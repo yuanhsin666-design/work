@@ -139,27 +139,27 @@
       }
     });
 
-    // 4. 保存数据到云端
-    document.getElementById("btn-save").addEventListener("click", async () => {
-      const user = auth.currentUser;
-      if (!user) return alert("请先登录！");
+   // 4. 保存数据到云端（并在保存后跳转）
+document.getElementById("btn-save").addEventListener("click", async () => {
+  const user = auth.currentUser;
+  if (!user) return alert("请先登录！");
 
-      try {
-        await setDoc(doc(db, "users", user.uid), {
-          savedData: userDataInput.value,
-          updatedAt: new Date()
-        }, { merge: true });
+  try {
+    // 1. 将资料保存至云端数据库
+    await setDoc(doc(db, "users", user.uid), {
+      savedData: userDataInput.value,
+      updatedAt: new Date()
+    }, { merge: true });
 
-        alert("资料已同步保存至云端！");
-      } catch (error) {
-        alert("保存失败: " + error.message);
-      }
-    });
+    alert("资料已同步保存至云端！即将跳转页面...");
 
-    // 5. 退出登录
-    document.getElementById("btn-logout").addEventListener("click", () => {
-      signOut(auth);
-    });
+    // 2. 跳转到你的网页（请替换为你具体的网页路径或 URL）
+    window.location.href = "index.html"; // 例如："main.html" 或 "https://your-domain.vercel.app"
+
+  } catch (error) {
+    alert("保存失败: " + error.message);
+  }
+});
   </script>
 </body>
 </html>
