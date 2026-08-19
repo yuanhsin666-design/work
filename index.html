@@ -43,7 +43,7 @@
 
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; }
+    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; vertical-align: middle; }
     .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
     .header-day { background: #f0f0f0; }
     .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
@@ -139,7 +139,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0;">📅 排班工作表预览</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表 (带颜色)</button>
+    <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表 (带颜色+直式换行)</button>
   </div>
   <div class="table-container">
     <table id="scheduleTable"></table>
@@ -567,7 +567,7 @@
       <th class="header-month">姓名</th>`;
     
     baseShifts.forEach(shift => {
-      let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');
+      let badge = shift.level === '高' ? '🔴' : (shift.level === ' চূ' ? '🟡' : '🟢');
       let headerClass = shift.level === '高' ? 'shift-high' : (shift.level === '中' ? 'shift-mid' : 'shift-low');
       html += `<th class="${headerClass}">${badge}<br>${shift.name}</th>`;
     });
@@ -619,7 +619,7 @@
     return getShiftLevel(shiftName) === "高";
   }
 
-  // ----------------复制带样式的表格到剪贴板----------------
+  // ----------------复制带样式的表格到剪贴板 (Excel直式换行优化)----------------
   async function copyTableWithStyles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
@@ -643,20 +643,29 @@
       cloneCell.style.padding = "6px";
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
+      cloneCell.style.verticalAlign = "middle";
       
-      // 换行字符在 Excel/Sheets 中维持换行
-      cloneCell.style.whiteSpace = "pre-line";
+      // 💡 Excel 兼容性核心：使用 Excel 专用的单元格内换行标签 <br style="mso-data-placement:same-cell;">
+      let cellText = origCell.innerText || origCell.textContent;
+      let htmlText = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
+      cloneCell.innerHTML = htmlText;
     });
 
-    // 构造完整的 HTML 字符串（包括 HTML header）以供粘贴板识别
+    // 构造完整的 HTML 字符串，设置 mso 属性以确保 Excel 自动开启【自动换行 (Wrap Text)】
     const htmlWrapper = `
-      <!DOCTYPE html>
-      <html>
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
       <head>
         <meta charset="utf-8">
         <style>
-          table { border-collapse: collapse; text-align: center; }
-          th, td { border: 1px solid #ccc; padding: 6px; white-space: pre-line; }
+          td, th {
+            mso-number-format: '\@';
+            white-space: normal;
+            vertical-align: middle;
+            text-align: center;
+          }
+          br {
+            mso-data-placement: same-cell;
+          }
         </style>
       </head>
       <body>
@@ -674,7 +683,7 @@
           "text/plain": blobText
         });
         await navigator.clipboard.write([item]);
-        alert("✅ 表格（含完整背景颜色）已成功复制到剪贴板！可以去 Excel / Google Sheets 粘贴了。");
+        alert("✅ 已复制整表（含颜色 + 直式换行）！直接在 Excel 中按 Ctrl+V 粘贴即可！");
       } else {
         // 兼容旧版浏览器的 Rich Text 选择复制法
         const container = document.createElement('div');
@@ -693,7 +702,7 @@
         selection.removeAllRanges();
         document.body.removeChild(container);
 
-        alert("✅ 表格（含完整背景颜色）已复制到剪贴板！");
+        alert("✅ 已复制整表（含颜色 + 直式换行）！可以去 Excel 粘贴了。");
       }
     } catch (err) {
       console.error("复制失败:", err);
@@ -767,32 +776,26 @@
             let countA = shiftCounts[a][shiftName] || 0;
             let countB = shiftCounts[b][shiftName] || 0;
 
-            // 规则 1：支援岗位阶梯轮替
             if (isSupport) {
               if (countA !== countB) return countA - countB;
             } else {
-              // 规则 2：优先消除 0 次岗位
               if (countA === 0 && countB !== 0) return -1;
               if (countB === 0 && countA !== 0) return 1;
-
               if (countA !== countB) return countA - countB;
             }
 
-            // 规则 3：强中低波浪穿插（关键调度）
             if (day > 1) {
               let prevShiftA = scheduleData[a][day - 2];
               let prevShiftB = scheduleData[b][day - 2];
               let prevLevelA = getShiftLevel(prevShiftA);
               let prevLevelB = getShiftLevel(prevShiftB);
 
-              // 如果昨天排了高，今天尽量避免再排高，优先排中/低
               if (currentLevel === "高") {
                 let aWasHigh = (prevLevelA === "高");
                 let bWasHigh = (prevLevelB === "高");
                 if (aWasHigh !== bWasHigh) return aWasHigh ? 1 : -1;
               }
 
-              // 如果昨天排了低，今天优先安排中/高
               if (currentLevel === "低") {
                 let aWasLow = (prevLevelA === "低");
                 let bWasLow = (prevLevelB === "低");
@@ -800,7 +803,6 @@
               }
             }
 
-            // 规则 4：高强度最多连排2天（严禁3连排）
             if (currentLevel === "高") {
               let aStreak = 0, bStreak = 0;
               for (let d = day - 2; d >= 0; d--) {
@@ -831,31 +833,28 @@
         });
       }
 
-      // 综合评价系统（打分选择全月最穿插、最合规的方案）
       let penalty = 0;
       let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
 
       staffs.forEach((_, sIdx) => {
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          if (count === 0) penalty += 10000; // 绝不许有0
+          if (count === 0) penalty += 10000;
           if (shiftName !== supportShift.name && count > 3) penalty += (count - 3) * 500;
           if (shiftName === supportShift.name && count > 2) penalty += (count - 2) * 300;
         });
 
-        // 检查穿插顺畅度（如果连续两天相同强度加少量惩罚分，促进穿插）
         for (let d = 1; d < totalDays; d++) {
           let s1 = scheduleData[sIdx][d - 1];
           let s2 = scheduleData[sIdx][d];
           if (s1 !== "休" && s2 !== "休" && s1 !== "休(预)" && s2 !== "休(预)") {
             let l1 = getShiftLevel(s1);
             let l2 = getShiftLevel(s2);
-            if (l1 === l2 && l1 !== "中") penalty += 10; // 同强度连排轻微扣分
-            if (l1 === "高" && l2 === "高") penalty += 50; // 连排高强度扣分
+            if (l1 === l2 && l1 !== "中") penalty += 10;
+            if (l1 === "高" && l2 === "高") penalty += 50;
           }
         }
 
-        // 严格检查是否超过3连高
         let streak = 0;
         for (let d = 0; d < totalDays; d++) {
           let sName = scheduleData[sIdx][d];
