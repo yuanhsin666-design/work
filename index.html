@@ -332,7 +332,7 @@
     });
   }
 
-  async function fetchCloudRests() {
+async function fetchCloudRests() {
     let rawUrl = document.getElementById('cloudUrlInput').value.trim();
     if (!rawUrl) return alert("请先输入当前月份的云端链接！");
 
@@ -381,10 +381,21 @@
       for (let r = 0; r < rows.length; r++) {
         let row = rows[r];
         if (row.length === 0) continue;
-        let nameInRow = row[0] ? row[0].replace(/"/g, '').trim() : '';
-        if (!nameInRow) continue;
+        
+        // 1. 取得表格中的姓名，並清除前後雙引號與所有前後/內部空白
+        let rawName = row[0] ? row[0].replace(/"/g, '').trim() : '';
+        let cleanNameInRow = rawName.replace(/\s+/g, '');
+        if (!cleanNameInRow) continue;
 
-        const sIdx = staffs.findIndex(s => s.name === nameInRow || (s.name === "孫孫" && nameInRow === "孙孙") || (s.name === "孙孙" && nameInRow === "孫孫"));
+        // 2. 進行自動相容比對 (自動去除所有空白)
+        const sIdx = staffs.findIndex(s => {
+          let cleanStaffName = s.name.replace(/\s+/g, '');
+          return cleanStaffName === cleanNameInRow ||
+                 (cleanStaffName === "孫孫" && cleanNameInRow === "孙孙") ||
+                 (cleanStaffName === "孙孙" && cleanNameInRow === "孫孫") ||
+                 (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||
+                 (cleanStaffName === "翔" && cleanNameInRow === "阿翔");
+        });
 
         if (sIdx !== -1) {
           updatedCount++;
