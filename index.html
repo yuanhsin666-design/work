@@ -26,6 +26,8 @@
     button.warning:hover { background: #ec971f; }
     button.success { background: #198754; color: white; }
     button.success:hover { background: #157347; }
+    button.copy-btn { background: #0d6efd; color: white; }
+    button.copy-btn:hover { background: #0b5ed7; }
 
     .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; max-height: 180px; overflow-y: auto; }
     .tag { padding: 5px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s; user-select: none; }
@@ -135,14 +137,20 @@
 </div>
 
 <div class="card">
-  <h3>📅 排班工作表预览</h3>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+    <h3 style="margin:0;">📅 排班工作表预览</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表 (带颜色)</button>
+  </div>
   <div class="table-container">
     <table id="scheduleTable"></table>
   </div>
 </div>
 
 <div class="card">
-  <h3>📊 员工岗位及强度次数统计</h3>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+    <h3 style="margin:0;">📊 员工岗位及强度次数统计</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('statsTable')">📋 复制统计表 (带颜色)</button>
+  </div>
   <div class="table-container">
     <table id="statsTable"></table>
   </div>
@@ -609,6 +617,88 @@
 
   function isHighShift(shiftName) {
     return getShiftLevel(shiftName) === "高";
+  }
+
+  // ----------------复制带样式的表格到剪贴板----------------
+  async function copyTableWithStyles(tableId) {
+    const table = document.getElementById(tableId);
+    if (!table) return alert("表格不存在！");
+
+    // 克隆表格副本，将 CSS Class 转换为 Excel 兼容的 inline style（内联样式）
+    const cloneTable = table.cloneNode(true);
+
+    // 复制计算后的实际样式（背景色、文字颜色、加粗、对齐）
+    const origCells = table.querySelectorAll('th, td');
+    const cloneCells = cloneTable.querySelectorAll('th, td');
+
+    origCells.forEach((origCell, index) => {
+      const computed = window.getComputedStyle(origCell);
+      const cloneCell = cloneCells[index];
+
+      // 将内联样式写入克隆节点
+      cloneCell.style.backgroundColor = computed.backgroundColor;
+      cloneCell.style.color = computed.color;
+      cloneCell.style.fontWeight = computed.fontWeight;
+      cloneCell.style.border = "1px solid #ccc";
+      cloneCell.style.padding = "6px";
+      cloneCell.style.textAlign = "center";
+      cloneCell.style.fontSize = "12px";
+      
+      // 换行字符在 Excel/Sheets 中维持换行
+      cloneCell.style.whiteSpace = "pre-line";
+    });
+
+    // 构造完整的 HTML 字符串（包括 HTML header）以供粘贴板识别
+    const htmlWrapper = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          table { border-collapse: collapse; text-align: center; }
+          th, td { border: 1px solid #ccc; padding: 6px; white-space: pre-line; }
+        </style>
+      </head>
+      <body>
+        ${cloneTable.outerHTML}
+      </body>
+      </html>
+    `;
+
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
+        const blobText = new Blob([cloneTable.innerText], { type: "text/plain" });
+        const item = new ClipboardItem({
+          "text/html": blobHtml,
+          "text/plain": blobText
+        });
+        await navigator.clipboard.write([item]);
+        alert("✅ 表格（含完整背景颜色）已成功复制到剪贴板！可以去 Excel / Google Sheets 粘贴了。");
+      } else {
+        // 兼容旧版浏览器的 Rich Text 选择复制法
+        const container = document.createElement('div');
+        container.innerHTML = htmlWrapper;
+        container.style.position = 'fixed';
+        container.style.left = '-9999px';
+        document.body.appendChild(container);
+
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(container);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        document.execCommand('copy');
+        selection.removeAllRanges();
+        document.body.removeChild(container);
+
+        alert("✅ 表格（含完整背景颜色）已复制到剪贴板！");
+      }
+    } catch (err) {
+      console.error("复制失败:", err);
+      alert("复制失败，请重试或更换 Chrome/Edge 现代浏览器。");
+    }
   }
 
   // ----------------智能多轮优选排班引擎（含强中低穿插算法）----------------
