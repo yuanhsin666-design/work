@@ -4,8 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>智能动态排班工作表 (跨月份独立保存版)</title>
-  <!-- 1. 引入 Supabase JS SDK -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -68,7 +66,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 彻底按月份隔离保存 + ☁️ Supabase 雲端同步)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 彻底按月份隔离保存)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -151,13 +149,6 @@
 </div>
 
 <script>
-  // -------------------------------------------------------------
-  // ⚡ Supabase 初始化設定 (請確認傳入正確的 Project URL 與 anon key)
-  // -------------------------------------------------------------
-  const SUPABASE_URL = 'https://sgtxweyklcyimerwvuhu.supabase.co';
-  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNndHh3ZXlrbGN5aW1lcnd2dWh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxMjMyMjcsImV4cCI6MjEwMjY5OTIyN30.YCaYuwInQyVNBPxneI53HaXk_uu_r1VH6ZRUCYJzxRY
-  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name }));
 
@@ -216,11 +207,11 @@
     }
   }
 
-  // ☁️ 儲存至本地與 Supabase 雲端
-  async function saveDataToLocal() {
+  function saveDataToLocal() {
     saveGlobalConfig();
     const monthKey = getMonthKey();
     
+    // 🎯 按月份 Key 隔离开存储
     const monthData = {
       currentMonthRests: currentMonthRests,
       lastGeneratedSchedule: lastGeneratedSchedule,
@@ -228,57 +219,19 @@
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
     
-    // 1. 本地備份
     localStorage.setItem(`auto_schedule_month_${monthKey}`, JSON.stringify(monthData));
-
-    // 2. 雲端同步 (Supabase Upsert)
-    try {
-      const { error } = await supabaseClient
-        .from('schedules')
-        .upsert(
-          { month_key: monthKey, data: monthData },
-          { onConflict: 'month_key' }
-        );
-      if (error) console.error("雲端同步失敗：", error.message);
-    } catch (err) {
-      console.error("Supabase 連線失敗：", err);
-    }
   }
 
-  // ☁️ 先讀取 Supabase 雲端資料，無資料才讀本地
-  async function loadDataFromLocal() {
+  function loadDataFromLocal() {
     loadGlobalConfig();
     const monthKey = getMonthKey();
+    const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
+
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
 
-    let data = null;
-
-    // 1. 嘗試從 Supabase 讀取
-    try {
-      const { data: cloudRes, error } = await supabaseClient
-        .from('schedules')
-        .select('data')
-        .eq('month_key', monthKey)
-        .maybeSingle();
-
-      if (!error && cloudRes && cloudRes.data) {
-        data = cloudRes.data;
-      }
-    } catch (err) {
-      console.warn("無法連接雲端，改用本地快取：", err);
-    }
-
-    // 2. 若雲端無資料，嘗試從 LocalStorage 讀取
-    if (!data) {
-      const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
-      if (savedMonth) {
-        try { data = JSON.parse(savedMonth); } catch(e) { console.error(e); }
-      }
-    }
-
-    if (!data) {
+    if (!savedMonth) {
       currentMonthRests = {};
       lastGeneratedSchedule = null;
       lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
@@ -286,11 +239,17 @@
       return false;
     }
 
-    currentMonthRests = data.currentMonthRests || {};
-    lastGeneratedSchedule = data.lastGeneratedSchedule || null;
-    lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
-    document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
-    return true;
+    try {
+      const data = JSON.parse(savedMonth);
+      currentMonthRests = data.currentMonthRests || {};
+      lastGeneratedSchedule = data.lastGeneratedSchedule || null;
+      lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+      document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
+      return true;
+    } catch(e) {
+      console.error("恢复月份数据失败:", e);
+      return false;
+    }
   }
 
   function resetAllData() {
@@ -385,7 +344,7 @@
       }
 
       renderAll();
-      await saveDataToLocal();
+      saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${monthKey}] 假表抓取成功！匹配 ${updatedCount} 人。`;
       alert(`[${monthKey}] 假表读取成功！已为 ${updatedCount} 位员工导入当月休假。`);
     } catch (err) {
@@ -501,8 +460,8 @@
     alert(`已清空当前 [${getMonthKey()}] 月份的休假。`);
   }
 
-  async function onDateChange() {
-    await loadDataFromLocal();
+  function onDateChange() {
+    loadDataFromLocal();
     renderAll();
   }
 
@@ -710,7 +669,7 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  async function generateSchedule() {
+  function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -793,20 +752,15 @@
 
     lastGeneratedSchedule = bestSchedule;
     renderAll();
-    await saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案！数据已同步至云端。`;
+    saveDataToLocal();
+    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案！数据已独立保存。`;
   }
 
-  // 頁面初始化
-  async function initApp() {
-    initDateSelectors();
-    await loadDataFromLocal();
-    updateSelect();
-    renderShifts();
-    renderAll();
-  }
-
-  initApp();
+  initDateSelectors();
+  loadDataFromLocal();
+  updateSelect();
+  renderShifts();
+  renderAll();
 </script>
 </body>
 </html>
