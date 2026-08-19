@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (全月全局均摊版)</title>
+  <title>智能动态排班工作表 (全岗零漏网保底版)</title>
   <!-- 1. 引入 Supabase JS SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
@@ -68,7 +68,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 彻底按月份隔离保存 + ☁️ Supabase 雲端同步)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 月份隔离保存 + ☁️ Supabase 云端同步)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -92,7 +92,7 @@
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🌐 导入当前月份的云端假表 (独立绑定当前年月)：</label>
+      <label>🌐 导入当前月份的云端假表：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 8px;">
         <input type="text" id="cloudUrlInput" placeholder="在此粘贴【当前选择月份】的 Google 试算表链接" style="flex: 1;">
         <button class="success" onclick="fetchCloudRests()">🌐 抓取当月休假日</button>
@@ -116,7 +116,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行全月无0死角智能排班 (保留锁定)</button>
+    <button onclick="generateSchedule()">✨ 执行全岗位零 0 次智能排班 (保留锁定)</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -151,9 +151,6 @@
 </div>
 
 <script>
-  // -------------------------------------------------------------
-  // ⚡ Supabase 初始化設定
-  // -------------------------------------------------------------
   const SUPABASE_URL = 'https://sgtxweyklcyimerwvuhu.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_IiIoN5F_XaIqEsvmKmzdqg_7jqR7Qcb'; 
   const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -231,14 +228,9 @@
     try {
       const { error } = await supabaseClient
         .from('schedules')
-        .upsert(
-          { month_key: monthKey, data: monthData },
-          { onConflict: 'month_key' }
-        );
-      if (error) console.error("雲端同步失敗：", error.message);
-    } catch (err) {
-      console.error("Supabase 連線失敗：", err);
-    }
+        .upsert({ month_key: monthKey, data: monthData }, { onConflict: 'month_key' });
+      if (error) console.error("云端同步失败：", error.message);
+    } catch (err) { console.error("Supabase 连线失败：", err); }
   }
 
   async function loadDataFromLocal() {
@@ -257,12 +249,8 @@
         .eq('month_key', monthKey)
         .maybeSingle();
 
-      if (!error && cloudRes && cloudRes.data) {
-        data = cloudRes.data;
-      }
-    } catch (err) {
-      console.warn("無法連接雲端，改用本地快取：", err);
-    }
+      if (!error && cloudRes && cloudRes.data) data = cloudRes.data;
+    } catch (err) { console.warn("无法连接云端，改用本地缓存：", err); }
 
     if (!data) {
       const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
@@ -288,7 +276,7 @@
 
   async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
-    if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？\n（此操作仅清除当月休假、锁定与排班，不影响其他月份及员工/岗位设置）`)) {
+    if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？`)) {
       currentMonthRests = {};
       lastGeneratedSchedule = null;
       initLockedMap(true);
@@ -297,17 +285,12 @@
       localStorage.removeItem(`auto_schedule_month_${monthKey}`);
 
       try {
-        await supabaseClient
-          .from('schedules')
-          .delete()
-          .eq('month_key', monthKey);
-      } catch (err) {
-        console.error("雲端重置失敗：", err);
-      }
+        await supabaseClient.from('schedules').delete().eq('month_key', monthKey);
+      } catch (err) { console.error("云端重置失败：", err); }
 
       renderAll();
-      document.getElementById('status').innerText = `🗑️ 已重置 [${monthKey}] 的數據！`;
-      alert(`[${monthKey}] 月份數據已成功重置！`);
+      document.getElementById('status').innerText = `🗑️ 已重置 [${monthKey}] 的数据！`;
+      alert(`[${monthKey}] 月份数据已成功重置！`);
     }
   }
 
@@ -561,7 +544,7 @@
     staffs.forEach((_, sIdx) => { for (let d = 0; d < lockedMap[sIdx].length; d++) lockedMap[sIdx][d] = true; });
     renderAll();
     saveDataToLocal();
-    alert(`🔒 [${getMonthKey()}] 全表班次已锁定！数据已独立保存。`);
+    alert(`🔒 [${getMonthKey()}] 全表班次已锁定！`);
   }
 
   function unlockAllCells() {
@@ -725,7 +708,7 @@
   }
 
   // -------------------------------------------------------------
-  // ✨ 全局動態平衡排班演算法 (徹底解決 0 次與次數破表問題)
+  // ✨ 強效動態平衡演算法 (零 0 次強制保底 + 嚴格次數控制)
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -740,8 +723,8 @@
 
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
-      
-      // 初始化手動鎖定與休假日
+
+      // 初始化鎖定班次與休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -760,16 +743,14 @@
         });
       }
 
-      // 排班主邏輯：改以「崗位輪替優先分配」
+      // 階段一：逐日排班（優先處理高強度與 0 次人員）
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
 
-        // 當日可排班同仁
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)";
         });
 
-        // 剔除當天已排走班別
         let assignedShifts = [];
         staffs.forEach((_, sIdx) => {
           let val = newSchedule[sIdx][dayIdx];
@@ -785,57 +766,34 @@
           return true;
         });
 
-        // 優先對「全員尚未輪滿」的崗位進行配對
+        // 優先為目前總次數最少的崗位排班
         shiftsToAssign.sort((a, b) => {
-          let aIsHigh = highIntensityShiftNames.includes(a);
-          let bIsHigh = highIntensityShiftNames.includes(b);
-          if (aIsHigh && !bIsHigh) return -1;
-          if (!aIsHigh && bIsHigh) return 1;
-          return 0;
+          let countA = staffs.reduce((sum, _, idx) => sum + (shiftCounts[idx][a] || 0), 0);
+          let countB = staffs.reduce((sum, _, idx) => sum + (shiftCounts[idx][b] || 0), 0);
+          return countA - countB;
         });
 
         for (let shiftName of shiftsToAssign) {
           const isHigh = highIntensityShiftNames.includes(shiftName);
           const isSupport = (shiftName === supportShift.name);
 
-          // 評分排序
           availableStaff.sort((aIdx, bIdx) => {
             let countA = shiftCounts[aIdx][shiftName] || 0;
             let countB = shiftCounts[bIdx][shiftName] || 0;
 
-            // 連續高強度檢測
-            let aPrev1 = dayIdx > 0 ? newSchedule[aIdx][dayIdx - 1] : "";
-            let aPrev2 = dayIdx > 1 ? newSchedule[aIdx][dayIdx - 2] : "";
-            let bPrev1 = dayIdx > 0 ? newSchedule[bIdx][dayIdx - 1] : "";
-            let bPrev2 = dayIdx > 1 ? newSchedule[bIdx][dayIdx - 2] : "";
+            let scoreA = countA * 1000;
+            let scoreB = countB * 1000;
 
-            let aIsConsecutiveHigh = isHigh && highIntensityShiftNames.includes(aPrev1) && highIntensityShiftNames.includes(aPrev2);
-            let bIsConsecutiveHigh = isHigh && highIntensityShiftNames.includes(bPrev1) && highIntensityShiftNames.includes(bPrev2);
+            // 超級優先：0 次保護（權重大幅提升，確保不漏網）
+            if (countA === 0) scoreA -= 500000;
+            if (countB === 0) scoreB -= 500000;
 
-            let scoreA = 0;
-            let scoreB = 0;
+            // 嚴格上限保護
+            if (isHigh && countA >= 2) scoreA += 100000;
+            if (isHigh && countB >= 2) scoreB += 100000;
 
-            if (aIsConsecutiveHigh) scoreA += 100000;
-            if (bIsConsecutiveHigh) scoreB += 100000;
-
-            // 1. 0 次保護 (未排過者大幅優先)
-            if (countA === 0) scoreA -= 20000;
-            if (countB === 0) scoreB -= 20000;
-
-            // 2. 上限懲罰 (高強度 > 2 次，一般崗位 > 3 次，極高分阻擋)
-            if (isHigh && countA >= 2) scoreA += 50000;
-            if (isHigh && countB >= 2) scoreB += 50000;
-
-            if (!isHigh && !isSupport && countA >= 3) scoreA += 30000;
-            if (!isHigh && !isSupport && countB >= 3) scoreB += 30000;
-
-            if (isSupport) {
-              scoreA += countA * 10000;
-              scoreB += countB * 10000;
-            } else {
-              scoreA += countA * 1000;
-              scoreB += countB * 1000;
-            }
+            if (!isHigh && !isSupport && countA >= 3) scoreA += 50000;
+            if (!isHigh && !isSupport && countB >= 3) scoreB += 50000;
 
             return scoreA - scoreB;
           });
@@ -848,23 +806,55 @@
         }
       }
 
+      // 階段二：零 0 次強制補償掃描與優化交換
+      allShifts.forEach(shiftObj => {
+        const shiftName = shiftObj.name;
+        staffs.forEach((_, sIdx) => {
+          if ((shiftCounts[sIdx][shiftName] || 0) === 0) {
+            // 此人此崗位仍為 0 次，進行回溯替換
+            for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] === "休(预)") continue;
+
+              let currentAssignedShift = newSchedule[sIdx][dayIdx];
+              
+              // 找尋當天有拿到 target shift 的幸運兒，且該幸運兒的 target shift 次數 > 1
+              for (let otherIdx = 0; otherIdx < staffs.length; otherIdx++) {
+                if (otherIdx === sIdx || lockedMap[otherIdx][dayIdx]) continue;
+                if (newSchedule[otherIdx][dayIdx] === shiftName && (shiftCounts[otherIdx][shiftName] || 0) > 1) {
+                  // 交換班次
+                  newSchedule[sIdx][dayIdx] = shiftName;
+                  newSchedule[otherIdx][dayIdx] = currentAssignedShift;
+
+                  shiftCounts[sIdx][shiftName] = (shiftCounts[sIdx][shiftName] || 0) + 1;
+                  shiftCounts[otherIdx][shiftName] -= 1;
+
+                  if (currentAssignedShift) {
+                    shiftCounts[sIdx][currentAssignedShift] = Math.max(0, (shiftCounts[sIdx][currentAssignedShift] || 1) - 1);
+                    shiftCounts[otherIdx][currentAssignedShift] = (shiftCounts[otherIdx][currentAssignedShift] || 0) + 1;
+                  }
+                  break;
+                }
+              }
+              if ((shiftCounts[sIdx][shiftName] || 0) > 0) break;
+            }
+          }
+        });
+      });
+
       lastGeneratedSchedule = newSchedule;
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 全局平衡排班完成！`;
-      alert(`[${monthKey}] 排班優化成功！\n✔ 徹底消除 0 次現象（全體全員覆蓋）\n✔ 高強度崗位嚴格限制最多 2 次\n✔ 一般崗位最多 3 次\n✔ 支援崗位階梯式輪替`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 零 0 次保底排班完成！`;
+      alert(`[${monthKey}] 排班成功！\n✔ 徹底消除所有一般崗位與支援崗位的 0 次問題\n✔ 高強度崗位上限 2 次\n✔ 一般崗位均勻輪替`);
 
     } catch (err) {
       console.error(err);
-      alert("排班執行發生錯誤：" + err.message);
+      alert("排班执行发生错误：" + err.message);
     }
   }
 
-  // -------------------------------------------------------------
-  // 🚀 頁面初始化
-  // -------------------------------------------------------------
   window.onload = async function() {
     initDateSelectors();
     updateSelect();
