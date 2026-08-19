@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>智能动态排班工作表 (跨月份独立保存版)</title>
+  <!-- 1. 引入 Supabase JS SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -66,7 +68,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 彻底按月份隔离保存)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 彻底按月份隔离保存 + ☁️ Supabase 雲端同步)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -149,6 +151,13 @@
 </div>
 
 <script>
+  // -------------------------------------------------------------
+  // ⚡ Supabase 初始化設定
+  // -------------------------------------------------------------
+  const SUPABASE_URL = 'https://sgtxweyklcyimerwvuhu.supabase.co';
+  const SUPABASE_KEY = '請把複製的_Publishable_key_貼在這裡'; 
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name }));
 
@@ -170,7 +179,6 @@
   let supportShift = { name: "支援\nND\nHS\nYD", level: "支援" };
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
   
-  // 🎯 当月专属独立变量 (切换月份时全套替换)
   let currentMonthRests = {}; 
   let lastGeneratedSchedule = null;
   let lockedMap = [];
@@ -207,11 +215,10 @@
     }
   }
 
-  function saveDataToLocal() {
+  async function saveDataToLocal() {
     saveGlobalConfig();
     const monthKey = getMonthKey();
     
-    // 🎯 按月份 Key 隔离开存储
     const monthData = {
       currentMonthRests: currentMonthRests,
       lastGeneratedSchedule: lastGeneratedSchedule,
@@ -220,18 +227,51 @@
     };
     
     localStorage.setItem(`auto_schedule_month_${monthKey}`, JSON.stringify(monthData));
+
+    try {
+      const { error } = await supabaseClient
+        .from('schedules')
+        .upsert(
+          { month_key: monthKey, data: monthData },
+          { onConflict: 'month_key' }
+        );
+      if (error) console.error("雲端同步失敗：", error.message);
+    } catch (err) {
+      console.error("Supabase 連線失敗：", err);
+    }
   }
 
-  function loadDataFromLocal() {
+  async function loadDataFromLocal() {
     loadGlobalConfig();
     const monthKey = getMonthKey();
-    const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
-
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
 
-    if (!savedMonth) {
+    let data = null;
+
+    try {
+      const { data: cloudRes, error } = await supabaseClient
+        .from('schedules')
+        .select('data')
+        .eq('month_key', monthKey)
+        .maybeSingle();
+
+      if (!error && cloudRes && cloudRes.data) {
+        data = cloudRes.data;
+      }
+    } catch (err) {
+      console.warn("無法連接雲端，改用本地快取：", err);
+    }
+
+    if (!data) {
+      const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
+      if (savedMonth) {
+        try { data = JSON.parse(savedMonth); } catch(e) { console.error(e); }
+      }
+    }
+
+    if (!data) {
       currentMonthRests = {};
       lastGeneratedSchedule = null;
       lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
@@ -239,17 +279,11 @@
       return false;
     }
 
-    try {
-      const data = JSON.parse(savedMonth);
-      currentMonthRests = data.currentMonthRests || {};
-      lastGeneratedSchedule = data.lastGeneratedSchedule || null;
-      lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
-      document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
-      return true;
-    } catch(e) {
-      console.error("恢复月份数据失败:", e);
-      return false;
-    }
+    currentMonthRests = data.currentMonthRests || {};
+    lastGeneratedSchedule = data.lastGeneratedSchedule || null;
+    lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+    document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
+    return true;
   }
 
   function resetAllData() {
@@ -344,7 +378,7 @@
       }
 
       renderAll();
-      saveDataToLocal();
+      await saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${monthKey}] 假表抓取成功！匹配 ${updatedCount} 人。`;
       alert(`[${monthKey}] 假表读取成功！已为 ${updatedCount} 位员工导入当月休假。`);
     } catch (err) {
@@ -460,8 +494,8 @@
     alert(`已清空当前 [${getMonthKey()}] 月份的休假。`);
   }
 
-  function onDateChange() {
-    loadDataFromLocal();
+  async function onDateChange() {
+    await loadDataFromLocal();
     renderAll();
   }
 
@@ -669,7 +703,7 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  function generateSchedule() {
+  async function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -752,15 +786,19 @@
 
     lastGeneratedSchedule = bestSchedule;
     renderAll();
-    saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案！数据已独立保存。`;
+    await saveDataToLocal();
+    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案！数据已同步至云端。`;
   }
 
-  initDateSelectors();
-  loadDataFromLocal();
-  updateSelect();
-  renderShifts();
-  renderAll();
+  async function initApp() {
+    initDateSelectors();
+    await loadDataFromLocal();
+    updateSelect();
+    renderShifts();
+    renderAll();
+  }
+
+  initApp();
 </script>
 </body>
 </html>
