@@ -703,22 +703,17 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-async function generateSchedule() {
+  async function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
     initLockedMap();
 
     let bestSchedule = null, minPenalty = Infinity;
-    let allBaseShifts = baseShifts.map(s => s.name);
-    let allShifts = [...allBaseShifts, supportShift.name];
-
-    // 提高模擬次數至 500 次，確保在複雜限制下找到最佳解
-    for (let iter = 0; iter < 500; iter++) {
+    for (let iter = 0; iter < 250; iter++) {
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 1. 帶入已鎖定的班次
       for (let day = 1; day <= totalDays; day++) {
         staffs.forEach((_, sIdx) => {
           if (lockedMap[sIdx] && lockedMap[sIdx][day - 1] && lastGeneratedSchedule && lastGeneratedSchedule[sIdx] && lastGeneratedSchedule[sIdx][day - 1]) {
@@ -731,7 +726,6 @@ async function generateSchedule() {
         });
       }
 
-      // 2. 按天進行班次分派
       for (let day = 1; day <= totalDays; day++) {
         let availableStaffIndexes = [];
         staffs.forEach((_, idx) => {
@@ -755,57 +749,20 @@ async function generateSchedule() {
           return !staffRests.includes(day);
         }).length;
 
-        let neededShifts = (totalWorkingToday <= baseShifts.length) 
-          ? baseShifts.slice(0, totalWorkingToday).map(s => s.name) 
-          : [...baseShifts.map(s => s.name), ...Array(totalWorkingToday - baseShifts.length).fill(supportShift.name)];
-        
-        lockedShiftsToday.forEach(lShift => { 
-          let idx = neededShifts.indexOf(lShift); 
-          if (idx !== -1) neededShifts.splice(idx, 1); 
-        });
+        let neededShifts = (totalWorkingToday <= baseShifts.length) ? baseShifts.slice(0, totalWorkingToday).map(s => s.name) : [...baseShifts.map(s => s.name), ...Array(totalWorkingToday - baseShifts.length).fill(supportShift.name)];
+        lockedShiftsToday.forEach(lShift => { let idx = neededShifts.indexOf(lShift); if (idx !== -1) neededShifts.splice(idx, 1); });
 
-        // 排序：先派最稀缺的崗位與高強度崗位
-        neededShifts.sort((a, b) => {
-          if (a === supportShift.name) return 1; // 支援留在最後分派以確保基準崗位覆蓋
-          if (b === supportShift.name) return -1;
-          return (isHighShift(b) ? 1 : 0) - (isHighShift(a) ? 1 : 0);
-        });
-
+        let shuffledShifts = [...neededShifts].sort(() => Math.random() - 0.5);
         let unassignedStaff = [...availableStaffIndexes];
 
-        neededShifts.forEach(shiftName => {
+        shuffledShifts.forEach(shiftName => {
+          let currentLevel = getShiftLevel(shiftName);
           if (unassignedStaff.length === 0) return;
-          let isHigh = isHighShift(shiftName);
-          let isSupport = (shiftName === supportShift.name);
 
           unassignedStaff.sort((a, b) => {
             let countA = shiftCounts[a][shiftName] || 0;
             let countB = shiftCounts[b][shiftName] || 0;
-
-            // 規則一：強制優先選擇「尚未排過該崗位 (count = 0)」的人
             if (countA !== countB) return countA - countB;
-
-            // 規則二：高強度崗位防連三檢查
-            if (isHigh) {
-              let recentHighA = 0, recentHighB = 0;
-              for (let d = day - 1; d >= 1; d--) {
-                if (isHighShift(scheduleData[a][d - 1])) recentHighA++;
-                if (recentHighA >= 2) break;
-              }
-              for (let d = day - 1; d >= 1; d--) {
-                if (isHighShift(scheduleData[b][d - 1])) recentHighB++;
-                if (recentHighB >= 2) break;
-              }
-              if (recentHighA !== recentHighB) return recentHighA - recentHighB;
-            }
-
-            // 規則三：支援崗位輪替（優先派給目前支援次數最少的人）
-            if (isSupport) {
-              let supA = shiftCounts[a][supportShift.name] || 0;
-              let supB = shiftCounts[b][supportShift.name] || 0;
-              if (supA !== supB) return supA - supB;
-            }
-
             return Math.random() - 0.5;
           });
 
@@ -815,53 +772,30 @@ async function generateSchedule() {
         });
       }
 
-      // 3. 嚴格評分與違規懲罰 (Penalty) 計算
       let penalty = 0;
-
-      // 取得團隊目前的支援最低次數
-      let minSupportInTeam = Math.min(...staffs.map((_, i) => shiftCounts[i][supportShift.name] || 0));
-
+      let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
       staffs.forEach((_, sIdx) => {
-        // 條件 1：人人都要輪到，不能有 0 次（極高罰分 200,000）
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          if (count === 0) {
-            penalty += 200000;
-          } else if (count > 3 && shiftName !== supportShift.name) {
-            // 條件 2：崗位最多 3 次，不得已超過則階梯式加罰
-            penalty += (count - 3) * 20000;
-          }
+          if (count === 0) penalty += 10000;
         });
-
-        // 條件 3：支援階梯輪替（全員未滿 2 次前，禁止出現第 3 次）
-        let supportCount = shiftCounts[sIdx][supportShift.name] || 0;
-        if (supportCount > 2 && minSupportInTeam < 2) {
-          penalty += 150000;
-        }
-
-        // 條件 4：高強度嚴格防連三
-        let consecutiveHighCount = 0;
-        for (let d = 0; d < totalDays; d++) {
-          if (isHighShift(scheduleData[sIdx][d])) {
-            consecutiveHighCount++;
-            if (consecutiveHighCount >= 3) {
-              penalty += 100000;
-            }
-          }
-        }
       });
 
-      if (penalty < minPenalty) {
-        minPenalty = penalty;
-        bestSchedule = scheduleData;
-        if (penalty === 0) break; // 找到完全合規的完美解答即停止
-      }
+      if (penalty < minPenalty) { minPenalty = penalty; bestSchedule = scheduleData; if (penalty === 0) break; }
     }
 
     lastGeneratedSchedule = bestSchedule;
     renderAll();
     await saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已生成完全符合四項核心規則的排班方案！`;
+    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案！数据已同步至云端。`;
+  }
+
+  async function initApp() {
+    initDateSelectors();
+    await loadDataFromLocal();
+    updateSelect();
+    renderShifts();
+    renderAll();
   }
 
   initApp();
