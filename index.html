@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (带岗位强度分级版)</title>
+  <title>智能动态排班工作表 (可点击切换强度版)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -27,13 +27,16 @@
     button.success { background: #198754; color: white; }
     button.success:hover { background: #157347; }
 
-    .tag-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding: 6px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; max-height: 160px; overflow-y: auto; }
-    .tag { padding: 4px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+    .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; max-height: 180px; overflow-y: auto; }
+    .tag { padding: 5px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s; user-select: none; }
+    .tag:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .tag-low { background: #d1e7dd; color: #0f5132; border: 1px solid #badbcc; }
     .tag-mid { background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
     .tag-high { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
-    .tag-support { background: #cff4fc; color: #055160; border: 1px solid #b6effb; }
-    .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; margin-left: 4px; }
+    .tag-support { background: #cff4fc; color: #055160; border: 1px solid #b6effb; cursor: default; }
+    .tag .level-badge { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 8px; font-weight: bold; font-size: 11px; }
+    .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; margin-left: 4px; font-size: 14px; }
+    .tag .remove-btn:hover { color: #a94442; }
 
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
@@ -57,7 +60,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 (带岗位强度分类)</h2>
+  <h2>⚙️ 动态排班管理设置 (支持点击直接切换岗位强度)</h2>
   
   <div class="control-grid">
     <!-- 1. 选择年月 -->
@@ -94,7 +97,7 @@
 
     <!-- 4. 岗位与强度管理 -->
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 岗位与强度设置：</label>
+      <label>🏷️ 岗位与强度设置 <span style="font-size: 12px; font-weight: normal; color: #0066cc;">(💡 提示：点击下方的岗位标签可直接切换低/中/高强度)</span>：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
         <input type="text" id="newShiftName" placeholder="岗位名称 (换行用 \n)" style="flex:2; min-width: 150px;">
         <select id="newShiftLevel" style="flex:1; min-width: 100px;">
@@ -141,7 +144,6 @@
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name, customRests: [] }));
 
-  // 预设岗位列表（带有强度属性：低/中/高）
   let baseShifts = [
     { name: "OL\nFB\nLY\nJY", level: "低" },
     { name: "MT\nXO\nSH\nYS", level: "中" },
@@ -177,11 +179,11 @@
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
     
-    localStorage.setItem('auto_schedule_data_v5', JSON.stringify(dataToSave));
+    localStorage.setItem('auto_schedule_data_v6', JSON.stringify(dataToSave));
   }
 
   function loadDataFromLocal() {
-    const saved = localStorage.getItem('auto_schedule_data_v5');
+    const saved = localStorage.getItem('auto_schedule_data_v6');
     if (!saved) return false;
 
     try {
@@ -204,7 +206,7 @@
 
   function resetAllData() {
     if (confirm("确定要重置所有保存的数据吗？")) {
-      localStorage.removeItem('auto_schedule_data_v5');
+      localStorage.removeItem('auto_schedule_data_v6');
       location.reload();
     }
   }
@@ -352,21 +354,34 @@
     select.innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');
   }
 
+  // 点击循环切换岗位强度：低 -> 中 -> 高 -> 低
+  function toggleShiftLevel(idx, event) {
+    if (event) event.stopPropagation();
+    const nextLevel = { "低": "中", "中": "高", "高": "低" };
+    baseShifts[idx].level = nextLevel[baseShifts[idx].level] || "中";
+    renderShifts();
+    renderAll();
+    saveDataToLocal();
+  }
+
   function renderShifts() {
     const container = document.getElementById('shiftsContainer');
     let html = baseShifts.map((shift, idx) => {
       let levelClass = shift.level === "低" ? "tag-low" : (shift.level === "高" ? "tag-high" : "tag-mid");
+      let icon = shift.level === "低" ? "🟢" : (shift.level === "高" ? "🔴" : "🟡");
       return `
-        <div class="tag ${levelClass}">
-          <span><b>${idx+1}.</b> [${shift.level}] ${shift.name.replace(/\n/g, ' ')}</span>
-          <span class="remove-btn" onclick="removeShift(${idx})">×</span>
+        <div class="tag ${levelClass}" onclick="toggleShiftLevel(${idx}, event)" title="点击切换岗位强度">
+          <span class="level-badge">${icon} ${shift.level}</span>
+          <span><b>${idx+1}.</b> ${shift.name.replace(/\n/g, ' ')}</span>
+          <span class="remove-btn" onclick="removeShift(${idx}, event)">×</span>
         </div>
       `;
     }).join('');
 
     html += `
       <div class="tag tag-support">
-        <span><b>支援:</b> ${supportShift.name.replace(/\n/g, ' ')}</span>
+        <span class="level-badge">🔵 支援</span>
+        <span>${supportShift.name.replace(/\n/g, ' ')}</span>
       </div>
     `;
     container.innerHTML = html;
@@ -397,7 +412,8 @@
     saveDataToLocal();
   }
 
-  function removeShift(idx) {
+  function removeShift(idx, event) {
+    if (event) event.stopPropagation();
     if (baseShifts.length <= 1) return alert('请至少保留一个基础岗位！');
     baseShifts.splice(idx, 1);
     renderShifts();
