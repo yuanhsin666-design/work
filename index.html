@@ -49,30 +49,33 @@
       </div>
     </div>
 
-    <!-- 2. 新增/移除员工 -->
+    <!-- 2. 新增/移除员工 (支持输入休假日) -->
     <div class="form-group">
       <label>👥 员工管理：</label>
+      <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+        <input type="text" id="newName" placeholder="姓名 (如: 小明)" style="flex: 1;">
+        <input type="text" id="newRests" placeholder="休假日 (用逗号分割, 如: 5,12,19)" style="flex: 2;">
+      </div>
       <div style="display: flex; gap: 5px;">
-        <input type="text" id="newName" placeholder="姓名" style="flex:1;">
-        <button onclick="addStaff()">添加</button>
-        <button class="danger" onclick="removeStaff()">移除选中员工</button>
+        <button onclick="addStaff()" style="flex: 1;">添加员工及休假</button>
+        <button class="danger" onclick="removeStaff()" style="flex: 1;">移除选中员工</button>
       </div>
     </div>
 
-    <!-- 3. 指定员工休假 -->
+    <!-- 3. 追加指定休假 -->
     <div class="form-group">
-      <label>📌 设定指定休假：</label>
+      <label>📌 快速补充单日休假：</label>
       <div style="display: flex; gap: 5px;">
         <select id="staffSelect" style="flex:1;"></select>
         <input type="number" id="restDay" placeholder="日期" min="1" max="31" style="width: 80px;">
-        <button class="secondary" onclick="addCustomRest()">设定休假</button>
+        <button class="secondary" onclick="addCustomRest()">追加休假</button>
       </div>
     </div>
   </div>
 
   <div class="toolbar">
     <button onclick="generateSchedule()">✨ 执行自动排班</button>
-    <span id="status" style="color: #666; font-size: 13px;">选择月份后自动计算当月天数与星期</span>
+    <span id="status" style="color: #666; font-size: 13px;">添加员工或设定休假后直接预览班表</span>
   </div>
 </div>
 
@@ -84,7 +87,6 @@
 </div>
 
 <script>
-  // 17 位默认员工名单
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name, customRests: [] }));
 
@@ -114,12 +116,29 @@
     select.innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');
   }
 
+  // 新增员工并自动带入休假日
   function addStaff() {
     const name = document.getElementById('newName').value.trim();
+    const restsInput = document.getElementById('newRests').value.trim();
+
     if (!name) return alert('请输入员工姓名');
+
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+
+    let parsedRests = [];
+    if (restsInput) {
+      // 提取所有数字，过滤掉非法日期
+      const rawNumbers = restsInput.split(/[,，\s]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
+      parsedRests = rawNumbers.filter(day => day >= 1 && day <= totalDays);
+    }
+
+    staffs.push({ name, customRests: parsedRests });
     
-    staffs.push({ name, customRests: [] });
     document.getElementById('newName').value = '';
+    document.getElementById('newRests').value = '';
+    
     updateSelect();
     renderTable();
   }
@@ -150,7 +169,6 @@
       staffs[idx].customRests.push(day);
     }
     document.getElementById('restDay').value = '';
-    alert(`已为 ${staffs[idx].name} 锁定 ${month}月${day}日 为指定休假！`);
     renderTable();
   }
 
