@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (按1取休版)</title>
+  <title>智能动态排班工作表 (带岗位强度分级版)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -27,10 +27,13 @@
     button.success { background: #198754; color: white; }
     button.success:hover { background: #157347; }
 
-    .tag-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding: 6px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; max-height: 120px; overflow-y: auto; }
-    .tag { background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
-    .tag.support { background: #d1e7dd; color: #0f5132; }
-    .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; }
+    .tag-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding: 6px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; max-height: 160px; overflow-y: auto; }
+    .tag { padding: 4px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+    .tag-low { background: #d1e7dd; color: #0f5132; border: 1px solid #badbcc; }
+    .tag-mid { background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
+    .tag-high { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+    .tag-support { background: #cff4fc; color: #055160; border: 1px solid #b6effb; }
+    .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; margin-left: 4px; }
 
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
@@ -40,9 +43,13 @@
     .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
     .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 70px; }
 
+    /* 岗位强度在排班表中的配色 */
+    .shift-low { background-color: #e8f5e9; color: #1b5e20; }
+    .shift-mid { background-color: #fffde7; color: #f57f17; }
+    .shift-high { background-color: #ffebee; color: #c62828; font-weight: 500; }
+    .shift-support { background-color: #e0f7fa; color: #006064; }
     .shift-休 { background-color: #d1e7dd; color: #0f5132; font-weight: bold; }
-    .shift-work { background-color: #ffffff; color: #333; }
-    .locked-day { background-color: #f1f3f5; position: relative; }
+    .locked-day { position: relative; opacity: 0.85; }
     .locked-header { background-color: #e2e8f0 !important; color: #475569; }
     .stat-total { background-color: #d97706; color: white; font-weight: bold; }
   </style>
@@ -50,7 +57,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置</h2>
+  <h2>⚙️ 动态排班管理设置 (带岗位强度分类)</h2>
   
   <div class="control-grid">
     <!-- 1. 选择年月 -->
@@ -64,18 +71,18 @@
 
     <!-- 2. 单个新增/移除员工 -->
     <div class="form-group">
-      <label>👥 员工管理 (单人)：</label>
+      <label>👥 员工管理：</label>
       <div style="display: flex; gap: 5px;">
         <input type="text" id="newName" placeholder="员工姓名" style="flex: 1;">
         <button onclick="addStaff()">添加</button>
-        <button class="danger" onclick="removeStaff()">移除选中员工</button>
+        <button class="danger" onclick="removeStaff()">移除选中</button>
       </div>
       <div style="margin-top: 5px;">
         <select id="staffSelect" style="width: 100%;"></select>
       </div>
     </div>
 
-    <!-- 3. 读取云端/休假日 (支持格子标记1) -->
+    <!-- 3. 读取云端休假日 -->
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>🌐 导入云端休假日 (Google 试算表中单元格为 1 代表休假)：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 8px;">
@@ -85,15 +92,24 @@
       </div>
     </div>
 
-    <!-- 4. 岗位调节管理 -->
+    <!-- 4. 岗位与强度管理 -->
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 基础岗位与支援岗位调整：</label>
-      <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-        <input type="text" id="newShift" placeholder="输入新基础岗位" style="flex:1;">
+      <label>🏷️ 岗位与强度设置：</label>
+      <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
+        <input type="text" id="newShiftName" placeholder="岗位名称 (换行用 \n)" style="flex:2; min-width: 150px;">
+        <select id="newShiftLevel" style="flex:1; min-width: 100px;">
+          <option value="低">🟢 低强度</option>
+          <option value="中" selected>🟡 中强度</option>
+          <option value="高">🔴 高强度</option>
+        </select>
         <button onclick="addShift()">添加基础岗位</button>
+      </div>
+
+      <div style="display: flex; gap: 5px; margin-bottom: 5px; align-items: center;">
         <input type="text" id="newSupportShift" placeholder="支援岗位名称" style="flex:1;">
         <button class="secondary" onclick="updateSupportShift()">修改支援岗位</button>
       </div>
+
       <div class="tag-container" id="shiftsContainer"></div>
     </div>
   </div>
@@ -102,7 +118,7 @@
     <button onclick="generateSchedule()">✨ 执行自适应动态轮岗排班</button>
     <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
     <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
-    <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地保存数据</button>
+    <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地数据</button>
     <span id="status" style="color: #666; font-size: 13px;"></span>
   </div>
 </div>
@@ -115,7 +131,7 @@
 </div>
 
 <div class="card">
-  <h3>📊 员工岗位次数统计</h3>
+  <h3>📊 员工岗位及强度次数统计</h3>
   <div class="table-container">
     <table id="statsTable"></table>
   </div>
@@ -125,18 +141,28 @@
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name, customRests: [] }));
 
+  // 预设岗位列表（带有强度属性：低/中/高）
   let baseShifts = [
-    "OL\nFB\nLY\nJY", "MT\nXO\nSH\nYS", "ND\n2500\n以下", "ND\n中大\n2501\n以上\nXH",
-    "HS\n3000\n以下\nSY", "HS大\n3001\n以上\nXY", "YD", "RF\n3000\n以下\nJD",
-    "RF\n3001\n以上\nLS", "TD\n1000\n以下", "TD\n1001\n5000", "TD\n5001\n以上"
+    { name: "OL\nFB\nLY\nJY", level: "低" },
+    { name: "MT\nXO\nSH\nYS", level: "中" },
+    { name: "ND\n2500\n以下", level: "中" },
+    { name: "ND\n中大\n2501\n以上\nXH", level: "高" },
+    { name: "HS\n3000\n以下\nSY", level: "中" },
+    { name: "HS大\n3001\n以上\nXY", level: "高" },
+    { name: "YD", level: "低" },
+    { name: "RF\n3000\n以下\nJD", level: "中" },
+    { name: "RF\n3001\n以上\nLS", level: "高" },
+    { name: "TD\n1000\n以下", level: "低" },
+    { name: "TD\n1001\n5000", level: "中" },
+    { name: "TD\n5001\n以上", level: "高" }
   ];
-  let supportShift = "支援\nND\nHS\nYD";
+
+  let supportShift = { name: "支援\nND\nHS\nYD", level: "支援" };
 
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
   let lastGeneratedSchedule = null;
   let forceUnlocked = false;
 
-  // 保存与恢复本地存储
   function saveDataToLocal() {
     const year = document.getElementById('yearSelect').value;
     const month = document.getElementById('monthSelect').value;
@@ -151,11 +177,11 @@
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
     
-    localStorage.setItem('auto_schedule_data_v4', JSON.stringify(dataToSave));
+    localStorage.setItem('auto_schedule_data_v5', JSON.stringify(dataToSave));
   }
 
   function loadDataFromLocal() {
-    const saved = localStorage.getItem('auto_schedule_data_v4');
+    const saved = localStorage.getItem('auto_schedule_data_v5');
     if (!saved) return false;
 
     try {
@@ -178,12 +204,11 @@
 
   function resetAllData() {
     if (confirm("确定要重置所有保存的数据吗？")) {
-      localStorage.removeItem('auto_schedule_data_v4');
+      localStorage.removeItem('auto_schedule_data_v5');
       location.reload();
     }
   }
 
-  // 简单解析 CSV，兼容引号
   function parseCSV(text) {
     let lines = text.split(/\r\n|\n/);
     return lines.map(line => {
@@ -206,7 +231,6 @@
     });
   }
 
-  // 从云端表格精准读取【人名 + 格子为1】
   async function fetchCloudRests() {
     let rawUrl = document.getElementById('cloudUrlInput').value.trim();
     if (!rawUrl) return alert("请先输入云端链接！");
@@ -237,11 +261,9 @@
       const month = parseInt(document.getElementById('monthSelect').value);
       const totalDays = getDaysInMonth(year, month);
 
-      // 先清空已有员工的休假
       staffs.forEach(s => s.customRests = []);
 
-      // 寻找包含日期的表头行 (标有数字 1~31)
-      let dayColumnMap = {}; // 列索引 -> 第几天
+      let dayColumnMap = {};
       let headerRowIndex = -1;
 
       for (let r = 0; r < rows.length; r++) {
@@ -258,7 +280,6 @@
 
       let updatedCount = 0;
 
-      // 遍历后续行匹配人名与 1
       for (let r = 0; r < rows.length; r++) {
         let row = rows[r];
         if (row.length === 0) continue;
@@ -266,7 +287,6 @@
         let nameInRow = row[0] ? row[0].replace(/"/g, '').trim() : '';
         if (!nameInRow) continue;
 
-        // 仅匹配在网页人员名单里的名字
         const staff = staffs.find(s => {
           if (s.name === nameInRow) return true;
           if (s.name === "孫孫" && nameInRow === "孙孙") return true;
@@ -280,7 +300,7 @@
           for (let c = 1; c < row.length; c++) {
             let val = row[c] ? row[c].trim() : '';
             if (val === '1') {
-              let day = dayColumnMap[c] || c; // 如果没匹配到表头，按列序号算
+              let day = dayColumnMap[c] || c;
               if (day >= 1 && day <= totalDays) {
                 rests.push(day);
               }
@@ -334,27 +354,33 @@
 
   function renderShifts() {
     const container = document.getElementById('shiftsContainer');
-    let html = baseShifts.map((shift, idx) => `
-      <div class="tag">
-        <span><b>${idx+1}.</b> ${shift.replace(/\n/g, ' ')}</span>
-        <span class="remove-btn" onclick="removeShift(${idx})">×</span>
-      </div>
-    `).join('');
+    let html = baseShifts.map((shift, idx) => {
+      let levelClass = shift.level === "低" ? "tag-low" : (shift.level === "高" ? "tag-high" : "tag-mid");
+      return `
+        <div class="tag ${levelClass}">
+          <span><b>${idx+1}.</b> [${shift.level}] ${shift.name.replace(/\n/g, ' ')}</span>
+          <span class="remove-btn" onclick="removeShift(${idx})">×</span>
+        </div>
+      `;
+    }).join('');
 
     html += `
-      <div class="tag support">
-        <span><b>支援:</b> ${supportShift.replace(/\n/g, ' ')}</span>
+      <div class="tag tag-support">
+        <span><b>支援:</b> ${supportShift.name.replace(/\n/g, ' ')}</span>
       </div>
     `;
     container.innerHTML = html;
   }
 
   function addShift() {
-    const input = document.getElementById('newShift');
-    const val = input.value.trim();
-    if (!val) return alert('请输入岗位名称');
-    baseShifts.push(val);
-    input.value = '';
+    const nameInput = document.getElementById('newShiftName');
+    const levelSelect = document.getElementById('newShiftLevel');
+    const name = nameInput.value.trim().replace(/\\n/g, '\n');
+    const level = levelSelect.value;
+
+    if (!name) return alert('请输入岗位名称');
+    baseShifts.push({ name, level });
+    nameInput.value = '';
     renderShifts();
     renderAll();
     saveDataToLocal();
@@ -362,9 +388,9 @@
 
   function updateSupportShift() {
     const input = document.getElementById('newSupportShift');
-    const val = input.value.trim();
+    const val = input.value.trim().replace(/\\n/g, '\n');
     if (!val) return alert('请输入支援岗位名称');
-    supportShift = val;
+    supportShift.name = val;
     input.value = '';
     renderShifts();
     renderAll();
@@ -427,6 +453,18 @@
     saveDataToLocal();
   }
 
+  function getShiftClass(shiftName) {
+    if (shiftName === "休" || shiftName === "休(预)") return "shift-休";
+    if (shiftName === supportShift.name) return "shift-support";
+    
+    let found = baseShifts.find(s => s.name === shiftName);
+    if (!found) return "";
+    if (found.level === "低") return "shift-low";
+    if (found.level === "中") return "shift-mid";
+    if (found.level === "高") return "shift-high";
+    return "";
+  }
+
   function renderTable(scheduleData = null) {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -456,17 +494,15 @@
       
       for(let day=1; day<=totalDays; day++) {
         let cellContent = "-";
-        let cellClass = "shift-work";
         let isLocked = isDayLocked(year, month, day);
 
         if (scheduleData && scheduleData[sIdx]) {
           cellContent = scheduleData[sIdx][day - 1];
         } else if (staff.customRests.includes(day)) {
           cellContent = "休(预)";
-          cellClass = "shift-休";
         }
 
-        if (cellContent === "休" || cellContent === "休(预)") cellClass = "shift-休";
+        let cellClass = getShiftClass(cellContent);
         if (isLocked) cellClass += " locked-day";
 
         html += `<td class="${cellClass}">${cellContent}</td>`;
@@ -479,24 +515,26 @@
   }
 
   function renderStatsTable(scheduleData = null) {
-    let allShifts = [...baseShifts, supportShift];
+    let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
 
     let html = `<thead><tr>
       <th class="header-month">姓名</th>`;
     
-    allShifts.forEach(shift => {
-      html += `<th class="header-day">${shift}</th>`;
+    baseShifts.forEach(shift => {
+      let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');
+      html += `<th class="header-day">${badge}<br>${shift.name}</th>`;
     });
+    html += `<th class="header-day">🔵<br>${supportShift.name}</th>`;
     html += `<th class="stat-total">上班总天数</th></tr></thead><tbody>`;
 
     staffs.forEach((staff, sIdx) => {
       html += `<tr><td class="staff-name">${staff.name}</td>`;
       
       let workCountTotal = 0;
-      allShifts.forEach(shift => {
+      allShifts.forEach(shiftName => {
         let count = 0;
         if (scheduleData && scheduleData[sIdx]) {
-          count = scheduleData[sIdx].filter(item => item === shift).length;
+          count = scheduleData[sIdx].filter(item => item === shiftName).length;
         }
         workCountTotal += count;
         html += `<td>${count}</td>`;
@@ -562,26 +600,27 @@
 
       let unassignedStaff = [...availableStaffIndexes];
 
-      todayShifts.forEach(shift => {
+      todayShifts.forEach(shiftObj => {
+        let shiftName = shiftObj.name;
         if (unassignedStaff.length === 0) return;
 
         unassignedStaff.sort((a, b) => {
-          let countA = shiftCounts[a][shift] || 0;
-          let countB = shiftCounts[b][shift] || 0;
+          let countA = shiftCounts[a][shiftName] || 0;
+          let countB = shiftCounts[b][shiftName] || 0;
           if (countA !== countB) return countA - countB;
           return Math.random() - 0.5;
         });
 
         let chosenStaffIdx = unassignedStaff.shift();
-        scheduleData[chosenStaffIdx][day - 1] = shift;
-        shiftCounts[chosenStaffIdx][shift] = (shiftCounts[chosenStaffIdx][shift] || 0) + 1;
+        scheduleData[chosenStaffIdx][day - 1] = shiftName;
+        shiftCounts[chosenStaffIdx][shiftName] = (shiftCounts[chosenStaffIdx][shiftName] || 0) + 1;
       });
     }
 
     lastGeneratedSchedule = scheduleData;
     renderAll();
     saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 自适应轮岗排班已成功生成！`;
+    document.getElementById('status').innerText = `${year}年${month}月 自适应动态轮岗排班已成功生成！`;
   }
 
   // 初始化
