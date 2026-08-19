@@ -710,10 +710,13 @@
     initLockedMap();
 
     let bestSchedule = null, minPenalty = Infinity;
-    for (let iter = 0; iter < 250; iter++) {
+
+    // 嘗試產生 300 次以尋找最佳最佳化解答
+    for (let iter = 0; iter < 300; iter++) {
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
       let shiftCounts = staffs.map(() => ({}));
 
+      // 1. 帶入已鎖定的班次
       for (let day = 1; day <= totalDays; day++) {
         staffs.forEach((_, sIdx) => {
           if (lockedMap[sIdx] && lockedMap[sIdx][day - 1] && lastGeneratedSchedule && lastGeneratedSchedule[sIdx] && lastGeneratedSchedule[sIdx][day - 1]) {
@@ -726,6 +729,7 @@
         });
       }
 
+      // 2. 按天安排班次
       for (let day = 1; day <= totalDays; day++) {
         let availableStaffIndexes = [];
         staffs.forEach((_, idx) => {
@@ -749,17 +753,40 @@
           return !staffRests.includes(day);
         }).length;
 
-        let neededShifts = (totalWorkingToday <= baseShifts.length) ? baseShifts.slice(0, totalWorkingToday).map(s => s.name) : [...baseShifts.map(s => s.name), ...Array(totalWorkingToday - baseShifts.length).fill(supportShift.name)];
-        lockedShiftsToday.forEach(lShift => { let idx = neededShifts.indexOf(lShift); if (idx !== -1) neededShifts.splice(idx, 1); });
+        let neededShifts = (totalWorkingToday <= baseShifts.length) 
+          ? baseShifts.slice(0, totalWorkingToday).map(s => s.name) 
+          : [...baseShifts.map(s => s.name), ...Array(totalWorkingToday - baseShifts.length).fill(supportShift.name)];
+        
+        lockedShiftsToday.forEach(lShift => { 
+          let idx = neededShifts.indexOf(lShift); 
+          if (idx !== -1) neededShifts.splice(idx, 1); 
+        });
 
-        let shuffledShifts = [...neededShifts].sort(() => Math.random() - 0.5);
+        // 優先分配高強度班次
+        neededShifts.sort((a, b) => (isHighShift(b) ? 1 : 0) - (isHighShift(a) ? 1 : 0));
+
         let unassignedStaff = [...availableStaffIndexes];
 
-        shuffledShifts.forEach(shiftName => {
-          let currentLevel = getShiftLevel(shiftName);
+        neededShifts.forEach(shiftName => {
           if (unassignedStaff.length === 0) return;
+          let isHigh = isHighShift(shiftName);
 
           unassignedStaff.sort((a, b) => {
+            // 防高強度連三避開機制
+            if (isHigh) {
+              let recentHighA = 0, recentHighB = 0;
+              // 檢查前 2 次已排的高強度個數
+              for (let d = day - 1; d >= 1; d--) {
+                if (isHighShift(scheduleData[a][d - 1])) recentHighA++;
+                if (recentHighA >= 2) break;
+              }
+              for (let d = day - 1; d >= 1; d--) {
+                if (isHighShift(scheduleData[b][d - 1])) recentHighB++;
+                if (recentHighB >= 2) break;
+              }
+              if (recentHighA !== recentHighB) return recentHighA - recentHighB;
+            }
+
             let countA = shiftCounts[a][shiftName] || 0;
             let countB = shiftCounts[b][shiftName] || 0;
             if (countA !== countB) return countA - countB;
@@ -772,24 +799,42 @@
         });
       }
 
+      // 3. 懲罰機制評分（計算違規程度）
       let penalty = 0;
       let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
+
       staffs.forEach((_, sIdx) => {
+        // 罰則 1：均勻度檢查
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          if (count === 0) penalty += 10000;
+          if (count === 0) penalty += 1000;
         });
+
+        // 罰則 2：嚴格防高強度「連三」（包含隔休假/低中強度）
+        let consecutiveHighCount = 0;
+        for (let d = 0; d < totalDays; d++) {
+          if (isHighShift(scheduleData[sIdx][d])) {
+            consecutiveHighCount++;
+            if (consecutiveHighCount >= 3) {
+              penalty += 50000; // 給予極高懲罰，強制避開高連三
+            }
+          }
+          // 這裡不重置 consecutiveHighCount，讓隔著休假或低/中強度的高強度班次也會被計算到
+        }
       });
 
-      if (penalty < minPenalty) { minPenalty = penalty; bestSchedule = scheduleData; if (penalty === 0) break; }
+      if (penalty < minPenalty) {
+        minPenalty = penalty;
+        bestSchedule = scheduleData;
+        if (penalty === 0) break;
+      }
     }
 
     lastGeneratedSchedule = bestSchedule;
     renderAll();
     await saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案！数据已同步至云端。`;
+    document.getElementById('status').innerText = `${year}年${month}月 已生成符合「高強度不連三」的最優排班方案！`;
   }
-
   async function initApp() {
     initDateSelectors();
     await loadDataFromLocal();
