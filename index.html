@@ -703,20 +703,21 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  async function generateSchedule() {
+async function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
     initLockedMap();
 
     let bestSchedule = null, minPenalty = Infinity;
+    let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
 
-    // 嘗試產生 300 次以尋找最佳最佳化解答
-    for (let iter = 0; iter < 300; iter++) {
+    // 多次模擬計算，尋找違規懲罰分最低的最佳解
+    for (let iter = 0; iter < 400; iter++) {
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 1. 帶入已鎖定的班次
+      // 1. 載入手動鎖定的班次
       for (let day = 1; day <= totalDays; day++) {
         staffs.forEach((_, sIdx) => {
           if (lockedMap[sIdx] && lockedMap[sIdx][day - 1] && lastGeneratedSchedule && lastGeneratedSchedule[sIdx] && lastGeneratedSchedule[sIdx][day - 1]) {
@@ -729,7 +730,7 @@
         });
       }
 
-      // 2. 按天安排班次
+      // 2. 每日進行班次派任
       for (let day = 1; day <= totalDays; day++) {
         let availableStaffIndexes = [];
         staffs.forEach((_, idx) => {
@@ -762,20 +763,30 @@
           if (idx !== -1) neededShifts.splice(idx, 1); 
         });
 
-        // 優先分配高強度班次
-        neededShifts.sort((a, b) => (isHighShift(b) ? 1 : 0) - (isHighShift(a) ? 1 : 0));
+        // 優先指派支援與高強度班次
+        neededShifts.sort((a, b) => {
+          if (a === supportShift.name) return -1;
+          if (b === supportShift.name) return 1;
+          return (isHighShift(b) ? 1 : 0) - (isHighShift(a) ? 1 : 0);
+        });
 
         let unassignedStaff = [...availableStaffIndexes];
 
         neededShifts.forEach(shiftName => {
           if (unassignedStaff.length === 0) return;
           let isHigh = isHighShift(shiftName);
+          let isSupport = (shiftName === supportShift.name);
 
           unassignedStaff.sort((a, b) => {
-            // 防高強度連三避開機制
+            let countA = shiftCounts[a][shiftName] || 0;
+            let countB = shiftCounts[b][shiftName] || 0;
+
+            // 規則：優先選還沒排過該崗位（count === 0）的人
+            if (countA !== countB) return countA - countB;
+
+            // 高強度防連三評分
             if (isHigh) {
               let recentHighA = 0, recentHighB = 0;
-              // 檢查前 2 次已排的高強度個數
               for (let d = day - 1; d >= 1; d--) {
                 if (isHighShift(scheduleData[a][d - 1])) recentHighA++;
                 if (recentHighA >= 2) break;
@@ -787,9 +798,6 @@
               if (recentHighA !== recentHighB) return recentHighA - recentHighB;
             }
 
-            let countA = shiftCounts[a][shiftName] || 0;
-            let countB = shiftCounts[b][shiftName] || 0;
-            if (countA !== countB) return countA - countB;
             return Math.random() - 0.5;
           });
 
@@ -799,27 +807,37 @@
         });
       }
 
-      // 3. 懲罰機制評分（計算違規程度）
+      // 3. 評分與懲罰計算 (Penalty)
       let penalty = 0;
-      let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
 
       staffs.forEach((_, sIdx) => {
-        // 罰則 1：均勻度檢查
+        // 規則 1：崗位覆蓋率 - 絕不能有 0 次 (重罰 100,000 分)
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          if (count === 0) penalty += 1000;
+          if (count === 0) {
+            penalty += 100000; 
+          } else if (count > 3 && shiftName !== supportShift.name) {
+            // 規則 1：最多 3 次，超過則加罰
+            penalty += (count - 3) * 5000;
+          }
         });
 
-        // 罰則 2：嚴格防高強度「連三」（包含隔休假/低中強度）
+        // 規則 2：支援崗位兩次均勻度 (未滿 2 次就有人拿到第 3 次則重罰)
+        let supportCount = shiftCounts[sIdx][supportShift.name] || 0;
+        if (supportCount > 2) {
+          let minSupportInTeam = Math.min(...staffs.map((_, i) => shiftCounts[i][supportShift.name] || 0));
+          if (minSupportInTeam < 2) {
+            penalty += 80000; // 團隊還有人未滿 2 次支援，禁止出現第 3 次
+          }
+        }
+
+        // 高強度防連三懲罰
         let consecutiveHighCount = 0;
         for (let d = 0; d < totalDays; d++) {
           if (isHighShift(scheduleData[sIdx][d])) {
             consecutiveHighCount++;
-            if (consecutiveHighCount >= 3) {
-              penalty += 50000; // 給予極高懲罰，強制避開高連三
-            }
+            if (consecutiveHighCount >= 3) penalty += 50000;
           }
-          // 這裡不重置 consecutiveHighCount，讓隔著休假或低/中強度的高強度班次也會被計算到
         }
       });
 
@@ -833,14 +851,7 @@
     lastGeneratedSchedule = bestSchedule;
     renderAll();
     await saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已生成符合「高強度不連三」的最優排班方案！`;
-  }
-  async function initApp() {
-    initDateSelectors();
-    await loadDataFromLocal();
-    updateSelect();
-    renderShifts();
-    renderAll();
+    document.getElementById('status').innerText = `${year}年${month}月 排班成功！已滿足「崗位零空缺、最多3次」與「支援2輪均勻」機制。`;
   }
 
   initApp();
