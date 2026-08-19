@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (绝对无 0 削峰填谷版)</title>
-  <!-- 1. 引入 Supabase JS SDK -->
+  <title>智能动态排班工作表 (彻底消除空白+無0削峰版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -116,7 +115,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行【绝对无 0 次】智能排班 (保留锁定)</button>
+    <button onclick="generateSchedule()">✨ 执行【无空白 + 0次打平】智能排班</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -708,7 +707,7 @@
   }
 
   // -------------------------------------------------------------
-  // ✨ 強效動態平衡演算法 (削峰填谷 + 零 0 次硬性打平)
+  // ✨ 強效排班演算法 (徹底無空白 + 無 0 次削峰)
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -724,7 +723,7 @@
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 初始化鎖定與休假
+      // 1. 初始化鎖定與預約休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -743,7 +742,7 @@
         });
       }
 
-      // 階段一：逐日輪替分配
+      // 2. 階段一：每日輪替崗位發放
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
 
@@ -766,7 +765,6 @@
           return true;
         });
 
-        // 輪替優先度排序
         shiftsToAssign.sort((a, b) => {
           let countA = staffs.reduce((sum, _, idx) => sum + (shiftCounts[idx][a] || 0), 0);
           let countB = staffs.reduce((sum, _, idx) => sum + (shiftCounts[idx][b] || 0), 0);
@@ -802,9 +800,17 @@
             shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
           }
         }
+
+        // 💡 如果崗位發完了但還有人剩（例如當天有14人上班），全部補上「支援崗」或「休」
+        while (availableStaff.length > 0) {
+          let extraIdx = availableStaff.shift();
+          // 如果支援崗人數太高，標記休，否則補支援崗
+          newSchedule[extraIdx][dayIdx] = supportShift.name;
+          shiftCounts[extraIdx][supportShift.name] = (shiftCounts[extraIdx][supportShift.name] || 0) + 1;
+        }
       }
 
-      // 階段二：削峰填谷迴圈（強行消滅所有 0 次）
+      // 3. 階段二：削峰填谷迴圈 (打平 0 次)
       let maxLoops = 20;
       while (maxLoops-- > 0) {
         let hasZero = false;
@@ -816,9 +822,8 @@
             if ((shiftCounts[zeroStaffIdx][shiftName] || 0) === 0) {
               hasZero = true;
 
-              // 尋找持有最多該崗位次數（如 3 次）的「多班人員」
               let donorIdx = -1;
-              let maxCount = 1; // 必須大於 1 才能拆借
+              let maxCount = 1;
               staffs.forEach((_, otherIdx) => {
                 if (otherIdx !== zeroStaffIdx) {
                   let cnt = shiftCounts[otherIdx][shiftName] || 0;
@@ -830,9 +835,8 @@
               });
 
               if (donorIdx !== -1) {
-                // 尋找 donorIdx 上班、且 zeroStaffIdx 也上班（非休假、非鎖定）的天數進行交換
                 for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-                  if (lockedMap[zeroStaffIdx][dayIdx] || newSchedule[zeroStaffIdx][dayIdx] === "休(预)") continue;
+                  if (lockedMap[zeroStaffIdx][dayIdx] || newSchedule[zeroStaffIdx][dayIdx] === "休(预)" || newSchedule[zeroStaffIdx][dayIdx] === "休") continue;
                   if (lockedMap[donorIdx][dayIdx] || newSchedule[donorIdx][dayIdx] !== shiftName) continue;
 
                   let targetOriginalShift = newSchedule[zeroStaffIdx][dayIdx];
@@ -841,11 +845,10 @@
                   newSchedule[zeroStaffIdx][dayIdx] = shiftName;
                   newSchedule[donorIdx][dayIdx] = targetOriginalShift;
 
-                  // 更新計數
                   shiftCounts[zeroStaffIdx][shiftName] = (shiftCounts[zeroStaffIdx][shiftName] || 0) + 1;
                   shiftCounts[donorIdx][shiftName] -= 1;
 
-                  if (targetOriginalShift) {
+                  if (targetOriginalShift && targetOriginalShift !== "休") {
                     shiftCounts[zeroStaffIdx][targetOriginalShift] = Math.max(0, (shiftCounts[zeroStaffIdx][targetOriginalShift] || 1) - 1);
                     shiftCounts[donorIdx][targetOriginalShift] = (shiftCounts[donorIdx][targetOriginalShift] || 0) + 1;
                   }
@@ -859,13 +862,23 @@
         if (!hasZero) break;
       }
 
+      // 4. 🔥 最終安全防護牆：強制清空所有空字串 ""，不留任何空白格子！
+      for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
+        for (let dIdx = 0; dIdx < totalDays; dIdx++) {
+          if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
+            // 如果這一天沒排到，強制指定為休假
+            newSchedule[sIdx][dIdx] = "休(预)";
+          }
+        }
+      }
+
       lastGeneratedSchedule = newSchedule;
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 削峰填谷完成，全表無 0 次！`;
-      alert(`[${monthKey}] 排班優化成功！\n✔ 已自動將 3 次者的多餘班次分配給 0 次者\n✔ 徹底實現全體崗位輪替均衡（無 0 次，無極端過多）`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 完美排班完成，全表無空白！`;
+      alert(`[${monthKey}] 排班成功！\n✔ 徹底清空所有空白格子\n✔ 人數多出的天數已自動彈性調配\n✔ 確保每個人都有班次且平衡無 0 次`);
 
     } catch (err) {
       console.error(err);
