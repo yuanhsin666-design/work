@@ -22,10 +22,10 @@
     button.danger { background: #d9534f; }
     button.danger:hover { background: #c9302c; }
 
-    .tag-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding: 6px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; max-height: 80px; overflow-y: auto; }
+    .tag-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding: 6px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; max-height: 100px; overflow-y: auto; }
     .tag { background: #e9ecef; color: #495057; padding: 2px 8px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 4px; }
+    .tag.support { background: #d1e7dd; color: #0f5132; }
     .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; }
-    .tag .remove-btn:hover { color: #a94442; }
 
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
@@ -80,9 +80,9 @@
 
     <!-- 4. 工作岗位管理 -->
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 每日工作岗位/班别管理 (点击 × 可移除)：</label>
+      <label>🏷️ 基础 12 个岗位 + 1 支援岗位 (自由调整)：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-        <input type="text" id="newShift" placeholder="输入新岗位/班别 (如: 柜台 或 JD/JY)" style="flex:1;">
+        <input type="text" id="newShift" placeholder="输入新岗位名称" style="flex:1;">
         <button onclick="addShift()">添加岗位</button>
       </div>
       <div class="tag-container" id="shiftsContainer"></div>
@@ -90,8 +90,8 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行自动排班</button>
-    <span id="status" style="color: #666; font-size: 13px;">点击自动排班，下方将自动计算岗位次数</span>
+    <button onclick="generateSchedule()">✨ 执行智能排班</button>
+    <span id="status" style="color: #666; font-size: 13px;">系统将根据每日实际上班人数自动匹配 12 岗位或 13 岗位（包含支援）</span>
   </div>
 </div>
 
@@ -113,9 +113,17 @@
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name, customRests: [] }));
 
-  let shiftsPool = ["JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
-  const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+  // 12个基础固定岗位
+  let baseShifts = [
+    "OL\nFB\nLY\nJY", "MT\nXO\nSH\nYS", "ND\n2500\n以下", "ND\n中大\n2501\n以上\nXH",
+    "HS\n3000\n以下\nSY", "HS大\n3001\n以上\nXY", "YD", "RF\n3000\n以下\nJD",
+    "RF\n3001\n以上\nLS", "TD\n1000\n以下", "TD\n1001\n5000", "TD\n5001\n以上"
+  ];
+  
+  // 第13个支援岗位
+  let supportShift = "支援\nND\nHS\nYD";
 
+  const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
   let lastGeneratedSchedule = null;
 
   function initDateSelectors() {
@@ -143,27 +151,35 @@
 
   function renderShifts() {
     const container = document.getElementById('shiftsContainer');
-    container.innerHTML = shiftsPool.map((shift, idx) => `
+    let html = baseShifts.map((shift, idx) => `
       <div class="tag">
         <span>${shift.replace(/\n/g, ' ')}</span>
         <span class="remove-btn" onclick="removeShift(${idx})">×</span>
       </div>
     `).join('');
+
+    // 绘制支援岗位
+    html += `
+      <div class="tag support">
+        <span>[支援] ${supportShift.replace(/\n/g, ' ')}</span>
+      </div>
+    `;
+    container.innerHTML = html;
   }
 
   function addShift() {
     const input = document.getElementById('newShift');
     const val = input.value.trim();
-    if (!val) return alert('请输入岗位或班别名称');
-    shiftsPool.push(val);
+    if (!val) return alert('请输入岗位名称');
+    baseShifts.push(val);
     input.value = '';
     renderShifts();
     renderAll();
   }
 
   function removeShift(idx) {
-    if (shiftsPool.length <= 1) return alert('请至少保留一个岗位！');
-    shiftsPool.splice(idx, 1);
+    if (baseShifts.length <= 1) return alert('请至少保留一个基础岗位！');
+    baseShifts.splice(idx, 1);
     renderShifts();
     renderAll();
   }
@@ -171,7 +187,6 @@
   function addStaff() {
     const name = document.getElementById('newName').value.trim();
     const restsInput = document.getElementById('newRests').value.trim();
-
     if (!name) return alert('请输入员工姓名');
 
     const year = parseInt(document.getElementById('yearSelect').value);
@@ -270,13 +285,13 @@
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
-  // 渲染岗位次数统计表
   function renderStatsTable(scheduleData = null) {
+    let allShifts = [...baseShifts, supportShift];
+
     let html = `<thead><tr>
       <th class="header-month">姓名</th>`;
     
-    // 岗位表头
-    shiftsPool.forEach(shift => {
+    allShifts.forEach(shift => {
       html += `<th class="header-day">${shift}</th>`;
     });
     html += `<th class="stat-total">上班总天数</th></tr></thead><tbody>`;
@@ -285,7 +300,7 @@
       html += `<tr><td class="staff-name">${staff.name}</td>`;
       
       let workCountTotal = 0;
-      shiftsPool.forEach(shift => {
+      allShifts.forEach(shift => {
         let count = 0;
         if (scheduleData && scheduleData[sIdx]) {
           count = scheduleData[sIdx].filter(item => item === shift).length;
@@ -306,30 +321,48 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
+  // 核心排班算法 (自动判定12/13人上班逻辑)
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
 
-    let scheduleData = [];
+    let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
 
-    staffs.forEach(staff => {
-      let row = [];
-      for(let day=1; day<=totalDays; day++) {
-        if (staff.customRests.includes(day)) {
-          row.push("休");
-        } else {
-          let isRest = Math.random() < 0.2;
-          let shift = isRest ? "休" : shiftsPool[Math.floor(Math.random() * shiftsPool.length)];
-          row.push(shift);
+    for (let day = 1; day <= totalDays; day++) {
+      // 找到当天没有预定休假的员工列表
+      let availableStaffIndexes = [];
+      staffs.forEach((staff, idx) => {
+        if (!staff.customRests.includes(day)) {
+          availableStaffIndexes.push(idx);
         }
+      });
+
+      // 打乱当天上班人员次序
+      availableStaffIndexes.sort(() => Math.random() - 0.5);
+
+      let workingCount = availableStaffIndexes.length;
+      let activeShifts = [...baseShifts];
+
+      // 如果上班人数 >= 13，追加 1 个支援岗位
+      if (workingCount >= 13) {
+        activeShifts.push(supportShift);
       }
-      scheduleData.push(row);
-    });
+
+      // 依序分配岗位给当天的上班员工
+      availableStaffIndexes.forEach((staffIdx, i) => {
+        if (i < activeShifts.length) {
+          scheduleData[staffIdx][day - 1] = activeShifts[i];
+        } else {
+          // 如果多于岗位数，自动排休
+          scheduleData[staffIdx][day - 1] = "休";
+        }
+      });
+    }
 
     lastGeneratedSchedule = scheduleData;
     renderAll();
-    document.getElementById('status').innerText = `${year}年${month}月 排班与统计计算完成！`;
+    document.getElementById('status').innerText = `${year}年${month}月 智能排班计算成功！`;
   }
 
   initDateSelectors();
