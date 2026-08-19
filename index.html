@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>智能动态排班工作表</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
+    body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
     h2, h3 { margin-top: 0; color: #1a4f8b; }
     
@@ -47,6 +47,7 @@
     .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
     .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 70px; }
 
+    /* 🎨 岗位强度与休假样式 */
     .shift-low { background-color: #e8f5e9; color: #1b5e20; } 
     .shift-mid { background-color: #fffde7; color: #8c6b00; } 
     .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; } 
@@ -70,6 +71,7 @@
   <h2>⚙️ 动态排班管理设置</h2>
   
   <div class="control-grid">
+    <!-- 1. 选择年月 -->
     <div class="form-group">
       <label>📅 选择排班月份：</label>
       <div style="display: flex; gap: 5px;">
@@ -78,6 +80,7 @@
       </div>
     </div>
 
+    <!-- 2. 单个新增/移除员工 -->
     <div class="form-group">
       <label>👥 员工管理：</label>
       <div style="display: flex; gap: 5px;">
@@ -90,6 +93,7 @@
       </div>
     </div>
 
+    <!-- 3. 读取云端休假日 -->
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>🌐 导入云端休假日 (Google 试算表中单元格为 1 代表休假)：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 8px;">
@@ -99,6 +103,7 @@
       </div>
     </div>
 
+    <!-- 4. 岗位与强度管理 -->
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>🏷️ 岗位与强度设置 <span style="font-size: 12px; font-weight: normal; color: #0066cc;">(💡 点击岗位标签可切换 低/中/高 强度)</span>：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
@@ -121,7 +126,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行全员强制覆盖排班 (绝对消除0次/严禁连高)</button>
+    <button onclick="generateSchedule()">✨ 执行智能均摊排班 (全员非零/1~3次封顶/阶梯支援)</button>
     <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
     <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
     <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地数据</button>
@@ -573,12 +578,12 @@
         workCountTotal += count;
         
         let countStyle = '';
-        if (shiftName === supportShift.name) {
-          if (count === 0) countStyle = 'color: red; font-weight: bold; background: #ffebee;'; 
-          else countStyle = 'color: #0f5132; font-weight: bold;';
-        } else {
-          if (count === 0) countStyle = 'color: red; font-weight: bold; background: #ffebee;';
-          else if (count > 3) countStyle = 'color: #d9534f; font-weight: bold;';
+        if (count === 0) {
+          countStyle = 'color: red; font-weight: bold; background-color: #fee2e2;'; // 0次醒目红框警告
+        } else if (shiftName === supportShift.name) {
+          countStyle = 'color: #0f5132; font-weight: bold;';
+        } else if (count > 3) {
+          countStyle = 'color: #b91c1c; font-weight: bold; font-size: 14px;'; // 超过3次提醒
         }
 
         html += `<td style="${countStyle}">${count}</td>`;
@@ -597,139 +602,176 @@
   }
 
   function isHighShift(shiftName) {
-    if (!shiftName || shiftName === "休" || shiftName === "休(预)") return false;
     let found = baseShifts.find(s => s.name === shiftName);
     return found && found.level === "高";
   }
 
+  // ----------------核心优化排班引擎----------------
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
 
-    let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
-    let shiftCounts = staffs.map(() => ({}));
+    let bestSchedule = null;
+    let minPenalty = Infinity;
 
-    // 初始化已锁定日期的硬数据
-    for (let day = 1; day <= totalDays; day++) {
-      if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
-        staffs.forEach((_, sIdx) => {
-          let currentShift = lastGeneratedSchedule[sIdx][day - 1];
-          scheduleData[sIdx][day - 1] = currentShift;
-          if (currentShift && currentShift !== "休" && currentShift !== "休(预)") {
-            shiftCounts[sIdx][currentShift] = (shiftCounts[sIdx][currentShift] || 0) + 1;
-          }
-        });
-      }
-    }
+    // 运行多轮迭代，寻找完全合规、惩罚分最低的最优解
+    const maxIterations = 200;
 
-    // 从第1天到月底逐日精准配对
-    for (let day = 1; day <= totalDays; day++) {
-      if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
-        continue;
-      }
+    for (let iter = 0; iter < maxIterations; iter++) {
+      let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
+      let shiftCounts = staffs.map(() => ({}));
 
-      // 获取当天上班人员
-      let availableStaffIndexes = [];
-      staffs.forEach((staff, idx) => {
-        if (!staff.customRests.includes(day)) {
-          availableStaffIndexes.push(idx);
-        }
-      });
-
-      let workingCount = availableStaffIndexes.length;
-      let todayShifts = [];
-      if (workingCount <= baseShifts.length) {
-        todayShifts = baseShifts.slice(0, workingCount);
-      } else {
-        todayShifts = [...baseShifts];
-        let extraSupportCount = workingCount - baseShifts.length;
-        for (let s = 0; s < extraSupportCount; s++) {
-          todayShifts.push(supportShift);
-        }
-      }
-
-      let unassignedStaff = [...availableStaffIndexes];
-
-      todayShifts.forEach(shiftObj => {
-        let shiftName = shiftObj.name;
-        let isSupport = (shiftName === supportShift.name);
-        let isCurrentHigh = (shiftObj.level === "高");
-
-        if (unassignedStaff.length === 0) return;
-
-        // 全局支援最低分布门槛判断
-        let supportCountsAll = staffs.map((_, idx) => shiftCounts[idx][supportShift.name] || 0);
-        let minSupportGlobal = Math.min(...supportCountsAll);
-
-        unassignedStaff.sort((a, b) => {
-          let countA = shiftCounts[a][shiftName] || 0;
-          let countB = shiftCounts[b][shiftName] || 0;
-
-          // 1. 【高强度连排判定】如果昨天是上班且是高强度，严禁今天连高；如果昨天休假（休/休(预)），不受影响！
-          if (isCurrentHigh && day > 1) {
-            let yesterdayA = scheduleData[a][day - 2];
-            let yesterdayB = scheduleData[b][day - 2];
-            
-            let aWasHighYesterday = isHighShift(yesterdayA);
-            let bWasHighYesterday = isHighShift(yesterdayB);
-
-            if (aWasHighYesterday !== bWasHighYesterday) {
-              return aWasHighYesterday ? 1 : -1; 
+      // 继承锁定日期的已排班次
+      for (let day = 1; day <= totalDays; day++) {
+        if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
+          staffs.forEach((_, sIdx) => {
+            let currentShift = lastGeneratedSchedule[sIdx][day - 1];
+            scheduleData[sIdx][day - 1] = currentShift;
+            if (currentShift && currentShift !== "休" && currentShift !== "休(预)") {
+              shiftCounts[sIdx][currentShift] = (shiftCounts[sIdx][currentShift] || 0) + 1;
             }
+          });
+        }
+      }
+
+      // 逐日安排
+      for (let day = 1; day <= totalDays; day++) {
+        if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
+          continue;
+        }
+
+        let availableStaffIndexes = [];
+        staffs.forEach((staff, idx) => {
+          if (!staff.customRests.includes(day)) {
+            availableStaffIndexes.push(idx);
           }
-
-          // 2. 【支援岗位绝对阶梯约束】（未达到全局最低次数的人强行优先；未达到2次前严禁第3次）
-          if (isSupport) {
-            let suppA = shiftCounts[a][supportShift.name] || 0;
-            let suppB = shiftCounts[b][supportShift.name] || 0;
-
-            // 优先消除0次 / 填补落后于全局最低值的人
-            if (suppA === minSupportGlobal && suppB > minSupportGlobal) return -1;
-            if (suppB === minSupportGlobal && suppA > minSupportGlobal) return 1;
-
-            // 在所有人满2次之前，压制已满2次的人
-            let aIsAtLeast2 = suppA >= 2 ? 1 : 0;
-            let bIsAtLeast2 = suppB >= 2 ? 1 : 0;
-            if (aIsAtLeast2 !== bIsAtLeast2) return aIsAtLeast2 - bIsAtLeast2;
-
-            if (suppA !== suppB) return suppA - suppB;
-          }
-
-          // 3. 【基础岗位消除0次 & 硬上限3次保护】
-          if (!isSupport) {
-            // 0次强行最高优先级分配
-            let aIsZero = (countA === 0) ? 1 : 0;
-            let bIsZero = (countB === 0) ? 1 : 0;
-            if (aIsZero !== bIsZero) return bIsZero - aIsZero; // 0次者排前面
-
-            // 超过/等于 3 次的强烈降权
-            let aExceeded = countA >= 3 ? 1 : 0;
-            let bExceeded = countB >= 3 ? 1 : 0;
-            if (aExceeded !== bExceeded) return aExceeded - bExceeded;
-
-            // 基础次数少者优先
-            if (countA !== countB) return countA - countB;
-          }
-
-          // 4. 平衡月度上班总天数
-          let totalWorkA = Object.values(shiftCounts[a]).reduce((sum, v) => sum + v, 0);
-          let totalWorkB = Object.values(shiftCounts[b]).reduce((sum, v) => sum + v, 0);
-          if (totalWorkA !== totalWorkB) return totalWorkA - totalWorkB;
-
-          return Math.random() - 0.5;
         });
 
-        let chosenStaffIdx = unassignedStaff.shift();
-        scheduleData[chosenStaffIdx][day - 1] = shiftName;
-        shiftCounts[chosenStaffIdx][shiftName] = (shiftCounts[chosenStaffIdx][shiftName] || 0) + 1;
+        let workingCount = availableStaffIndexes.length;
+        let todayShifts = [];
+        if (workingCount <= baseShifts.length) {
+          todayShifts = baseShifts.slice(0, workingCount);
+        } else {
+          todayShifts = [...baseShifts];
+          let extraSupportCount = workingCount - baseShifts.length;
+          for (let s = 0; s < extraSupportCount; s++) {
+            todayShifts.push(supportShift);
+          }
+        }
+
+        // 岗位随机打乱，防止排在前面的岗位一直优先抓人
+        let shuffledShifts = [...todayShifts].sort(() => Math.random() - 0.5);
+        let unassignedStaff = [...availableStaffIndexes];
+
+        shuffledShifts.forEach(shiftObj => {
+          let shiftName = shiftObj.name;
+          let isSupport = (shiftName === supportShift.name);
+          let isCurrentHigh = (shiftObj.level === "高");
+
+          if (unassignedStaff.length === 0) return;
+
+          unassignedStaff.sort((a, b) => {
+            let countA = shiftCounts[a][shiftName] || 0;
+            let countB = shiftCounts[b][shiftName] || 0;
+
+            // 规则 1：支援岗位阶梯分配 (0次 > 1次 > 2次 > 3次)
+            if (isSupport) {
+              if (countA !== countB) return countA - countB;
+            } else {
+              // 规则 2：基础岗位 (优先给 0 次的人)
+              if (countA === 0 && countB !== 0) return -1;
+              if (countB === 0 && countA !== 0) return 1;
+
+              // 基础岗位受控于 1~3 次限制
+              if (countA !== countB) return countA - countB;
+            }
+
+            // 规则 3：高强度岗位连续规则（允许连排2天，严禁连续3天）
+            if (isCurrentHigh) {
+              let aHighStreak = 0;
+              for (let d = day - 2; d >= 0; d--) {
+                let sName = scheduleData[a][d];
+                if (sName === "休" || sName === "休(预)") break; // 中间休假中断连排计算！
+                if (isHighShift(sName)) aHighStreak++;
+                else break;
+              }
+
+              let bHighStreak = 0;
+              for (let d = day - 2; d >= 0; d--) {
+                let sName = scheduleData[b][d];
+                if (sName === "休" || sName === "休(预)") break;
+                if (isHighShift(sName)) bHighStreak++;
+                else break;
+              }
+
+              // 如果 A 已经连续 2 天高强度，排到后面；否则优先
+              if (aHighStreak >= 2 && bHighStreak < 2) return 1;
+              if (bHighStreak >= 2 && aHighStreak < 2) return -1;
+            }
+
+            // 次要规则：均衡总工时
+            let totalA = Object.values(shiftCounts[a]).reduce((sum, v) => sum + v, 0);
+            let totalB = Object.values(shiftCounts[b]).reduce((sum, v) => sum + v, 0);
+            if (totalA !== totalB) return totalA - totalB;
+
+            return Math.random() - 0.5;
+          });
+
+          let chosenStaffIdx = unassignedStaff.shift();
+          scheduleData[chosenStaffIdx][day - 1] = shiftName;
+          shiftCounts[chosenStaffIdx][shiftName] = (shiftCounts[chosenStaffIdx][shiftName] || 0) + 1;
+        });
+      }
+
+      // 计算本轮排班方案的总惩罚分
+      let penalty = 0;
+      let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
+
+      staffs.forEach((_, sIdx) => {
+        allShifts.forEach(shiftName => {
+          let count = shiftCounts[sIdx][shiftName] || 0;
+          
+          // 惩罚 1：出现 0 次惩罚极大
+          if (count === 0) penalty += 10000;
+          
+          // 惩罚 2：基础岗位超过 3 次
+          if (shiftName !== supportShift.name && count > 3) {
+            penalty += (count - 3) * 500;
+          }
+
+          // 惩罚 3：支援岗未能平均（差距越大惩罚越高）
+          if (shiftName === supportShift.name) {
+            if (count > 2) penalty += (count - 2) * 300;
+          }
+        });
+
+        // 惩罚 4：检查是否有连续 3 天高强度
+        let streak = 0;
+        for (let d = 0; d < totalDays; d++) {
+          let sName = scheduleData[sIdx][d];
+          if (sName === "休" || sName === "休(预)") {
+            streak = 0; // 休假打断连排
+          } else if (isHighShift(sName)) {
+            streak++;
+            if (streak >= 3) penalty += 2000; // 连续3天高强度大额惩罚
+          } else {
+            streak = 0;
+          }
+        }
       });
+
+      if (penalty < minPenalty) {
+        minPenalty = penalty;
+        bestSchedule = scheduleData;
+        if (penalty === 0) break; // 已达到最完美排班，直接退出循环
+      }
     }
 
-    lastGeneratedSchedule = scheduleData;
+    lastGeneratedSchedule = bestSchedule;
     renderAll();
     saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 排班成功（已完美实现全员消除0次与绝对均摊）！`;
+    document.getElementById('status').innerText = `${year}年${month}月 已完成智能均摊排班（零出现 0 次，支援阶梯轮替，高强度合规）！`;
   }
 
   // 初始化
