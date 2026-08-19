@@ -98,6 +98,7 @@
     <button onclick="generateSchedule()">✨ 执行智能轮调排班 (保证每人均轮岗)</button>
     <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
     <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
+    <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地保存数据</button>
     <span id="status" style="color: #666; font-size: 13px;"></span>
   </div>
 </div>
@@ -130,6 +131,52 @@
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
   let lastGeneratedSchedule = null;
   let forceUnlocked = false;
+
+  // ---------------- localStorage 本地数据存储与恢复 ----------------
+  function saveDataToLocal() {
+    const year = document.getElementById('yearSelect').value;
+    const month = document.getElementById('monthSelect').value;
+    
+    const dataToSave = {
+      staffs: staffs,
+      baseShifts: baseShifts,
+      lastGeneratedSchedule: lastGeneratedSchedule,
+      year: year,
+      month: month,
+      batchRestText: document.getElementById('batchRestInput').value
+    };
+    
+    localStorage.setItem('auto_schedule_data', JSON.stringify(dataToSave));
+  }
+
+  function loadDataFromLocal() {
+    const saved = localStorage.getItem('auto_schedule_data');
+    if (!saved) return false;
+
+    try {
+      const data = JSON.parse(saved);
+      if (data.staffs) staffs = data.staffs;
+      if (data.baseShifts) baseShifts = data.baseShifts;
+      if (data.lastGeneratedSchedule) lastGeneratedSchedule = data.lastGeneratedSchedule;
+      
+      if (data.year) document.getElementById('yearSelect').value = data.year;
+      if (data.month) document.getElementById('monthSelect').value = data.month;
+      if (data.batchRestText) document.getElementById('batchRestInput').value = data.batchRestText;
+
+      return true;
+    } catch(e) {
+      console.error("恢复保存数据失败:", e);
+      return false;
+    }
+  }
+
+  function resetAllData() {
+    if (confirm("确定要重置所有保存的数据吗？重置后将还原到系统默认状态。")) {
+      localStorage.removeItem('auto_schedule_data');
+      location.reload();
+    }
+  }
+  // -------------------------------------------------------------
 
   function initDateSelectors() {
     const yearSelect = document.getElementById('yearSelect');
@@ -191,6 +238,7 @@
     input.value = '';
     renderShifts();
     renderAll();
+    saveDataToLocal();
   }
 
   function removeShift(idx) {
@@ -198,6 +246,7 @@
     baseShifts.splice(idx, 1);
     renderShifts();
     renderAll();
+    saveDataToLocal();
   }
 
   function addStaff() {
@@ -209,6 +258,7 @@
     
     updateSelect();
     renderAll();
+    saveDataToLocal();
   }
 
   function removeStaff() {
@@ -218,6 +268,7 @@
     staffs.splice(idx, 1);
     updateSelect();
     renderAll();
+    saveDataToLocal();
     alert(`已移除员工：${removedName}`);
   }
 
@@ -257,6 +308,7 @@
     });
 
     renderAll();
+    saveDataToLocal();
     alert(`批量休假更新完毕！成功匹配 ${matchCount} 位员工的休假。`);
   }
 
@@ -264,6 +316,7 @@
     staffs.forEach(s => s.customRests = []);
     document.getElementById('batchRestInput').value = '';
     renderAll();
+    saveDataToLocal();
     alert('已清空所有员工的指定休假。');
   }
 
@@ -284,6 +337,7 @@
     lastGeneratedSchedule = null;
     forceUnlocked = false;
     renderAll();
+    saveDataToLocal();
   }
 
   function renderTable(scheduleData = null) {
@@ -373,7 +427,6 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
-  // 高级公平轮岗排班算法
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -383,12 +436,10 @@
       ? JSON.parse(JSON.stringify(lastGeneratedSchedule))
       : Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
 
-    // 初始化统计每人已分配岗位次数 (用于公平轮配)
     let shiftCounts = staffs.map(() => ({}));
 
     for (let day = 1; day <= totalDays; day++) {
       if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
-        // 如果此天已锁定，记录已被占用的岗位天数
         staffs.forEach((_, sIdx) => {
           let currentShift = scheduleData[sIdx][day - 1];
           if (currentShift && currentShift !== "休" && currentShift !== "休(预)") {
@@ -398,12 +449,10 @@
         continue;
       }
 
-      // 重置当天的记录
       staffs.forEach((_, idx) => {
         scheduleData[idx][day - 1] = "休";
       });
 
-      // 选出当天没休假的上班人员
       let availableStaffIndexes = [];
       staffs.forEach((staff, idx) => {
         if (!staff.customRests.includes(day)) {
@@ -417,18 +466,16 @@
         activeShifts.push(supportShift);
       }
 
-      // 对当天岗位按贪心分配算法匹配最合适员工 (未做过该岗位或做过次数最少的优先)
       let unassignedStaff = [...availableStaffIndexes];
 
       activeShifts.forEach(shift => {
         if (unassignedStaff.length === 0) return;
 
-        // 在未分配员工中找到在这个岗位做过最多次数最小的人
         unassignedStaff.sort((a, b) => {
           let countA = shiftCounts[a][shift] || 0;
           let countB = shiftCounts[b][shift] || 0;
           if (countA !== countB) return countA - countB;
-          return Math.random() - 0.5; // 次数相同时随机
+          return Math.random() - 0.5;
         });
 
         let chosenStaffIdx = unassignedStaff.shift();
@@ -439,10 +486,13 @@
 
     lastGeneratedSchedule = scheduleData;
     renderAll();
-    document.getElementById('status').innerText = `${year}年${month}月 全员轮配排班算法执行完毕！`;
+    saveDataToLocal(); // 排班完成自动保存
+    document.getElementById('status').innerText = `${year}年${month}月 排班成功并已自动保存到本地！`;
   }
 
+  // 初始化流程
   initDateSelectors();
+  loadDataFromLocal(); // 尝试读取上一次保存的数据
   updateSelect();
   renderShifts();
   renderAll();
