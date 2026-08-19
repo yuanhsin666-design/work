@@ -56,6 +56,7 @@
     /* ⚪ 白底黑字加粗的“休”字样式 */
     .shift-休 { background-color: #ffffff; color: #000000; font-weight: bold; }
     .shift-休预 { background-color: #ffffff; color: #000000; font-weight: bold; }
+    .shift-empty { background-color: #ffffff; }
     
     /* 👥 当日上班人数统计行样式 */
     .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; position: sticky; bottom: 0; z-index: 4; }
@@ -188,11 +189,11 @@
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
     
-    localStorage.setItem('auto_schedule_data_v12', JSON.stringify(dataToSave));
+    localStorage.setItem('auto_schedule_data_v13', JSON.stringify(dataToSave));
   }
 
   function loadDataFromLocal() {
-    const saved = localStorage.getItem('auto_schedule_data_v12');
+    const saved = localStorage.getItem('auto_schedule_data_v13');
     if (!saved) return false;
 
     try {
@@ -215,7 +216,7 @@
 
   function resetAllData() {
     if (confirm("确定要重置所有保存的数据吗？")) {
-      localStorage.removeItem('auto_schedule_data_v12');
+      localStorage.removeItem('auto_schedule_data_v13');
       location.reload();
     }
   }
@@ -478,6 +479,7 @@
   }
 
   function getShiftClass(shiftName) {
+    if (!shiftName) return "shift-empty";
     if (shiftName === "休") return "shift-休";
     if (shiftName === "休(预)") return "shift-休预";
     if (shiftName === supportShift.name) return "shift-support";
@@ -520,7 +522,7 @@
         <td class="staff-name">${staff.name}</td>`;
       
       for(let day=1; day<=totalDays; day++) {
-        let cellContent = "休";
+        let cellContent = "";
         let isLocked = isDayLocked(year, month, day);
 
         if (scheduleData && scheduleData[sIdx]) {
@@ -529,7 +531,7 @@
           cellContent = "休(预)";
         }
 
-        if (cellContent !== "休" && cellContent !== "休(预)") {
+        if (cellContent && cellContent !== "休" && cellContent !== "休(预)") {
           dailyWorkingTotals[day - 1]++;
         }
 
