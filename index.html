@@ -126,7 +126,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行智能均摊排班 (全员非零/1~3次封顶/阶梯支援)</button>
+    <button onclick="generateSchedule()">✨ 执行智能均摊排班 (强中低穿插/全员非零/1~3次)</button>
     <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
     <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
     <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地数据</button>
@@ -187,11 +187,11 @@
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
     
-    localStorage.setItem('auto_schedule_data_v16', JSON.stringify(dataToSave));
+    localStorage.setItem('auto_schedule_data_v17', JSON.stringify(dataToSave));
   }
 
   function loadDataFromLocal() {
-    const saved = localStorage.getItem('auto_schedule_data_v16');
+    const saved = localStorage.getItem('auto_schedule_data_v17');
     if (!saved) return false;
 
     try {
@@ -214,7 +214,7 @@
 
   function resetAllData() {
     if (confirm("确定要重置所有保存的数据吗？")) {
-      localStorage.removeItem('auto_schedule_data_v16');
+      localStorage.removeItem('auto_schedule_data_v17');
       location.reload();
     }
   }
@@ -579,11 +579,11 @@
         
         let countStyle = '';
         if (count === 0) {
-          countStyle = 'color: red; font-weight: bold; background-color: #fee2e2;'; // 0次醒目红框警告
+          countStyle = 'color: red; font-weight: bold; background-color: #fee2e2;';
         } else if (shiftName === supportShift.name) {
           countStyle = 'color: #0f5132; font-weight: bold;';
         } else if (count > 3) {
-          countStyle = 'color: #b91c1c; font-weight: bold; font-size: 14px;'; // 超过3次提醒
+          countStyle = 'color: #b91c1c; font-weight: bold; font-size: 14px;';
         }
 
         html += `<td style="${countStyle}">${count}</td>`;
@@ -601,12 +601,17 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
-  function isHighShift(shiftName) {
+  function getShiftLevel(shiftName) {
+    if (shiftName === supportShift.name) return "支援";
     let found = baseShifts.find(s => s.name === shiftName);
-    return found && found.level === "高";
+    return found ? found.level : "低";
   }
 
-  // ----------------核心优化排班引擎----------------
+  function isHighShift(shiftName) {
+    return getShiftLevel(shiftName) === "高";
+  }
+
+  // ----------------智能多轮优选排班引擎（含强中低穿插算法）----------------
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -615,8 +620,7 @@
     let bestSchedule = null;
     let minPenalty = Infinity;
 
-    // 运行多轮迭代，寻找完全合规、惩罚分最低的最优解
-    const maxIterations = 200;
+    const maxIterations = 250;
 
     for (let iter = 0; iter < maxIterations; iter++) {
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
@@ -635,7 +639,6 @@
         }
       }
 
-      // 逐日安排
       for (let day = 1; day <= totalDays; day++) {
         if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
           continue;
@@ -660,14 +663,13 @@
           }
         }
 
-        // 岗位随机打乱，防止排在前面的岗位一直优先抓人
         let shuffledShifts = [...todayShifts].sort(() => Math.random() - 0.5);
         let unassignedStaff = [...availableStaffIndexes];
 
         shuffledShifts.forEach(shiftObj => {
           let shiftName = shiftObj.name;
-          let isSupport = (shiftName === supportShift.name);
-          let isCurrentHigh = (shiftObj.level === "高");
+          let currentLevel = getShiftLevel(shiftName);
+          let isSupport = (currentLevel === "支援");
 
           if (unassignedStaff.length === 0) return;
 
@@ -675,42 +677,57 @@
             let countA = shiftCounts[a][shiftName] || 0;
             let countB = shiftCounts[b][shiftName] || 0;
 
-            // 规则 1：支援岗位阶梯分配 (0次 > 1次 > 2次 > 3次)
+            // 规则 1：支援岗位阶梯轮替
             if (isSupport) {
               if (countA !== countB) return countA - countB;
             } else {
-              // 规则 2：基础岗位 (优先给 0 次的人)
+              // 规则 2：优先消除 0 次岗位
               if (countA === 0 && countB !== 0) return -1;
               if (countB === 0 && countA !== 0) return 1;
 
-              // 基础岗位受控于 1~3 次限制
               if (countA !== countB) return countA - countB;
             }
 
-            // 规则 3：高强度岗位连续规则（允许连排2天，严禁连续3天）
-            if (isCurrentHigh) {
-              let aHighStreak = 0;
-              for (let d = day - 2; d >= 0; d--) {
-                let sName = scheduleData[a][d];
-                if (sName === "休" || sName === "休(预)") break; // 中间休假中断连排计算！
-                if (isHighShift(sName)) aHighStreak++;
-                else break;
+            // 规则 3：强中低波浪穿插（关键调度）
+            if (day > 1) {
+              let prevShiftA = scheduleData[a][day - 2];
+              let prevShiftB = scheduleData[b][day - 2];
+              let prevLevelA = getShiftLevel(prevShiftA);
+              let prevLevelB = getShiftLevel(prevShiftB);
+
+              // 如果昨天排了高，今天尽量避免再排高，优先排中/低
+              if (currentLevel === "高") {
+                let aWasHigh = (prevLevelA === "高");
+                let bWasHigh = (prevLevelB === "高");
+                if (aWasHigh !== bWasHigh) return aWasHigh ? 1 : -1;
               }
 
-              let bHighStreak = 0;
-              for (let d = day - 2; d >= 0; d--) {
-                let sName = scheduleData[b][d];
-                if (sName === "休" || sName === "休(预)") break;
-                if (isHighShift(sName)) bHighStreak++;
-                else break;
+              // 如果昨天排了低，今天优先安排中/高
+              if (currentLevel === "低") {
+                let aWasLow = (prevLevelA === "低");
+                let bWasLow = (prevLevelB === "低");
+                if (aWasLow !== bWasLow) return aWasLow ? 1 : -1;
               }
-
-              // 如果 A 已经连续 2 天高强度，排到后面；否则优先
-              if (aHighStreak >= 2 && bHighStreak < 2) return 1;
-              if (bHighStreak >= 2 && aHighStreak < 2) return -1;
             }
 
-            // 次要规则：均衡总工时
+            // 规则 4：高强度最多连排2天（严禁3连排）
+            if (currentLevel === "高") {
+              let aStreak = 0, bStreak = 0;
+              for (let d = day - 2; d >= 0; d--) {
+                let s = scheduleData[a][d];
+                if (s === "休" || s === "休(预)") break;
+                if (isHighShift(s)) aStreak++; else break;
+              }
+              for (let d = day - 2; d >= 0; d--) {
+                let s = scheduleData[b][d];
+                if (s === "休" || s === "休(预)") break;
+                if (isHighShift(s)) bStreak++; else break;
+              }
+
+              if (aStreak >= 2 && bStreak < 2) return 1;
+              if (bStreak >= 2 && aStreak < 2) return -1;
+            }
+
             let totalA = Object.values(shiftCounts[a]).reduce((sum, v) => sum + v, 0);
             let totalB = Object.values(shiftCounts[b]).reduce((sum, v) => sum + v, 0);
             if (totalA !== totalB) return totalA - totalB;
@@ -724,54 +741,53 @@
         });
       }
 
-      // 计算本轮排班方案的总惩罚分
+      // 综合评价系统（打分选择全月最穿插、最合规的方案）
       let penalty = 0;
       let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
 
       staffs.forEach((_, sIdx) => {
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          
-          // 惩罚 1：出现 0 次惩罚极大
-          if (count === 0) penalty += 10000;
-          
-          // 惩罚 2：基础岗位超过 3 次
-          if (shiftName !== supportShift.name && count > 3) {
-            penalty += (count - 3) * 500;
-          }
-
-          // 惩罚 3：支援岗未能平均（差距越大惩罚越高）
-          if (shiftName === supportShift.name) {
-            if (count > 2) penalty += (count - 2) * 300;
-          }
+          if (count === 0) penalty += 10000; // 绝不许有0
+          if (shiftName !== supportShift.name && count > 3) penalty += (count - 3) * 500;
+          if (shiftName === supportShift.name && count > 2) penalty += (count - 2) * 300;
         });
 
-        // 惩罚 4：检查是否有连续 3 天高强度
+        // 检查穿插顺畅度（如果连续两天相同强度加少量惩罚分，促进穿插）
+        for (let d = 1; d < totalDays; d++) {
+          let s1 = scheduleData[sIdx][d - 1];
+          let s2 = scheduleData[sIdx][d];
+          if (s1 !== "休" && s2 !== "休" && s1 !== "休(预)" && s2 !== "休(预)") {
+            let l1 = getShiftLevel(s1);
+            let l2 = getShiftLevel(s2);
+            if (l1 === l2 && l1 !== "中") penalty += 10; // 同强度连排轻微扣分
+            if (l1 === "高" && l2 === "高") penalty += 50; // 连排高强度扣分
+          }
+        }
+
+        // 严格检查是否超过3连高
         let streak = 0;
         for (let d = 0; d < totalDays; d++) {
           let sName = scheduleData[sIdx][d];
-          if (sName === "休" || sName === "休(预)") {
-            streak = 0; // 休假打断连排
-          } else if (isHighShift(sName)) {
+          if (sName === "休" || sName === "休(预)") streak = 0;
+          else if (isHighShift(sName)) {
             streak++;
-            if (streak >= 3) penalty += 2000; // 连续3天高强度大额惩罚
-          } else {
-            streak = 0;
-          }
+            if (streak >= 3) penalty += 2000;
+          } else streak = 0;
         }
       });
 
       if (penalty < minPenalty) {
         minPenalty = penalty;
         bestSchedule = scheduleData;
-        if (penalty === 0) break; // 已达到最完美排班，直接退出循环
+        if (penalty === 0) break;
       }
     }
 
     lastGeneratedSchedule = bestSchedule;
     renderAll();
     saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已完成智能均摊排班（零出现 0 次，支援阶梯轮替，高强度合规）！`;
+    document.getElementById('status').innerText = `${year}年${month}月 已生成【强中低动态穿插】最优排班方案！`;
   }
 
   // 初始化
