@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表</title>
+  <title>智能动态排班工作表 (云端同步版)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -24,6 +24,8 @@
     button.danger:hover { background: #c9302c; }
     button.warning { background: #f0ad4e; color: #333; }
     button.warning:hover { background: #ec971f; }
+    button.success { background: #198754; color: white; }
+    button.success:hover { background: #157347; }
 
     .tag-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding: 6px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; max-height: 120px; overflow-y: auto; }
     .tag { background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
@@ -73,19 +75,25 @@
       </div>
     </div>
 
-    <!-- 3. 批量贴上休假日 -->
+    <!-- 3. 读取云端/手动休假日 -->
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>📋 批量导入所有员工休假日 (格式: 名字 1,2,3)：</label>
-      <textarea id="batchRestInput" rows="3" placeholder="支持多行贴上，例如：&#10;大抠 2,3,7,11,16,20,25,26&#10;孙孙 1, 5, 10, 15&#10;宏 1,4,9,15,16,25,27,28"></textarea>
+      <label>🌐 导入云端休假日 (支持 Google Sheets 或直接 CSV 链接)：</label>
+      <div style="display: flex; gap: 5px; margin-bottom: 8px;">
+        <input type="text" id="cloudUrlInput" placeholder="请在此粘贴 Google 试算表公开链接" style="flex: 1;">
+        <button class="success" onclick="fetchCloudRests()">🌐 抓取云端休假日</button>
+      </div>
+
+      <label>📋 休假数据文本框 (云端抓取后会自动填入这里，也可手动修改)：</label>
+      <textarea id="batchRestInput" rows="3" placeholder="例如：&#10;大抠 2,3,7,11,16,20,25,26&#10;孙孙 1, 5, 10, 15&#10;宏 1,4,9,15,16,25,27,28"></textarea>
       <div style="display: flex; gap: 5px; margin-top: 5px;">
-        <button class="secondary" onclick="importBatchRests()">📥 一键读取并更新休假日</button>
+        <button class="secondary" onclick="importBatchRests()">📥 更新文本框中的休假日</button>
         <button class="danger" onclick="clearAllRests()">🗑️ 清空所有休假</button>
       </div>
     </div>
 
     <!-- 4. 岗位调节管理 -->
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 基础岗位与支援岗位调整 (按顺序排优先级)：</label>
+      <label>🏷️ 基础岗位与支援岗位调整：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px;">
         <input type="text" id="newShift" placeholder="输入新基础岗位" style="flex:1;">
         <button onclick="addShift()">添加基础岗位</button>
@@ -134,7 +142,7 @@
   let lastGeneratedSchedule = null;
   let forceUnlocked = false;
 
-  // localStorage 存取
+  // 保存与恢复本地存储
   function saveDataToLocal() {
     const year = document.getElementById('yearSelect').value;
     const month = document.getElementById('monthSelect').value;
@@ -146,14 +154,15 @@
       lastGeneratedSchedule: lastGeneratedSchedule,
       year: year,
       month: month,
+      cloudUrl: document.getElementById('cloudUrlInput').value,
       batchRestText: document.getElementById('batchRestInput').value
     };
     
-    localStorage.setItem('auto_schedule_data_v2', JSON.stringify(dataToSave));
+    localStorage.setItem('auto_schedule_data_v3', JSON.stringify(dataToSave));
   }
 
   function loadDataFromLocal() {
-    const saved = localStorage.getItem('auto_schedule_data_v2');
+    const saved = localStorage.getItem('auto_schedule_data_v3');
     if (!saved) return false;
 
     try {
@@ -165,6 +174,7 @@
       
       if (data.year) document.getElementById('yearSelect').value = data.year;
       if (data.month) document.getElementById('monthSelect').value = data.month;
+      if (data.cloudUrl) document.getElementById('cloudUrlInput').value = data.cloudUrl;
       if (data.batchRestText) document.getElementById('batchRestInput').value = data.batchRestText;
 
       return true;
@@ -176,8 +186,45 @@
 
   function resetAllData() {
     if (confirm("确定要重置所有保存的数据吗？")) {
-      localStorage.removeItem('auto_schedule_data_v2');
+      localStorage.removeItem('auto_schedule_data_v3');
       location.reload();
+    }
+  }
+
+  // 云端拉取逻辑
+  async function fetchCloudRests() {
+    let rawUrl = document.getElementById('cloudUrlInput').value.trim();
+    if (!rawUrl) return alert("请先输入云端链接！");
+
+    let targetUrl = rawUrl;
+
+    // 自动将 Google Sheets 普通查看链接转为直接下载 CSV 的链接
+    if (rawUrl.includes("docs.google.com/spreadsheets")) {
+      const match = rawUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      if (match && match[1]) {
+        const sheetId = match[1];
+        let gidMatch = rawUrl.match(/gid=([0-9]+)/);
+        let gidParam = gidMatch ? `&gid=${gidMatch[1]}` : "";
+        targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;
+      }
+    }
+
+    document.getElementById('status').innerText = "⏳ 正在拉取云端数据...";
+
+    try {
+      const response = await fetch(targetUrl);
+      if (!response.ok) throw new Error("无法读取链接，请确认链接是否开启了公开权限");
+      
+      const csvText = await response.text();
+      
+      // 填入输入框并立即应用
+      document.getElementById('batchRestInput').value = csvText;
+      importBatchRests();
+      document.getElementById('status').innerText = "✅ 云端休假日数据同步成功！";
+      saveDataToLocal();
+    } catch (err) {
+      alert("抓取失败：" + err.message + "\n请确保 Google 试算表已设为「知道链接者皆可查看」。");
+      document.getElementById('status').innerText = "❌ 云端抓取失败";
     }
   }
 
@@ -283,7 +330,7 @@
 
   function importBatchRests() {
     const text = document.getElementById('batchRestInput').value.trim();
-    if (!text) return alert('请填入休假文本数据！');
+    if (!text) return alert('没有检测到休假数据！');
 
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -318,7 +365,6 @@
 
     renderAll();
     saveDataToLocal();
-    alert(`休假更新完毕！成功匹配 ${matchCount} 位员工。`);
   }
 
   function clearAllRests() {
@@ -436,7 +482,6 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
-  // 动态自适应排班算法
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -463,7 +508,6 @@
         scheduleData[idx][day - 1] = "休";
       });
 
-      // 统计当天可上班的人员
       let availableStaffIndexes = [];
       staffs.forEach((staff, idx) => {
         if (!staff.customRests.includes(day)) {
@@ -473,13 +517,10 @@
 
       let workingCount = availableStaffIndexes.length;
       
-      // 构建当天需要填充的岗位队列
       let todayShifts = [];
       if (workingCount <= baseShifts.length) {
-        // 如果上班人数小于等于基础岗位，按顺序填满基础岗位
         todayShifts = baseShifts.slice(0, workingCount);
       } else {
-        // 如果上班人数多于基础岗位，基础岗位全开，剩余人力全部设为支援岗位
         todayShifts = [...baseShifts];
         let extraSupportCount = workingCount - baseShifts.length;
         for (let s = 0; s < extraSupportCount; s++) {
@@ -489,7 +530,6 @@
 
       let unassignedStaff = [...availableStaffIndexes];
 
-      // 给当天岗位分配最合适的员工
       todayShifts.forEach(shift => {
         if (unassignedStaff.length === 0) return;
 
@@ -512,7 +552,7 @@
     document.getElementById('status').innerText = `${year}年${month}月 自适应岗位排班完成！`;
   }
 
-  // 初始化流程
+  // 初始化
   initDateSelectors();
   loadDataFromLocal();
   updateSelect();
