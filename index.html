@@ -688,7 +688,8 @@ html += `</tr><tr class="header-day">`;
         
         html += `<td style="${countStyle}">${count}</td>`;
       });
-      html += `<td class="stat-total">${workCountTotal}</td></tr>`;let restTotal = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === '休' || item === '休(预)').length : 0;
+      html += `<td class="stat-total">${workCountTotal}</td></tr>`;
+      let restTotal = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === '休' || item === '休(预)').length : 0;
 html += `<td class="stat-total">${restTotal}</td></tr>`;
     });
     html += `</tbody>`;
