@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (極致打散+人性化高強度冷卻版)</title>
+  <title>智能动态排班工作表 (強制冷卻+全局洗牌打散版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -67,7 +67,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🌱 人性化打散 + 🛡️ 高强度冷卻保護)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #d9534f; font-weight: normal;">(🎲 全局亂數洗牌 + 🛑 2天冷卻硬性鎖死)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -115,7 +115,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行【人性化高強度打散】智能排班</button>
+    <button onclick="generateSchedule()">🎲 重新洗牌！執行【極致打散】智能排班</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -706,36 +706,27 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  // 🛡️ 人性化評價函式：計算某員工在某一天接高強度的「痛苦度評分」
-  function getHighIntensityPainScore(schedule, sIdx, dayIdx, highNames) {
-    let score = 0;
-
-    // 1. 冷卻保護：檢查前 1~2 天是否為高強度
-    if (dayIdx >= 1 && highNames.includes(schedule[sIdx][dayIdx - 1])) score += 1000; // 隔天又高強度，極度痛苦
-    if (dayIdx >= 2 && highNames.includes(schedule[sIdx][dayIdx - 2])) score += 300;  // 隔天冷卻不足
-
-    // 2. 檢查後 1~2 天是否已經是高強度
-    if (dayIdx + 1 < schedule[sIdx].length && highNames.includes(schedule[sIdx][dayIdx + 1])) score += 1000;
-    if (dayIdx + 2 < schedule[sIdx].length && highNames.includes(schedule[sIdx][dayIdx + 2])) score += 300;
-
-    // 3. 7 天滾動區間密集度限制：檢查前後 3 天（共7天區間）內的高強度總數
-    let start = Math.max(0, dayIdx - 3);
-    let end = Math.min(schedule[sIdx].length - 1, dayIdx + 3);
-    let recentHighCount = 0;
-    for (let d = start; d <= end; d++) {
-      if (d !== dayIdx && highNames.includes(schedule[sIdx][d])) {
-        recentHighCount++;
+  // 🛑 判斷某人在某天是否處於「高強度硬性冷卻期 (至少冷卻 2 天)」
+  function isHighCoolingDown(schedule, sIdx, dayIdx, highNames) {
+    // 檢查前 1 天與前 2 天是否有高強度
+    for (let offset = 1; offset <= 2; offset++) {
+      if (dayIdx - offset >= 0) {
+        let prevShift = schedule[sIdx][dayIdx - offset];
+        if (highNames.includes(prevShift)) return true;
       }
     }
-
-    if (recentHighCount >= 2) score += 2000; // 7天內已有2個高強度，再排就炸了
-    else score += recentHighCount * 200;
-
-    return score;
+    // 檢查後 1 天與後 2 天（以防萬一後續已鎖定高強度）
+    for (let offset = 1; offset <= 2; offset++) {
+      if (dayIdx + offset < schedule[sIdx].length) {
+        let nextShift = schedule[sIdx][dayIdx + offset];
+        if (highNames.includes(nextShift)) return true;
+      }
+    }
+    return false;
   }
 
   // -------------------------------------------------------------
-  // ✨ 強效人性化排班演算法 (高強度冷凍冷卻 + 全域極致打散)
+  // 🎲 重構版：全局亂數 + 強制冷卻洗牌算法
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -745,13 +736,14 @@
 
       initLockedMap();
 
-      const allShifts = [...baseShifts, supportShift];
-      const highIntensityShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
+      const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+      const midShifts = baseShifts.filter(s => s.level === '中').map(s => s.name);
+      const lowShifts = baseShifts.filter(s => s.level === '低').map(s => s.name);
 
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 1. 初始化鎖定與預約休假
+      // 1. 填入鎖定與預約休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -770,72 +762,71 @@
         });
       }
 
-      // 2. 每日輪替派班
-      for (let day = 1; day <= totalDays; day++) {
-        const dayIdx = day - 1;
+      // 2. 生成全月天數陣列並打亂 (Random Shuffle Days)
+      let daysOrder = Array.from({ length: totalDays }, (_, i) => i);
+      daysOrder.sort(() => Math.random() - 0.5);
 
+      // 先派全月的高強度 🔴，打破天數順序
+      daysOrder.forEach(dayIdx => {
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
-          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)" && newSchedule[sIdx][dayIdx] !== "休";
+          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)" && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
-        let assignedBaseShifts = [];
-        staffs.forEach((_, sIdx) => {
-          let val = newSchedule[sIdx][dayIdx];
-          if (val && val !== "休(预)" && val !== "休" && val !== supportShift.name) {
-            assignedBaseShifts.push(val);
+        highShifts.forEach(hShift => {
+          // 檢查今天是否已有鎖定的高強度班
+          let alreadyAssigned = staffs.some(s => newSchedule[s.idx || 0]?.[dayIdx] === hShift);
+          if (alreadyAssigned) return;
+
+          // 篩選出「不在冷卻期」的員工
+          let validCandidates = availableStaff.filter(sIdx => !isHighCoolingDown(newSchedule, sIdx, dayIdx, highShifts));
+          
+          // 如果大家都在冷卻，放寬到冷卻1天
+          if (validCandidates.length === 0) validCandidates = availableStaff;
+
+          if (validCandidates.length > 0) {
+            // 排序：優先給「高強度總數最少」且「隨機」的人
+            validCandidates.sort((a, b) => {
+              let countA = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[a][s.name] || 0) : sum, 0);
+              let countB = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[b][s.name] || 0) : sum, 0);
+              return countA - countB || (Math.random() - 0.5);
+            });
+
+            let chosenIdx = validCandidates[0];
+            newSchedule[chosenIdx][dayIdx] = hShift;
+            shiftCounts[chosenIdx][hShift] = (shiftCounts[chosenIdx][hShift] || 0) + 1;
+            availableStaff = availableStaff.filter(id => id !== chosenIdx);
           }
         });
+      });
 
-        let baseShiftsToAssign = baseShifts.map(s => s.name).filter(sName => {
-          let pos = assignedBaseShifts.indexOf(sName);
-          if (pos !== -1) {
-            assignedBaseShifts.splice(pos, 1);
-            return false;
-          }
-          return true;
+      // 3. 填入剩餘的中、低強度與支援班次 (按天派滿)
+      for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+        let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
+          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)" && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
-        // 優先派高強度崗位，才能優先發套用人性化冷卻機制
-        baseShiftsToAssign.sort((a, b) => {
-          let isHighA = highIntensityShiftNames.includes(a) ? 1 : 0;
-          let isHighB = highIntensityShiftNames.includes(b) ? 1 : 0;
-          return isHighB - isHighA;
+        let unassignedBase = baseShifts.filter(s => s.level !== '高').map(s => s.name).filter(sName => {
+          return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
 
-        for (let shiftName of baseShiftsToAssign) {
-          if (availableStaff.length === 0) break;
+        // 隨機打亂中低班次
+        unassignedBase.sort(() => Math.random() - 0.5);
 
-          const isHigh = highIntensityShiftNames.includes(shiftName);
+        unassignedBase.forEach(shiftName => {
+          if (availableStaff.length === 0) return;
 
-          availableStaff.sort((aIdx, bIdx) => {
-            let countA = shiftCounts[aIdx][shiftName] || 0;
-            let countB = shiftCounts[bIdx][shiftName] || 0;
-
-            let scoreA = countA * 10000;
-            let scoreB = countB * 10000;
-
-            // 高強度崗位：加上「人性化痛苦度評分」
-            if (isHigh) {
-              scoreA += getHighIntensityPainScore(newSchedule, aIdx, dayIdx, highIntensityShiftNames);
-              scoreB += getHighIntensityPainScore(newSchedule, bIdx, dayIdx, highIntensityShiftNames);
-            }
-
-            // 打散總高強度數
-            if (isHigh) {
-              let totalHighA = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[aIdx][s.name] || 0) : sum, 0);
-              let totalHighB = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[bIdx][s.name] || 0) : sum, 0);
-              scoreA += totalHighA * 2000;
-              scoreB += totalHighB * 2000;
-            }
-
-            return scoreA - scoreB;
+          availableStaff.sort((a, b) => {
+            let countA = shiftCounts[a][shiftName] || 0;
+            let countB = shiftCounts[b][shiftName] || 0;
+            return countA - countB || (Math.random() - 0.5);
           });
 
           let chosenIdx = availableStaff.shift();
           newSchedule[chosenIdx][dayIdx] = shiftName;
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
-        }
+        });
 
+        // 剩餘的人排支援
         while (availableStaff.length > 0) {
           let extraIdx = availableStaff.shift();
           newSchedule[extraIdx][dayIdx] = supportShift.name;
@@ -843,52 +834,7 @@
         }
       }
 
-      // 3. 階段三：人性化削峰與平滑打散（解決集中在月頭/月尾的問題）
-      let maxLoops = 30;
-      while (maxLoops-- > 0) {
-        let improved = false;
-
-        highIntensityShiftNames.forEach(highShift => {
-          staffs.forEach((_, sIdx) => {
-            for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-              if (newSchedule[sIdx][dayIdx] === highShift && !lockedMap[sIdx][dayIdx]) {
-                let currentPain = getHighIntensityPainScore(newSchedule, sIdx, dayIdx, highIntensityShiftNames);
-
-                // 如果這個高強度排在這裡痛苦指數很高，嘗試找人交換
-                if (currentPain >= 500) {
-                  for (let otherIdx = 0; otherIdx < staffs.length; otherIdx++) {
-                    if (otherIdx === sIdx) continue;
-                    if (lockedMap[otherIdx][dayIdx]) continue;
-
-                    let otherShift = newSchedule[otherIdx][dayIdx];
-                    if (!otherShift || otherShift === "休(预)" || otherShift === "休" || highIntensityShiftNames.includes(otherShift)) continue;
-
-                    let otherPainIfTaken = getHighIntensityPainScore(newSchedule, otherIdx, dayIdx, highIntensityShiftNames);
-
-                    // 如果其他人接這個班痛苦度低很多，那就進行交換！
-                    if (otherPainIfTaken < currentPain - 300) {
-                      newSchedule[sIdx][dayIdx] = otherShift;
-                      newSchedule[otherIdx][dayIdx] = highShift;
-
-                      shiftCounts[sIdx][highShift]--;
-                      shiftCounts[otherIdx][highShift] = (shiftCounts[otherIdx][highShift] || 0) + 1;
-                      shiftCounts[sIdx][otherShift] = (shiftCounts[sIdx][otherShift] || 0) + 1;
-                      shiftCounts[otherIdx][otherShift]--;
-
-                      improved = true;
-                      break;
-                    }
-                  }
-                }
-              }
-            }
-          });
-        });
-
-        if (!improved) break;
-      }
-
-      // 4. 補齊空白
+      // 4. 補齊空白為休(預)
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
@@ -902,8 +848,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 已完成人性化打散排班！`;
-      alert(`[${monthKey}] 排班成功！\n✔ 人性化升級：高強度崗位（🔴）已均勻打散至整月\n✔ 加入冷卻保護：避免隔天或短天數內連續重複高強度\n✔ 12 個崗位完整派滿，無任何空白`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 已完成全局洗牌打散排班！`;
+      alert(`[${monthKey}] 重新洗牌完成！\n✔ 已強制鎖定「高強度班次後至少冷卻 2 天」\n✔ 已打散 1~5 號密集的紅色高強度班次\n✔ 點擊按鈕可再次隨機洗牌`);
 
     } catch (err) {
       console.error(err);
