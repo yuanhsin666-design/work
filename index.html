@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表</title>
+  <title>智能动态排班工作表 (带锁定与解锁功能)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -13,7 +13,6 @@
     .form-group { display: flex; flex-direction: column; gap: 5px; }
     label { font-size: 13px; font-weight: bold; color: #555; }
     input, select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
-    textarea { resize: vertical; font-family: inherit; }
     
     .toolbar { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
     button { background: #0066cc; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
@@ -28,6 +27,8 @@
     button.success:hover { background: #157347; }
     button.copy-btn { background: #0d6efd; color: white; }
     button.copy-btn:hover { background: #0b5ed7; }
+    button.lock-btn { background: #6f42c1; color: white; }
+    button.lock-btn:hover { background: #593196; }
 
     .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; max-height: 180px; overflow-y: auto; }
     .tag { padding: 5px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s; user-select: none; }
@@ -39,15 +40,15 @@
     .tag-support { background: #cff4fc; color: #055160; border: 1px solid #b6effb; cursor: default; }
     .tag .level-badge { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 8px; font-weight: bold; font-size: 11px; }
     .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; margin-left: 4px; font-size: 14px; }
-    .tag .remove-btn:hover { color: #a94442; }
 
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; vertical-align: middle; }
+    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; vertical-align: middle; position: relative; }
     .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
-    .header-day { background: #f0f0f0; }
+    .header-day { background: #f0f0f0; cursor: pointer; }
+    .header-day:hover { background: #e0e0e0; }
     .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
-    .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 70px; }
+    .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 80px; }
 
     /* 🎨 岗位强度与休假样式 */
     .shift-low { background-color: #e8f5e9; color: #1b5e20; } 
@@ -62,9 +63,25 @@
     .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; position: sticky; bottom: 0; z-index: 4; }
     .row-daily-total .staff-name { background-color: #cbd5e1; color: #0f172a; position: sticky; left: 0; z-index: 6; }
 
-    .locked-day { position: relative; opacity: 0.85; }
-    .locked-header { background-color: #e2e8f0 !important; color: #475569; }
+    .cell-clickable { cursor: pointer; user-select: none; }
+    .cell-clickable:hover { outline: 2px dashed #6f42c1; outline-offset: -2px; }
+    
+    .cell-locked { position: relative; }
+    .cell-locked::after {
+      content: "🔒";
+      position: absolute;
+      top: 1px;
+      right: 1px;
+      font-size: 9px;
+      line-height: 1;
+      opacity: 0.8;
+    }
+    
+    .locked-header { background-color: #cbd5e1 !important; color: #334155; }
     .stat-total { background-color: #d97706; color: white; font-weight: bold; }
+    
+    .lock-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #f1f5f9; padding: 10px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
+    .lock-controls label { font-size: 13px; color: #334155; margin-right: 5px; }
   </style>
 </head>
 <body>
@@ -128,19 +145,27 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行智能均摊排班 (强中低穿插/全员非零/1~3次)</button>
-    <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
-    <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
+    <button onclick="generateSchedule()">✨ 执行智能均摊排班 (保留已锁定格子)</button>
     <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
 </div>
 
 <div class="card">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
     <h3 style="margin:0;">📅 排班工作表预览</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表 (带颜色+直式换行)</button>
   </div>
+
+  <!-- 🔒 新增：多维度锁定/解锁快捷控制栏 -->
+  <div class="lock-controls">
+    <label><b>🔐 排班锁定控制台：</b></label>
+    <button class="lock-btn" onclick="lockAllCells()">🔒 一键锁定全表班次</button>
+    <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁全表</button>
+    <button class="secondary" onclick="lockPastDays()">🗓️ 锁定今天之前的历史日期</button>
+    <span style="font-size: 12px; color: #64748b; margin-left: auto;">💡 提示：点击表头可<b>锁定/解锁整列</b>，点击员工名字可<b>锁定/解锁整行</b>，直接点击<b>单个单元格</b>可单独切换锁定。重新生成排班时，<b>已锁定班次不会被改变</b>。</span>
+  </div>
+
   <div class="table-container">
     <table id="scheduleTable"></table>
   </div>
@@ -179,7 +204,19 @@
 
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
   let lastGeneratedSchedule = null;
-  let forceUnlocked = false;
+  
+  // 🔒 单元格锁定状态二维数组: lockedMap[staffIndex][dayIndex] = boolean
+  let lockedMap = [];
+
+  function initLockedMap(forceReset = false) {
+    const year = parseInt(document.getElementById('yearSelect').value || new Date().getFullYear());
+    const month = parseInt(document.getElementById('monthSelect').value || (new Date().getMonth() + 1));
+    const totalDays = getDaysInMonth(year, month);
+
+    if (forceReset || !lockedMap || lockedMap.length !== staffs.length || (lockedMap[0] && lockedMap[0].length !== totalDays)) {
+      lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+    }
+  }
 
   function saveDataToLocal() {
     const year = document.getElementById('yearSelect').value;
@@ -190,16 +227,17 @@
       baseShifts: baseShifts,
       supportShift: supportShift,
       lastGeneratedSchedule: lastGeneratedSchedule,
+      lockedMap: lockedMap,
       year: year,
       month: month,
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
     
-    localStorage.setItem('auto_schedule_data_v17', JSON.stringify(dataToSave));
+    localStorage.setItem('auto_schedule_data_v18', JSON.stringify(dataToSave));
   }
 
   function loadDataFromLocal() {
-    const saved = localStorage.getItem('auto_schedule_data_v17');
+    const saved = localStorage.getItem('auto_schedule_data_v18');
     if (!saved) return false;
 
     try {
@@ -208,6 +246,7 @@
       if (data.baseShifts) baseShifts = data.baseShifts;
       if (data.supportShift) supportShift = data.supportShift;
       if (data.lastGeneratedSchedule) lastGeneratedSchedule = data.lastGeneratedSchedule;
+      if (data.lockedMap) lockedMap = data.lockedMap;
       
       if (data.year) document.getElementById('yearSelect').value = data.year;
       if (data.month) document.getElementById('monthSelect').value = data.month;
@@ -221,8 +260,8 @@
   }
 
   function resetAllData() {
-    if (confirm("确定要重置所有保存的数据吗？")) {
-      localStorage.removeItem('auto_schedule_data_v17');
+    if (confirm("确定要重置所有保存的数据和锁定状态吗？")) {
+      localStorage.removeItem('auto_schedule_data_v18');
       location.reload();
     }
   }
@@ -356,15 +395,6 @@
     return new Date(year, month, 0).getDate();
   }
 
-  function isDayLocked(year, month, day) {
-    if (forceUnlocked) return false;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const targetDate = new Date(year, month - 1, day);
-    targetDate.setHours(0, 0, 0, 0);
-    return targetDate < today;
-  }
-
   function updateSelect() {
     const select = document.getElementById('staffSelect');
     select.innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');
@@ -440,6 +470,7 @@
     const name = document.getElementById('newName').value.trim();
     if (!name) return alert('请输入员工姓名');
     staffs.push({ name, customRests: [] });
+    initLockedMap(true);
     document.getElementById('newName').value = '';
     updateSelect();
     renderAll();
@@ -451,6 +482,7 @@
     const idx = document.getElementById('staffSelect').value;
     const removedName = staffs[idx].name;
     staffs.splice(idx, 1);
+    initLockedMap(true);
     updateSelect();
     renderAll();
     saveDataToLocal();
@@ -464,24 +496,102 @@
     alert('已清空所有员工休假。');
   }
 
-  function unlockAllDays() {
-    forceUnlocked = true;
-    renderAll();
-    alert("已解锁所有日期！");
-  }
-
-  function lockPastDaysManually() {
-    forceUnlocked = false;
-    renderAll();
-    alert("已重新锁定历史日期！");
-  }
-
   function onDateChange() {
     staffs.forEach(s => s.customRests = []);
     lastGeneratedSchedule = null;
-    forceUnlocked = false;
+    initLockedMap(true);
     renderAll();
     saveDataToLocal();
+  }
+
+  /* ----------------🔒 锁定与解锁控制逻辑---------------- */
+  function toggleCellLock(sIdx, dayIdx) {
+    if (!lockedMap[sIdx]) return;
+    lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];
+    renderAll();
+    saveDataToLocal();
+  }
+
+  function toggleColumnLock(dayIdx) {
+    initLockedMap();
+    let allLocked = staffs.every((_, sIdx) => lockedMap[sIdx][dayIdx]);
+    staffs.forEach((_, sIdx) => {
+      lockedMap[sIdx][dayIdx] = !allLocked;
+    });
+    renderAll();
+    saveDataToLocal();
+  }
+
+  function toggleRowLock(sIdx) {
+    initLockedMap();
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    
+    let allLocked = true;
+    for (let d = 0; d < totalDays; d++) {
+      if (!lockedMap[sIdx][d]) {
+        allLocked = false;
+        break;
+      }
+    }
+
+    for (let d = 0; d < totalDays; d++) {
+      lockedMap[sIdx][d] = !allLocked;
+    }
+    renderAll();
+    saveDataToLocal();
+  }
+
+  function lockAllCells() {
+    initLockedMap();
+    staffs.forEach((_, sIdx) => {
+      for (let d = 0; d < lockedMap[sIdx].length; d++) {
+        lockedMap[sIdx][d] = true;
+      }
+    });
+    renderAll();
+    saveDataToLocal();
+    alert("🔒 全表班次已锁定！再次执行自动排班时将保留当前结果。");
+  }
+
+  function unlockAllCells() {
+    initLockedMap();
+    staffs.forEach((_, sIdx) => {
+      for (let d = 0; d < lockedMap[sIdx].length; d++) {
+        lockedMap[sIdx][d] = false;
+      }
+    });
+    renderAll();
+    saveDataToLocal();
+    alert("🔓 全表已解锁！执行排班时将全量重新排列。");
+  }
+
+  function lockPastDays() {
+    initLockedMap();
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let count = 0;
+    for (let day = 1; day <= totalDays; day++) {
+      const targetDate = new Date(year, month - 1, day);
+      targetDate.setHours(0, 0, 0, 0);
+
+      if (targetDate < today) {
+        staffs.forEach((_, sIdx) => {
+          lockedMap[sIdx][day - 1] = true;
+        });
+        count++;
+      }
+    }
+
+    renderAll();
+    saveDataToLocal();
+    alert(`🗓️ 已锁定 ${count} 天历史日期的班次！`);
   }
 
   function getShiftClass(shiftName) {
@@ -502,13 +612,16 @@
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
+    initLockedMap();
 
     let html = `<thead><tr>
       <th rowspan="2" class="header-month">${month}月</th>`;
     
     for(let i=1; i<=totalDays; i++) {
-      let isLocked = isDayLocked(year, month, i);
-      html += `<th class="${isLocked ? 'locked-header' : ''}">${i}${isLocked ? '🔒' : ''}</th>`;
+      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
+      html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})" title="点击锁定/解锁【第 ${i} 日】整列">
+        ${i} ${isColLocked ? '🔒' : ''}
+      </th>`;
     }
     html += `</tr><tr class="header-day">`;
     
@@ -516,20 +629,26 @@
       let dateObj = new Date(year, month - 1, i);
       let dayOfWeek = dateObj.getDay();
       let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-      let isLocked = isDayLocked(year, month, i);
-      html += `<th class="${isWeekend ? 'weekend' : ''} ${isLocked ? 'locked-header' : ''}">${weekDays[dayOfWeek]}</th>`;
+      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
+      html += `<th class="header-day ${isWeekend ? 'weekend' : ''} ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})" title="点击锁定/解锁【第 ${i} 日】整列">
+        ${weekDays[dayOfWeek]}
+      </th>`;
     }
     html += `</tr></thead><tbody>`;
 
     let dailyWorkingTotals = Array(totalDays).fill(0);
 
     staffs.forEach((staff, sIdx) => {
+      let isRowLocked = lockedMap[sIdx] && lockedMap[sIdx].every(v => v);
+      
       html += `<tr>
-        <td class="staff-name">${staff.name}</td>`;
+        <td class="staff-name cell-clickable ${isRowLocked ? 'locked-header' : ''}" onclick="toggleRowLock(${sIdx})" title="点击锁定/解锁【${staff.name}】全月行">
+          ${staff.name} ${isRowLocked ? '🔒' : ''}
+        </td>`;
       
       for(let day=1; day<=totalDays; day++) {
         let cellContent = "";
-        let isLocked = isDayLocked(year, month, day);
+        let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
 
         if (scheduleData && scheduleData[sIdx]) {
           cellContent = scheduleData[sIdx][day - 1];
@@ -542,9 +661,9 @@
         }
 
         let cellClass = getShiftClass(cellContent);
-        if (isLocked) cellClass += " locked-day";
+        if (isLocked) cellClass += " cell-locked";
 
-        html += `<td class="${cellClass}">${cellContent}</td>`;
+        html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})" title="点击单独切换锁定状态">${cellContent}</td>`;
       }
       html += `</tr>`;
     });
@@ -567,7 +686,7 @@
       <th class="header-month">姓名</th>`;
     
     baseShifts.forEach(shift => {
-      let badge = shift.level === '高' ? '🔴' : (shift.level === ' চূ' ? '🟡' : '🟢');
+      let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');
       let headerClass = shift.level === '高' ? 'shift-high' : (shift.level === '中' ? 'shift-mid' : 'shift-low');
       html += `<th class="${headerClass}">${badge}<br>${shift.name}</th>`;
     });
@@ -624,10 +743,9 @@
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
 
-    // 克隆表格副本，将 CSS Class 转换为 Excel 兼容的 inline style（内联样式）
     const cloneTable = table.cloneNode(true);
 
-    // 复制计算后的实际样式（背景色、文字颜色、加粗、对齐）
+    // 移除克隆表格中纯 UI 用的 lock 标记，保留纯干净文字与背景
     const origCells = table.querySelectorAll('th, td');
     const cloneCells = cloneTable.querySelectorAll('th, td');
 
@@ -635,7 +753,6 @@
       const computed = window.getComputedStyle(origCell);
       const cloneCell = cloneCells[index];
 
-      // 将内联样式写入克隆节点
       cloneCell.style.backgroundColor = computed.backgroundColor;
       cloneCell.style.color = computed.color;
       cloneCell.style.fontWeight = computed.fontWeight;
@@ -645,13 +762,12 @@
       cloneCell.style.fontSize = "12px";
       cloneCell.style.verticalAlign = "middle";
       
-      // 💡 Excel 兼容性核心：使用 Excel 专用的单元格内换行标签 <br style="mso-data-placement:same-cell;">
       let cellText = origCell.innerText || origCell.textContent;
+      cellText = cellText.replace(/🔒/g, '').trim();
       let htmlText = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
       cloneCell.innerHTML = htmlText;
     });
 
-    // 构造完整的 HTML 字符串，设置 mso 属性以确保 Excel 自动开启【自动换行 (Wrap Text)】
     const htmlWrapper = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
       <head>
@@ -685,7 +801,6 @@
         await navigator.clipboard.write([item]);
         alert("✅ 已复制整表（含颜色 + 直式换行）！直接在 Excel 中按 Ctrl+V 粘贴即可！");
       } else {
-        // 兼容旧版浏览器的 Rich Text 选择复制法
         const container = document.createElement('div');
         container.innerHTML = htmlWrapper;
         container.style.position = 'fixed';
@@ -710,11 +825,12 @@
     }
   }
 
-  // ----------------智能多轮优选排班引擎（含强中低穿插算法）----------------
+  // ----------------智能多轮优选排班引擎（含锁定保留）----------------
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
+    initLockedMap();
 
     let bestSchedule = null;
     let minPenalty = Infinity;
@@ -725,48 +841,70 @@
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 继承锁定日期的已排班次
+      // 继承已排班且已锁定的单元格班次
       for (let day = 1; day <= totalDays; day++) {
-        if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
-          staffs.forEach((_, sIdx) => {
+        staffs.forEach((_, sIdx) => {
+          let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
+          if (isLocked && lastGeneratedSchedule && lastGeneratedSchedule[sIdx] && lastGeneratedSchedule[sIdx][day - 1]) {
             let currentShift = lastGeneratedSchedule[sIdx][day - 1];
             scheduleData[sIdx][day - 1] = currentShift;
             if (currentShift && currentShift !== "休" && currentShift !== "休(预)") {
               shiftCounts[sIdx][currentShift] = (shiftCounts[sIdx][currentShift] || 0) + 1;
             }
-          });
-        }
+          }
+        });
       }
 
       for (let day = 1; day <= totalDays; day++) {
-        if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
-          continue;
-        }
-
         let availableStaffIndexes = [];
         staffs.forEach((staff, idx) => {
-          if (!staff.customRests.includes(day)) {
+          let isLocked = lockedMap[idx] && lockedMap[idx][day - 1];
+          if (!isLocked && !staff.customRests.includes(day)) {
             availableStaffIndexes.push(idx);
           }
         });
 
-        let workingCount = availableStaffIndexes.length;
-        let todayShifts = [];
-        if (workingCount <= baseShifts.length) {
-          todayShifts = baseShifts.slice(0, workingCount);
+        // 统计当天尚未被锁定占用的班次需求
+        let lockedShiftsToday = [];
+        staffs.forEach((_, sIdx) => {
+          if (lockedMap[sIdx] && lockedMap[sIdx][day - 1]) {
+            let sName = scheduleData[sIdx][day - 1];
+            if (sName && sName !== "休" && sName !== "休(预)") {
+              lockedShiftsToday.push(sName);
+            }
+          }
+        });
+
+        let totalWorkingToday = staffs.filter((s, idx) => {
+          let isLocked = lockedMap[idx] && lockedMap[idx][day - 1];
+          if (isLocked) {
+            let val = scheduleData[idx][day - 1];
+            return val && val !== "休" && val !== "休(预)";
+          }
+          return !s.customRests.includes(day);
+        }).length;
+
+        let neededShifts = [];
+        if (totalWorkingToday <= baseShifts.length) {
+          neededShifts = baseShifts.slice(0, totalWorkingToday).map(s => s.name);
         } else {
-          todayShifts = [...baseShifts];
-          let extraSupportCount = workingCount - baseShifts.length;
-          for (let s = 0; s < extraSupportCount; s++) {
-            todayShifts.push(supportShift);
+          neededShifts = baseShifts.map(s => s.name);
+          let extraSupport = totalWorkingToday - baseShifts.length;
+          for (let s = 0; s < extraSupport; s++) {
+            neededShifts.push(supportShift.name);
           }
         }
 
-        let shuffledShifts = [...todayShifts].sort(() => Math.random() - 0.5);
+        // 扣除已经被锁定的岗位
+        lockedShiftsToday.forEach(lShift => {
+          let idx = neededShifts.indexOf(lShift);
+          if (idx !== -1) neededShifts.splice(idx, 1);
+        });
+
+        let shuffledShifts = [...neededShifts].sort(() => Math.random() - 0.5);
         let unassignedStaff = [...availableStaffIndexes];
 
-        shuffledShifts.forEach(shiftObj => {
-          let shiftName = shiftObj.name;
+        shuffledShifts.forEach(shiftName => {
           let currentLevel = getShiftLevel(shiftName);
           let isSupport = (currentLevel === "支援");
 
@@ -876,16 +1014,16 @@
     lastGeneratedSchedule = bestSchedule;
     renderAll();
     saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已生成【强中低动态穿插】最优排班方案！`;
+    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案（已自动保留锁定班次）！`;
   }
 
   // 初始化
   initDateSelectors();
   loadDataFromLocal();
+  initLockedMap();
   updateSelect();
   renderShifts();
   renderAll();
 </script>
 
 </body>
-</html>
