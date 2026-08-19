@@ -12,7 +12,8 @@
     .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 15px; }
     .form-group { display: flex; flex-direction: column; gap: 5px; }
     label { font-size: 13px; font-weight: bold; color: #555; }
-    input, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+    input, select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+    textarea { resize: vertical; font-family: inherit; }
     
     .toolbar { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
     button { background: #0066cc; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
@@ -55,26 +56,26 @@
       </div>
     </div>
 
-    <!-- 2. 新增/移除员工 -->
+    <!-- 2. 单个新增/移除员工 -->
     <div class="form-group">
-      <label>👥 员工管理：</label>
-      <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-        <input type="text" id="newName" placeholder="姓名 (如: 小明)" style="flex: 1;">
-        <input type="text" id="newRests" placeholder="休假日 (如: 5,12,19)" style="flex: 2;">
-      </div>
+      <label>👥 员工管理 (单人)：</label>
       <div style="display: flex; gap: 5px;">
-        <button onclick="addStaff()" style="flex: 1;">添加员工及休假</button>
-        <button class="danger" onclick="removeStaff()" style="flex: 1;">移除选中员工</button>
+        <input type="text" id="newName" placeholder="员工姓名" style="flex: 1;">
+        <button onclick="addStaff()">添加</button>
+        <button class="danger" onclick="removeStaff()">移除选中员工</button>
+      </div>
+      <div style="margin-top: 5px;">
+        <select id="staffSelect" style="width: 100%;"></select>
       </div>
     </div>
 
-    <!-- 3. 追加指定休假 -->
-    <div class="form-group">
-      <label>📌 快速补充单日休假：</label>
-      <div style="display: flex; gap: 5px;">
-        <select id="staffSelect" style="flex:1;"></select>
-        <input type="number" id="restDay" placeholder="日期" min="1" max="31" style="width: 80px;">
-        <button class="secondary" onclick="addCustomRest()">追加休假</button>
+    <!-- 3. 批量贴上休假日 (新功能) -->
+    <div class="form-group" style="grid-column: 1 / -1;">
+      <label>📋 批量导入所有员工休假日 (格式: 名字 1,2,3)：</label>
+      <textarea id="batchRestInput" rows="4" placeholder="支持多行贴上，例如：&#10;大抠 5, 12, 19&#10;妮妮 3 10 17 24&#10;阿翔 1, 8, 15"></textarea>
+      <div style="display: flex; gap: 5px; margin-top: 5px;">
+        <button class="secondary" onclick="importBatchRests()">📥 一键读取并更新休假日</button>
+        <button class="danger" onclick="clearAllRests()">🗑️ 清空所有休假</button>
       </div>
     </div>
 
@@ -91,7 +92,7 @@
 
   <div class="toolbar">
     <button onclick="generateSchedule()">✨ 执行智能排班</button>
-    <span id="status" style="color: #666; font-size: 13px;">系统将根据每日实际上班人数自动匹配 12 岗位或 13 岗位（包含支援）</span>
+    <span id="status" style="color: #666; font-size: 13px;">可批量贴上休假，系统将自动分配岗位</span>
   </div>
 </div>
 
@@ -113,14 +114,11 @@
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name, customRests: [] }));
 
-  // 12个基础固定岗位
   let baseShifts = [
     "OL\nFB\nLY\nJY", "MT\nXO\nSH\nYS", "ND\n2500\n以下", "ND\n中大\n2501\n以上\nXH",
     "HS\n3000\n以下\nSY", "HS大\n3001\n以上\nXY", "YD", "RF\n3000\n以下\nJD",
     "RF\n3001\n以上\nLS", "TD\n1000\n以下", "TD\n1001\n5000", "TD\n5001\n以上"
   ];
-  
-  // 第13个支援岗位
   let supportShift = "支援\nND\nHS\nYD";
 
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
@@ -158,7 +156,6 @@
       </div>
     `).join('');
 
-    // 绘制支援岗位
     html += `
       <div class="tag support">
         <span>[支援] ${supportShift.replace(/\n/g, ' ')}</span>
@@ -186,22 +183,10 @@
 
   function addStaff() {
     const name = document.getElementById('newName').value.trim();
-    const restsInput = document.getElementById('newRests').value.trim();
     if (!name) return alert('请输入员工姓名');
 
-    const year = parseInt(document.getElementById('yearSelect').value);
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const totalDays = getDaysInMonth(year, month);
-
-    let parsedRests = [];
-    if (restsInput) {
-      const rawNumbers = restsInput.split(/[,，\s]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
-      parsedRests = rawNumbers.filter(day => day >= 1 && day <= totalDays);
-    }
-
-    staffs.push({ name, customRests: parsedRests });
+    staffs.push({ name, customRests: [] });
     document.getElementById('newName').value = '';
-    document.getElementById('newRests').value = '';
     
     updateSelect();
     renderAll();
@@ -217,22 +202,48 @@
     alert(`已移除员工：${removedName}`);
   }
 
-  function addCustomRest() {
+  // 批量读取并更新休假日逻辑
+  function importBatchRests() {
+    const text = document.getElementById('batchRestInput').value.trim();
+    if (!text) return alert('请填入休假文本数据！');
+
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
 
-    const idx = document.getElementById('staffSelect').value;
-    if (idx === null || idx === undefined || !staffs[idx]) return;
-    
-    const day = parseInt(document.getElementById('restDay').value);
-    if (!day || day < 1 || day > totalDays) return alert(`请输入有效的日期 (1-${totalDays})`);
-    
-    if (!staffs[idx].customRests.includes(day)) {
-      staffs[idx].customRests.push(day);
-    }
-    document.getElementById('restDay').value = '';
+    const lines = text.split('\n');
+    let matchCount = 0;
+
+    lines.forEach(line => {
+      if (!line.trim()) return;
+      
+      // 解析每一行：前段为姓名，后续提取所有数字
+      const tokens = line.trim().split(/[\s:：,，]+/);
+      if (tokens.length < 1) return;
+
+      const name = tokens[0];
+      const staff = staffs.find(s => s.name === name);
+
+      if (staff) {
+        matchCount++;
+        // 抓取该行所有数字作为休假日
+        const rawNumbers = line.match(/\d+/g) || [];
+        const days = rawNumbers.map(n => parseInt(n)).filter(d => d >= 1 && d <= totalDays);
+        
+        // 覆盖更新或去重合并
+        staff.customRests = Array.from(new Set(days));
+      }
+    });
+
     renderAll();
+    alert(`批量休假更新完毕！成功匹配 ${matchCount} 位员工的休假。`);
+  }
+
+  function clearAllRests() {
+    staffs.forEach(s => s.customRests = []);
+    document.getElementById('batchRestInput').value = '';
+    renderAll();
+    alert('已清空所有员工的指定休假。');
   }
 
   function onDateChange() {
@@ -321,7 +332,6 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
-  // 核心排班算法 (自动判定12/13人上班逻辑)
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -330,7 +340,6 @@
     let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
 
     for (let day = 1; day <= totalDays; day++) {
-      // 找到当天没有预定休假的员工列表
       let availableStaffIndexes = [];
       staffs.forEach((staff, idx) => {
         if (!staff.customRests.includes(day)) {
@@ -338,23 +347,19 @@
         }
       });
 
-      // 打乱当天上班人员次序
       availableStaffIndexes.sort(() => Math.random() - 0.5);
 
       let workingCount = availableStaffIndexes.length;
       let activeShifts = [...baseShifts];
 
-      // 如果上班人数 >= 13，追加 1 个支援岗位
       if (workingCount >= 13) {
         activeShifts.push(supportShift);
       }
 
-      // 依序分配岗位给当天的上班员工
       availableStaffIndexes.forEach((staffIdx, i) => {
         if (i < activeShifts.length) {
           scheduleData[staffIdx][day - 1] = activeShifts[i];
         } else {
-          // 如果多于岗位数，自动排休
           scheduleData[staffIdx][day - 1] = "休";
         }
       });
