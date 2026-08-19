@@ -76,7 +76,7 @@
     <!-- 3. 批量贴上休假日 -->
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>📋 批量导入所有员工休假日 (格式: 名字 1,2,3)：</label>
-      <textarea id="batchRestInput" rows="3" placeholder="支持多行贴上，例如：&#10;大抠 5, 12, 19&#10;妮妮 3 10 17 24&#10;阿翔 1, 8, 15"></textarea>
+      <textarea id="batchRestInput" rows="4" placeholder="支持多行贴上，例如：&#10;大抠 2,3,7,11,16,20,25,26&#10;孙孙 1, 5, 10, 15&#10;宏 1,4,9,15,16,25,27,28"></textarea>
       <div style="display: flex; gap: 5px; margin-top: 5px;">
         <button class="secondary" onclick="importBatchRests()">📥 一键读取并更新休假日</button>
         <button class="danger" onclick="clearAllRests()">🗑️ 清空所有休假</button>
@@ -149,12 +149,11 @@
     return new Date(year, month, 0).getDate();
   }
 
-  // 修改：只锁定今日以前的日期 (targetDate < today，不包含当天)
   function isDayLocked(year, month, day) {
     if (forceUnlocked) return false;
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // 抹平时间，只比对日期
+    today.setHours(0, 0, 0, 0);
 
     const targetDate = new Date(year, month - 1, day);
     targetDate.setHours(0, 0, 0, 0);
@@ -222,6 +221,7 @@
     alert(`已移除员工：${removedName}`);
   }
 
+  // 改进版：兼容繁简名字 & 改进各种文本格式抓取
   function importBatchRests() {
     const text = document.getElementById('batchRestInput').value.trim();
     if (!text) return alert('请填入休假文本数据！');
@@ -234,17 +234,27 @@
     let matchCount = 0;
 
     lines.forEach(line => {
-      if (!line.trim()) return;
+      let cleanLine = line.trim();
+      if (!cleanLine) return;
       
-      const tokens = line.trim().split(/[\s:：,，]+/);
-      if (tokens.length < 1) return;
+      // 找到行首的名字 (匹配中文/英文/数字/特殊符号，遇到空格或第一个数字终止)
+      let nameMatch = cleanLine.match(/^[^\d\s,:：]+/);
+      if (!nameMatch) return;
 
-      const name = tokens[0];
-      const staff = staffs.find(s => s.name === name);
+      let inputName = nameMatch[0].trim();
+
+      // 在员工列表里寻找匹配的员工（包含简繁转换兼容，例如 孙孙 <-> 孫孫）
+      const staff = staffs.find(s => {
+        if (s.name === inputName) return true;
+        if (s.name === "孫孫" && inputName === "孙孙") return true;
+        if (s.name === "孙孙" && inputName === "孫孫") return true;
+        return false;
+      });
 
       if (staff) {
         matchCount++;
-        const rawNumbers = line.match(/\d+/g) || [];
+        // 抓取该行名字之后出现的全部数字
+        const rawNumbers = cleanLine.match(/\d+/g) || [];
         const days = rawNumbers.map(n => parseInt(n)).filter(d => d >= 1 && d <= totalDays);
         staff.customRests = Array.from(new Set(days));
       }
