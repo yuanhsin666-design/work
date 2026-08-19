@@ -45,24 +45,193 @@
       <label>📅 选择排班月份：</label>
       <div style="display: flex; gap: 5px;">
         <select id="yearSelect" style="flex:1;" onchange="onDateChange()"></select>
-        <select id="monthSelect" style="flex:1;" onchange="已为您整理现有员工名单，共 **17** 位：
+        <select id="monthSelect" style="flex:1;" onchange="onDateChange()"></select>
+      </div>
+    </div>
 
-* 大抠
-* 宏
-* YU
-* 妮妮
-* 靓靓
-* 阿翔
-* Kay
-* 达西
-* Q娜
-* 海绵
-* 闵诗
-* DKK
-* 施施
-* 小克
-* 小兔
-* 孫孫
-* 小美
+    <!-- 2. 新增/移除员工 -->
+    <div class="form-group">
+      <label>👥 员工管理：</label>
+      <div style="display: flex; gap: 5px;">
+        <input type="text" id="newName" placeholder="姓名" style="flex:1;">
+        <button onclick="addStaff()">添加</button>
+        <button class="danger" onclick="removeStaff()">移除选中员工</button>
+      </div>
+    </div>
 
-请随时告诉我您需要**新增**还是**移除**哪些员工（例如：“新增：小明”、“移除：大抠”），我会为您同步更新名单！
+    <!-- 3. 指定员工休假 -->
+    <div class="form-group">
+      <label>📌 设定指定休假：</label>
+      <div style="display: flex; gap: 5px;">
+        <select id="staffSelect" style="flex:1;"></select>
+        <input type="number" id="restDay" placeholder="日期" min="1" max="31" style="width: 80px;">
+        <button class="secondary" onclick="addCustomRest()">设定休假</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button onclick="generateSchedule()">✨ 执行自动排班</button>
+    <span id="status" style="color: #666; font-size: 13px;">选择月份后自动计算当月天数与星期</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>📅 排班工作表预览</h3>
+  <div class="table-container">
+    <table id="scheduleTable"></table>
+  </div>
+</div>
+
+<script>
+  // 17 位默认员工名单
+  let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
+  let staffs = defaultNames.map(name => ({ name, customRests: [] }));
+
+  const shiftsPool = ["JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
+  const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+
+  function initDateSelectors() {
+    const yearSelect = document.getElementById('yearSelect');
+    const monthSelect = document.getElementById('monthSelect');
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+
+    for (let y = currentYear - 1; y <= currentYear + 2; y++) {
+      yearSelect.innerHTML += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y} 年</option>`;
+    }
+    for (let m = 1; m <= 12; m++) {
+      monthSelect.innerHTML += `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m} 月</option>`;
+    }
+  }
+
+  function getDaysInMonth(year, month) {
+    return new Date(year, month, 0).getDate();
+  }
+
+  function updateSelect() {
+    const select = document.getElementById('staffSelect');
+    select.innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');
+  }
+
+  function addStaff() {
+    const name = document.getElementById('newName').value.trim();
+    if (!name) return alert('请输入员工姓名');
+    
+    staffs.push({ name, customRests: [] });
+    document.getElementById('newName').value = '';
+    updateSelect();
+    renderTable();
+  }
+
+  function removeStaff() {
+    if (staffs.length === 0) return;
+    const idx = document.getElementById('staffSelect').value;
+    const removedName = staffs[idx].name;
+    staffs.splice(idx, 1);
+    updateSelect();
+    renderTable();
+    alert(`已移除员工：${removedName}`);
+  }
+
+  function addCustomRest() {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+
+    const idx = document.getElementById('staffSelect').value;
+    if (idx === null || idx === undefined || !staffs[idx]) return;
+    
+    const day = parseInt(document.getElementById('restDay').value);
+    
+    if (!day || day < 1 || day > totalDays) return alert(`请输入有效的日期 (1-${totalDays})`);
+    
+    if (!staffs[idx].customRests.includes(day)) {
+      staffs[idx].customRests.push(day);
+    }
+    document.getElementById('restDay').value = '';
+    alert(`已为 ${staffs[idx].name} 锁定 ${month}月${day}日 为指定休假！`);
+    renderTable();
+  }
+
+  function onDateChange() {
+    staffs.forEach(s => s.customRests = []);
+    renderTable();
+  }
+
+  function renderTable(scheduleData = null) {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+
+    let html = `<thead><tr>
+      <th rowspan="2" class="header-month">${month}月</th>`;
+    
+    for(let i=1; i<=totalDays; i++) html += `<th>${i}</th>`;
+    html += `</tr><tr class="header-day">`;
+    
+    for(let i=1; i<=totalDays; i++) {
+      let dateObj = new Date(year, month - 1, i);
+      let dayOfWeek = dateObj.getDay();
+      let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+      html += `<th class="${isWeekend ? 'weekend' : ''}">${weekDays[dayOfWeek]}</th>`;
+    }
+    html += `</tr></thead><tbody>`;
+
+    staffs.forEach((staff, sIdx) => {
+      html += `<tr>
+        <td class="staff-name">${staff.name}</td>`;
+      
+      for(let day=1; day<=totalDays; day++) {
+        let cellContent = "-";
+        let cellClass = "shift-work";
+
+        if (scheduleData && scheduleData[sIdx]) {
+          cellContent = scheduleData[sIdx][day - 1];
+        } else if (staff.customRests.includes(day)) {
+          cellContent = "休(预)";
+          cellClass = "shift-休";
+        }
+
+        if (cellContent === "休" || cellContent === "休(预)") cellClass = "shift-休";
+        html += `<td class="${cellClass}">${cellContent}</td>`;
+      }
+      html += `</tr>`;
+    });
+    
+    html += `</tbody>`;
+    document.getElementById('scheduleTable').innerHTML = html;
+  }
+
+  function generateSchedule() {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+
+    let scheduleData = [];
+
+    staffs.forEach(staff => {
+      let row = [];
+      for(let day=1; day<=totalDays; day++) {
+        if (staff.customRests.includes(day)) {
+          row.push("休");
+        } else {
+          let isRest = Math.random() < 0.2;
+          let shift = isRest ? "休" : shiftsPool[Math.floor(Math.random() * shiftsPool.length)];
+          row.push(shift);
+        }
+      }
+      scheduleData.push(row);
+    });
+
+    renderTable(scheduleData);
+    document.getElementById('status').innerText = `${year}年${month}月 排班计算完成！`;
+  }
+
+  initDateSelectors();
+  updateSelect();
+  renderTable();
+</script>
+
+</body>
+</html>
