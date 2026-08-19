@@ -95,7 +95,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行智能排班 (仅更新含今日及未来日期)</button>
+    <button onclick="generateSchedule()">✨ 执行智能轮调排班 (保证每人均轮岗)</button>
     <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
     <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
     <span id="status" style="color: #666; font-size: 13px;"></span>
@@ -221,7 +221,6 @@
     alert(`已移除员工：${removedName}`);
   }
 
-  // 改进版：兼容繁简名字 & 改进各种文本格式抓取
   function importBatchRests() {
     const text = document.getElementById('batchRestInput').value.trim();
     if (!text) return alert('请填入休假文本数据！');
@@ -237,13 +236,11 @@
       let cleanLine = line.trim();
       if (!cleanLine) return;
       
-      // 找到行首的名字 (匹配中文/英文/数字/特殊符号，遇到空格或第一个数字终止)
       let nameMatch = cleanLine.match(/^[^\d\s,:：]+/);
       if (!nameMatch) return;
 
       let inputName = nameMatch[0].trim();
 
-      // 在员工列表里寻找匹配的员工（包含简繁转换兼容，例如 孙孙 <-> 孫孫）
       const staff = staffs.find(s => {
         if (s.name === inputName) return true;
         if (s.name === "孫孫" && inputName === "孙孙") return true;
@@ -253,7 +250,6 @@
 
       if (staff) {
         matchCount++;
-        // 抓取该行名字之后出现的全部数字
         const rawNumbers = cleanLine.match(/\d+/g) || [];
         const days = rawNumbers.map(n => parseInt(n)).filter(d => d >= 1 && d <= totalDays);
         staff.customRests = Array.from(new Set(days));
@@ -377,6 +373,7 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
+  // 高级公平轮岗排班算法
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -386,15 +383,27 @@
       ? JSON.parse(JSON.stringify(lastGeneratedSchedule))
       : Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
 
-    let updatedDaysCount = 0;
+    // 初始化统计每人已分配岗位次数 (用于公平轮配)
+    let shiftCounts = staffs.map(() => ({}));
 
     for (let day = 1; day <= totalDays; day++) {
       if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
+        // 如果此天已锁定，记录已被占用的岗位天数
+        staffs.forEach((_, sIdx) => {
+          let currentShift = scheduleData[sIdx][day - 1];
+          if (currentShift && currentShift !== "休" && currentShift !== "休(预)") {
+            shiftCounts[sIdx][currentShift] = (shiftCounts[sIdx][currentShift] || 0) + 1;
+          }
+        });
         continue;
       }
 
-      updatedDaysCount++;
+      // 重置当天的记录
+      staffs.forEach((_, idx) => {
+        scheduleData[idx][day - 1] = "休";
+      });
 
+      // 选出当天没休假的上班人员
       let availableStaffIndexes = [];
       staffs.forEach((staff, idx) => {
         if (!staff.customRests.includes(day)) {
@@ -402,31 +411,35 @@
         }
       });
 
-      availableStaffIndexes.sort(() => Math.random() - 0.5);
-
       let workingCount = availableStaffIndexes.length;
       let activeShifts = [...baseShifts];
-
       if (workingCount >= 13) {
         activeShifts.push(supportShift);
       }
 
-      staffs.forEach((_, idx) => {
-        scheduleData[idx][day - 1] = "休";
-      });
+      // 对当天岗位按贪心分配算法匹配最合适员工 (未做过该岗位或做过次数最少的优先)
+      let unassignedStaff = [...availableStaffIndexes];
 
-      availableStaffIndexes.forEach((staffIdx, i) => {
-        if (i < activeShifts.length) {
-          scheduleData[staffIdx][day - 1] = activeShifts[i];
-        } else {
-          scheduleData[staffIdx][day - 1] = "休";
-        }
+      activeShifts.forEach(shift => {
+        if (unassignedStaff.length === 0) return;
+
+        // 在未分配员工中找到在这个岗位做过最多次数最小的人
+        unassignedStaff.sort((a, b) => {
+          let countA = shiftCounts[a][shift] || 0;
+          let countB = shiftCounts[b][shift] || 0;
+          if (countA !== countB) return countA - countB;
+          return Math.random() - 0.5; // 次数相同时随机
+        });
+
+        let chosenStaffIdx = unassignedStaff.shift();
+        scheduleData[chosenStaffIdx][day - 1] = shift;
+        shiftCounts[chosenStaffIdx][shift] = (shiftCounts[chosenStaffIdx][shift] || 0) + 1;
       });
     }
 
     lastGeneratedSchedule = scheduleData;
     renderAll();
-    document.getElementById('status').innerText = `${year}年${month}月 排班计算完毕！(包含当天与未来共有 ${updatedDaysCount} 天参与计算，跳过并保留了 ${totalDays - updatedDaysCount} 个已过完的历史日期)`;
+    document.getElementById('status').innerText = `${year}年${month}月 全员轮配排班算法执行完毕！`;
   }
 
   initDateSelectors();
