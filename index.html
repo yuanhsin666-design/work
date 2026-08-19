@@ -27,7 +27,7 @@
     .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; }
     .tag .remove-btn:hover { color: #a94442; }
 
-    .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; }
+    .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
     th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; }
     .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
@@ -37,6 +37,7 @@
 
     .shift-休 { background-color: #d1e7dd; color: #0f5132; font-weight: bold; }
     .shift-work { background-color: #ffffff; color: #333; }
+    .stat-total { background-color: #d97706; color: white; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -77,7 +78,7 @@
       </div>
     </div>
 
-    <!-- 4. 工作岗位/班别管理 (新增) -->
+    <!-- 4. 工作岗位管理 -->
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>🏷️ 每日工作岗位/班别管理 (点击 × 可移除)：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px;">
@@ -90,7 +91,7 @@
 
   <div class="toolbar">
     <button onclick="generateSchedule()">✨ 执行自动排班</button>
-    <span id="status" style="color: #666; font-size: 13px;">选择月份与设置岗位后，点击执行自动排班</span>
+    <span id="status" style="color: #666; font-size: 13px;">点击自动排班，下方将自动计算岗位次数</span>
   </div>
 </div>
 
@@ -101,13 +102,21 @@
   </div>
 </div>
 
+<div class="card">
+  <h3>📊 员工岗位次数统计</h3>
+  <div class="table-container">
+    <table id="statsTable"></table>
+  </div>
+</div>
+
 <script>
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name, customRests: [] }));
 
-  // 可动态增加或移除的岗位池
   let shiftsPool = ["JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+
+  let lastGeneratedSchedule = null;
 
   function initDateSelectors() {
     const yearSelect = document.getElementById('yearSelect');
@@ -132,7 +141,6 @@
     select.innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');
   }
 
-  // 岗位管理逻辑
   function renderShifts() {
     const container = document.getElementById('shiftsContainer');
     container.innerHTML = shiftsPool.map((shift, idx) => `
@@ -150,12 +158,14 @@
     shiftsPool.push(val);
     input.value = '';
     renderShifts();
+    renderAll();
   }
 
   function removeShift(idx) {
     if (shiftsPool.length <= 1) return alert('请至少保留一个岗位！');
     shiftsPool.splice(idx, 1);
     renderShifts();
+    renderAll();
   }
 
   function addStaff() {
@@ -175,12 +185,11 @@
     }
 
     staffs.push({ name, customRests: parsedRests });
-    
     document.getElementById('newName').value = '';
     document.getElementById('newRests').value = '';
     
     updateSelect();
-    renderTable();
+    renderAll();
   }
 
   function removeStaff() {
@@ -189,7 +198,7 @@
     const removedName = staffs[idx].name;
     staffs.splice(idx, 1);
     updateSelect();
-    renderTable();
+    renderAll();
     alert(`已移除员工：${removedName}`);
   }
 
@@ -202,19 +211,19 @@
     if (idx === null || idx === undefined || !staffs[idx]) return;
     
     const day = parseInt(document.getElementById('restDay').value);
-    
     if (!day || day < 1 || day > totalDays) return alert(`请输入有效的日期 (1-${totalDays})`);
     
     if (!staffs[idx].customRests.includes(day)) {
       staffs[idx].customRests.push(day);
     }
     document.getElementById('restDay').value = '';
-    renderTable();
+    renderAll();
   }
 
   function onDateChange() {
     staffs.forEach(s => s.customRests = []);
-    renderTable();
+    lastGeneratedSchedule = null;
+    renderAll();
   }
 
   function renderTable(scheduleData = null) {
@@ -261,6 +270,42 @@
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
+  // 渲染岗位次数统计表
+  function renderStatsTable(scheduleData = null) {
+    let html = `<thead><tr>
+      <th class="header-month">姓名</th>`;
+    
+    // 岗位表头
+    shiftsPool.forEach(shift => {
+      html += `<th class="header-day">${shift}</th>`;
+    });
+    html += `<th class="stat-total">上班总天数</th></tr></thead><tbody>`;
+
+    staffs.forEach((staff, sIdx) => {
+      html += `<tr><td class="staff-name">${staff.name}</td>`;
+      
+      let workCountTotal = 0;
+      shiftsPool.forEach(shift => {
+        let count = 0;
+        if (scheduleData && scheduleData[sIdx]) {
+          count = scheduleData[sIdx].filter(item => item === shift).length;
+        }
+        workCountTotal += count;
+        html += `<td>${count}</td>`;
+      });
+
+      html += `<td class="stat-total">${workCountTotal}</td></tr>`;
+    });
+
+    html += `</tbody>`;
+    document.getElementById('statsTable').innerHTML = html;
+  }
+
+  function renderAll() {
+    renderTable(lastGeneratedSchedule);
+    renderStatsTable(lastGeneratedSchedule);
+  }
+
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -282,14 +327,15 @@
       scheduleData.push(row);
     });
 
-    renderTable(scheduleData);
-    document.getElementById('status').innerText = `${year}年${month}月 排班计算完成！`;
+    lastGeneratedSchedule = scheduleData;
+    renderAll();
+    document.getElementById('status').innerText = `${year}年${month}月 排班与统计计算完成！`;
   }
 
   initDateSelectors();
   updateSelect();
   renderShifts();
-  renderTable();
+  renderAll();
 </script>
 
 </body>
