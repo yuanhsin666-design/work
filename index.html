@@ -95,15 +95,15 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行智能排班 (仅更新未锁定日期)</button>
+    <button onclick="generateSchedule()">✨ 执行智能排班 (仅更新含今日及未来日期)</button>
     <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
-    <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定今日前日期</button>
+    <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
     <span id="status" style="color: #666; font-size: 13px;"></span>
   </div>
 </div>
 
 <div class="card">
-  <h3>📅 排班工作表预览 <span style="font-size: 12px; font-weight: normal; color: #666;">(带 🔒 标识或灰底的日期表示已锁定)</span></h3>
+  <h3>📅 排班工作表预览 <span style="font-size: 12px; font-weight: normal; color: #666;">(带 🔒 标识的日期表示已过完并锁定)</span></h3>
   <div class="table-container">
     <table id="scheduleTable"></table>
   </div>
@@ -129,7 +129,7 @@
 
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
   let lastGeneratedSchedule = null;
-  let forceUnlocked = false; // 是否强制解锁标志
+  let forceUnlocked = false;
 
   function initDateSelectors() {
     const yearSelect = document.getElementById('yearSelect');
@@ -149,15 +149,17 @@
     return new Date(year, month, 0).getDate();
   }
 
-  // 判断指定日期是否应该被自动锁定 (过完的日期/过去的月份)
+  // 修改：只锁定今日以前的日期 (targetDate < today，不包含当天)
   function isDayLocked(year, month, day) {
     if (forceUnlocked) return false;
 
     const today = new Date();
-    const targetDate = new Date(year, month - 1, day);
-    today.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0); // 抹平时间，只比对日期
 
-    return targetDate <= today;
+    const targetDate = new Date(year, month - 1, day);
+    targetDate.setHours(0, 0, 0, 0);
+
+    return targetDate < today;
   }
 
   function updateSelect() {
@@ -268,7 +270,7 @@
   function lockPastDaysManually() {
     forceUnlocked = false;
     renderAll();
-    alert("已重新锁定过完的日期！");
+    alert("已重新锁定今天以前的历史日期！");
   }
 
   function onDateChange() {
@@ -365,13 +367,11 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
-  // 核心排班算法 (加入锁定日期跳过逻辑)
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
 
-    // 初始化排班数组或沿用上次的已锁定数据
     let scheduleData = lastGeneratedSchedule 
       ? JSON.parse(JSON.stringify(lastGeneratedSchedule))
       : Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
@@ -379,7 +379,6 @@
     let updatedDaysCount = 0;
 
     for (let day = 1; day <= totalDays; day++) {
-      // 校验该日是否已锁定，锁定则跳过计算，维持原状
       if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
         continue;
       }
@@ -402,7 +401,6 @@
         activeShifts.push(supportShift);
       }
 
-      // 重置未锁定当天的所有人状态为休，再重排
       staffs.forEach((_, idx) => {
         scheduleData[idx][day - 1] = "休";
       });
@@ -418,7 +416,7 @@
 
     lastGeneratedSchedule = scheduleData;
     renderAll();
-    document.getElementById('status').innerText = `${year}年${month}月 排班计算完毕！(已跳过并保留 ${totalDays - updatedDaysCount} 个已锁定日期的排班)`;
+    document.getElementById('status').innerText = `${year}年${month}月 排班计算完毕！(包含当天与未来共有 ${updatedDaysCount} 天参与计算，跳过并保留了 ${totalDays - updatedDaysCount} 个已过完的历史日期)`;
   }
 
   initDateSelectors();
