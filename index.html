@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智能排班工作表</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+    .toolbar { margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+    button { background: #0066cc; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
+    button:hover { background: #0052a3; }
+    .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; }
+    table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 45px; white-space: pre-line; }
+    .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; }
+    .header-day { background: #f0f0f0; }
+    .weekend { color: #d9534f; font-weight: bold; }
+    .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 60px; }
+    /* 班次配色方案 */
+    .shift-休 { background-color: #d1e7dd; color: #0f5132; font-weight: bold; }
+    .shift-work { background-color: #ffffff; color: #333; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>📅 智能自动排班工作表</h2>
+  <div class="toolbar">
+    <button onclick="generateSchedule()">✨ 一键自动排班</button>
+    <span id="status" style="color: #666; font-size: 13px;">点击按钮自动生成本月班表</span>
+  </div>
+
+  <div class="table-container">
+    <table id="scheduleTable">
+      <!-- 动态渲染表格 -->
+    </table>
+  </div>
+</div>
+
+<script>
+  const staffs = ["大枢", "宏", "YU", "妮妮"];
+  const shiftsPool = ["休", "JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
+
+  function initTable() {
+    let html = `<thead><tr><th rowspan="2" class="header-month">8月</th>`;
+    // 日期行
+    for(let i=1; i<=31; i++) html += `<th>${i}</th>`;
+    html += `</tr><tr class="header-day">`;
+    // 星期行
+    for(let i=1; i<=31; i++) {
+      let isWeekend = (i % 7 === 6 || i % 7 === 0);
+      html += `<th class="${isWeekend ? 'weekend' : ''}">${isWeekend ? '六' : '一'}</th>`;
+    }
+    html += `</tr></thead><tbody id="tbody">`;
+    
+    // 默认空数据
+    staffs.forEach(name => {
+      html += `<tr><td class="staff-name">${name}</td>`;
+      for(let i=1; i<=31; i++) html += `<td class="shift-work">-</td>`;
+      html += `</tr>`;
+    });
+    html += `</tbody>`;
+    document.getElementById('scheduleTable').innerHTML = html;
+  }
+
+  // 自动排班逻辑
+  function generateSchedule() {
+    let tbodyHtml = '';
+    staffs.forEach(name => {
+      tbodyHtml += `<tr><td class="staff-name">${name}</td>`;
+      for(let i=1; i<=31; i++) {
+        let isRest = Math.random() < 0.25;
+        let randomShift = isRest ? "休" : shiftsPool[Math.floor(Math.random() * (shiftsPool.length - 1)) + 1];
+        let cellClass = randomShift === "休" ? "shift-休" : "shift-work";
+        
+        tbodyHtml += `<td class="${cellClass}">${randomShift}</td>`;
+      }
+      tbodyHtml += `</tr>`;
+    });
+    document.getElementById('tbody').innerHTML = tbodyHtml;
+    document.getElementById('status').innerText = "排班已成功生成！";
+  }
+
+  // 初始化
+  initTable();
+</script>
+
+</body>
+</html>
