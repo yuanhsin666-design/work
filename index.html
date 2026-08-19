@@ -6,18 +6,32 @@
   <title>智能排班工作表</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
-    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-    .toolbar { margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    h2, h3 { margin-top: 0; color: #1a4f8b; }
+    
+    /* 控制面板样式 */
+    .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 15px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    label { font-size: 13px; font-weight: bold; color: #555; }
+    input, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+    
+    .toolbar { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
     button { background: #0066cc; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
     button:hover { background: #0052a3; }
+    button.secondary { background: #6c757d; }
+    button.secondary:hover { background: #5a6268; }
+
+    /* 表格样式 */
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 45px; white-space: pre-line; }
+    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; }
     .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; }
     .header-day { background: #f0f0f0; }
     .weekend { color: #d9534f; font-weight: bold; }
-    .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 60px; }
-    /* 班次配色方案 */
+    .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 70px; }
+    .staff-pos { background: #f4f4f4; color: #666; font-size: 11px; }
+
+    /* 班次配色 */
     .shift-休 { background-color: #d1e7dd; color: #0f5132; font-weight: bold; }
     .shift-work { background-color: #ffffff; color: #333; }
   </style>
@@ -25,65 +39,155 @@
 <body>
 
 <div class="card">
-  <h2>📅 智能自动排班工作表</h2>
-  <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 一键自动排班</button>
-    <span id="status" style="color: #666; font-size: 13px;">点击按钮自动生成本月班表</span>
+  <h2>⚙️ 排班管理设置</h2>
+  
+  <div class="control-grid">
+    <!-- 1. 新增人员与岗位 -->
+    <div class="form-group">
+      <label>新增员工与岗位：</label>
+      <div style="display: flex; gap: 5px;">
+        <input type="text" id="newName" placeholder="姓名 (如: 小明)" style="flex:1;">
+        <input type="text" id="newPos" placeholder="岗位 (如: 柜台)" style="flex:1;">
+        <button onclick="addStaff()">添加</button>
+      </div>
+    </div>
+
+    <!-- 2. 指定员工休假 -->
+    <div class="form-group">
+      <label>设定指定休假：</label>
+      <div style="display: flex; gap: 5px;">
+        <select id="staffSelect" style="flex:1;"></select>
+        <input type="number" id="restDay" placeholder="日期 (1-31)" min="1" max="31" style="width: 90px;">
+        <button class="secondary" onclick="addCustomRest()">设定指定休</button>
+      </div>
+    </div>
   </div>
 
+  <div class="toolbar">
+    <button onclick="generateSchedule()">✨ 执行自动排班</button>
+    <span id="status" style="color: #666; font-size: 13px;">可先设定指定休假，再点击执行自动排班</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>📅 排班工作表预览</h3>
   <div class="table-container">
-    <table id="scheduleTable">
-      <!-- 动态渲染表格 -->
-    </table>
+    <table id="scheduleTable"></table>
   </div>
 </div>
 
 <script>
-  const staffs = ["大枢", "宏", "YU", "妮妮"];
-  const shiftsPool = ["休", "JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
+  // 基础人员与岗位数据
+  let staffs = [
+    { name: "大枢", pos: "主管", customRests: [] },
+    { name: "宏", pos: "收银", customRests: [] },
+    { name: "YU", pos: "理货", customRests: [] },
+    { name: "妮妮", pos: "门市", customRests: [] }
+  ];
 
-  function initTable() {
-    let html = `<thead><tr><th rowspan="2" class="header-month">8月</th>`;
-    // 日期行
+  // 岗位工作班次库 (岗位/班次代码/具体工作)
+  const shiftsPool = ["JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
+
+  // 更新下拉选单
+  function updateSelect() {
+    const select = document.getElementById('staffSelect');
+    select.innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name} (${s.pos})</option>`).join('');
+  }
+
+  // 功能 1：新增人员与岗位
+  function addStaff() {
+    const name = document.getElementById('newName').value.trim();
+    const pos = document.getElementById('newPos').value.trim() || '通用';
+    if (!name) return alert('请输入员工姓名');
+    
+    staffs.push({ name, pos, customRests: [] });
+    document.getElementById('newName').value = '';
+    document.getElementById('newPos').value = '';
+    updateSelect();
+    renderTable();
+  }
+
+  // 功能 3：添加指定休假
+  function addCustomRest() {
+    const idx = document.getElementById('staffSelect').value;
+    const day = parseInt(document.getElementById('restDay').value);
+    if (!day || day < 1 || day > 31) return alert('请输入有效的日期 (1-31)');
+    
+    if (!staffs[idx].customRests.includes(day)) {
+      staffs[idx].customRests.push(day);
+    }
+    document.getElementById('restDay').value = '';
+    alert(`已为 ${staffs[idx].name} 锁定 ${day} 号为指定休假！`);
+    renderTable();
+  }
+
+  // 渲染基础表格
+  function renderTable(scheduleData = null) {
+    let html = `<thead><tr>
+      <th rowspan="2" class="header-month">8月</th>
+      <th rowspan="2" class="header-day">岗位</th>`;
+    
     for(let i=1; i<=31; i++) html += `<th>${i}</th>`;
     html += `</tr><tr class="header-day">`;
-    // 星期行
     for(let i=1; i<=31; i++) {
       let isWeekend = (i % 7 === 6 || i % 7 === 0);
       html += `<th class="${isWeekend ? 'weekend' : ''}">${isWeekend ? '六' : '一'}</th>`;
     }
-    html += `</tr></thead><tbody id="tbody">`;
-    
-    // 默认空数据
-    staffs.forEach(name => {
-      html += `<tr><td class="staff-name">${name}</td>`;
-      for(let i=1; i<=31; i++) html += `<td class="shift-work">-</td>`;
+    html += `</tr></thead><tbody>`;
+
+    staffs.forEach((staff, sIdx) => {
+      html += `<tr>
+        <td class="staff-name">${staff.name}</td>
+        <td class="staff-pos">${staff.pos}</td>`;
+      
+      for(let day=1; day<=31; day++) {
+        let cellContent = "-";
+        let cellClass = "shift-work";
+
+        if (scheduleData) {
+          cellContent = scheduleData[sIdx][day - 1];
+        } else if (staff.customRests.includes(day)) {
+          cellContent = "休(预)";
+          cellClass = "shift-休";
+        }
+
+        if (cellContent === "休" || cellContent === "休(预)") cellClass = "shift-休";
+        html += `<td class="${cellClass}">${cellContent}</td>`;
+      }
       html += `</tr>`;
     });
+    
     html += `</tbody>`;
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
-  // 自动排班逻辑
+  // 功能：自动排班（结合指定休假与随机生成）
   function generateSchedule() {
-    let tbodyHtml = '';
-    staffs.forEach(name => {
-      tbodyHtml += `<tr><td class="staff-name">${name}</td>`;
-      for(let i=1; i<=31; i++) {
-        let isRest = Math.random() < 0.25;
-        let randomShift = isRest ? "休" : shiftsPool[Math.floor(Math.random() * (shiftsPool.length - 1)) + 1];
-        let cellClass = randomShift === "休" ? "shift-休" : "shift-work";
-        
-        tbodyHtml += `<td class="${cellClass}">${randomShift}</td>`;
+    let scheduleData = [];
+
+    staffs.forEach(staff => {
+      let row = [];
+      for(let day=1; day<=31; day++) {
+        // 如果是员工指定的休假日，直接排“休”
+        if (staff.customRests.includes(day)) {
+          row.push("休");
+        } else {
+          // 否则随机排班或轮休
+          let isRest = Math.random() < 0.2; // 20% 随机休假概率
+          let shift = isRest ? "休" : shiftsPool[Math.floor(Math.random() * shiftsPool.length)];
+          row.push(shift);
+        }
       }
-      tbodyHtml += `</tr>`;
+      scheduleData.push(row);
     });
-    document.getElementById('tbody').innerHTML = tbodyHtml;
-    document.getElementById('status').innerText = "排班已成功生成！";
+
+    renderTable(scheduleData);
+    document.getElementById('status').innerText = "自动排班计算完成！指定休假日已优先保留。";
   }
 
   // 初始化
-  initTable();
+  updateSelect();
+  renderTable();
 </script>
 
 </body>
