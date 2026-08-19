@@ -708,7 +708,8 @@
 
     let bestSchedule = null, minPenalty = Infinity;
 
-    for (let iter = 0; iter < 250; iter++) {
+    // 多次疊代以尋找符合條件的最佳解答
+    for (let iter = 0; iter < 400; iter++) {
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
       let shiftCounts = staffs.map(() => ({}));
 
@@ -764,10 +765,36 @@
         shuffledShifts.forEach(shiftName => {
           if (unassignedStaff.length === 0) return;
 
+          let shiftLevel = getShiftLevel(shiftName);
+
+          // 排序候選人，套用排班限制規則
           unassignedStaff.sort((a, b) => {
+            // 規則二：檢查高強度連三
+            if (shiftLevel === "高") {
+              let aRecentHigh = (day > 2 && getShiftLevel(scheduleData[a][day - 2]) === "高" && getShiftLevel(scheduleData[a][day - 3]) === "高");
+              let bRecentHigh = (day > 2 && getShiftLevel(scheduleData[b][day - 2]) === "高" && getShiftLevel(scheduleData[b][day - 3]) === "高");
+              if (aRecentHigh && !bRecentHigh) return 1;
+              if (!aRecentHigh && bRecentHigh) return -1;
+            }
+
+            // 規則三：支援崗位輪流平攤（滿1次才許第2次，滿2次才許第3次）
+            if (shiftName === supportShift.name) {
+              let aSupp = shiftCounts[a][supportShift.name] || 0;
+              let bSupp = shiftCounts[b][supportShift.name] || 0;
+              if (aSupp !== bSupp) return aSupp - bSupp;
+            }
+
+            // 規則一與三：優先安排該崗位次數較少者（追求 >0 且不超過 3 次）
             let countA = shiftCounts[a][shiftName] || 0;
             let countB = shiftCounts[b][shiftName] || 0;
+
             if (countA !== countB) return countA - countB;
+
+            // 若次數相同，優先指派「總排班次數較少者」
+            let totalA = Object.values(shiftCounts[a]).reduce((sum, v) => sum + v, 0);
+            let totalB = Object.values(shiftCounts[b]).reduce((sum, v) => sum + v, 0);
+            if (totalA !== totalB) return totalA - totalB;
+
             return Math.random() - 0.5;
           });
 
@@ -777,15 +804,34 @@
         });
       }
 
-      // 3. 計算均勻度懲罰值 (以找出最佳均勻解)
+      // 3. 評估與計算懲罰分數 (Penalty Score)
       let penalty = 0;
       let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
+
+      // A. 全員每個崗位不可為 0 (強懲罰)
       staffs.forEach((_, sIdx) => {
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          if (count === 0) penalty += 1000;
-          penalty += Math.pow(count, 2);
+          if (count === 0) penalty += 5000; // 違背「每個人都要輪到」
+          if (count > 3 && shiftName !== supportShift.name) penalty += (count - 3) * 2000; // 違背「最多3次」
         });
+      });
+
+      // B. 支援崗位極致平攤懲罰
+      let supportCounts = staffs.map((_, sIdx) => shiftCounts[sIdx][supportShift.name] || 0);
+      let minSupp = Math.min(...supportCounts);
+      let maxSupp = Math.max(...supportCounts);
+      if (maxSupp - minSupp > 1) penalty += (maxSupp - minSupp) * 3000;
+
+      // C. 高強度不可連三
+      staffs.forEach((_, sIdx) => {
+        for (let d = 0; d < totalDays - 2; d++) {
+          if (getShiftLevel(scheduleData[sIdx][d]) === "高" &&
+              getShiftLevel(scheduleData[sIdx][d + 1]) === "高" &&
+              getShiftLevel(scheduleData[sIdx][d + 2]) === "高") {
+            penalty += 10000;
+          }
+        }
       });
 
       if (penalty < minPenalty) { 
@@ -797,7 +843,7 @@
     lastGeneratedSchedule = bestSchedule;
     renderAll();
     await saveDataToLocal();
-    document.getElementById('status').innerText = "✅ 当月智能均摊排班完成！";
+    document.getElementById('status').innerText = "✅ 已套用新規則生成當月最佳排班！";
   }
 
   // -------------------------------------------------------------
