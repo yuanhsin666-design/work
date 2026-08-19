@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (嚴格12崗位優先+支援補空版)</title>
+  <title>智能动态排班工作表 (嚴格12崗位優先+高強度不連三版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -67,7 +67,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 月份隔离保存 + ☁️ Supabase 云端同步)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #198754; font-weight: normal;">(🗓️ 月份隔离保存 + 🛡️ 高强度不连三机制)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -115,7 +115,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行【12崗位優先+無空白】智能排班</button>
+    <button onclick="generateSchedule()">✨ 执行【12崗位優先+防高強度連三】智能排班</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -706,8 +706,32 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
+  // 🛡️ 輔助函式：檢查某員工在當天若接此崗位，是否會造成「高強度連續三天（含）以上」
+  function checkCausesConsecutiveHigh(schedule, sIdx, dayIdx, shiftName, highNames) {
+    if (!highNames.includes(shiftName)) return false; // 不是高強度崗位，沒問題
+
+    // 往前算連續高強度天數
+    let prevHighCount = 0;
+    for (let d = dayIdx - 1; d >= 0; d--) {
+      let shift = schedule[sIdx][d];
+      if (highNames.includes(shift)) prevHighCount++;
+      else break;
+    }
+
+    // 往後算連續高強度天數
+    let nextHighCount = 0;
+    for (let d = dayIdx + 1; d < schedule[sIdx].length; d++) {
+      let shift = schedule[sIdx][d];
+      if (highNames.includes(shift)) nextHighCount++;
+      else break;
+    }
+
+    // 如果把今天算進去，連續天數 >= 3 則算違規
+    return (prevHighCount + 1 + nextHighCount) >= 3;
+  }
+
   // -------------------------------------------------------------
-  // ✨ 強效排班演算法 (嚴格兩階段：12基礎崗優先 -> 支援補空缺 -> 削峰)
+  // ✨ 強效排班演算法 (12基礎崗優先 -> 支援補空缺 -> 防高強度連三 -> 削峰)
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -751,7 +775,7 @@
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)" && newSchedule[sIdx][dayIdx] !== "休";
         });
 
-        // 找出已鎖定的基礎崗位
+        // 找出當天已鎖定的基礎崗位
         let assignedBaseShifts = [];
         staffs.forEach((_, sIdx) => {
           let val = newSchedule[sIdx][dayIdx];
@@ -760,7 +784,7 @@
           }
         });
 
-        // 🎯 階段 A：先篩選出「尚未發放的 12 個基礎崗位」
+        // 🎯 階段 A：篩選出當天「尚未發放的基礎崗位」
         let baseShiftsToAssign = baseShifts.map(s => s.name).filter(sName => {
           let pos = assignedBaseShifts.indexOf(sName);
           if (pos !== -1) {
@@ -770,20 +794,33 @@
           return true;
         });
 
-        // 按累計次數排序基礎崗位，優先發放全局次數較少的崗位
+        // 優先派發高強度崗位，確保高強度有足夠的人選可以避開連三
         baseShiftsToAssign.sort((a, b) => {
+          let isHighA = highIntensityShiftNames.includes(a) ? 1 : 0;
+          let isHighB = highIntensityShiftNames.includes(b) ? 1 : 0;
+          if (isHighA !== isHighB) return isHighB - isHighA;
+
           let countA = staffs.reduce((sum, _, idx) => sum + (shiftCounts[idx][a] || 0), 0);
           let countB = staffs.reduce((sum, _, idx) => sum + (shiftCounts[idx][b] || 0), 0);
           return countA - countB;
         });
 
-        // 依序將 12 個基礎崗位派給最適合的員工
+        // 依序派班
         for (let shiftName of baseShiftsToAssign) {
-          if (availableStaff.length === 0) break; // 若當天上班人數不足12人
+          if (availableStaff.length === 0) break;
 
           const isHigh = highIntensityShiftNames.includes(shiftName);
 
+          // 排序人員
           availableStaff.sort((aIdx, bIdx) => {
+            // 🛡️ 檢查是否會造成高強度連三
+            let aConsecutive = checkCausesConsecutiveHigh(newSchedule, aIdx, dayIdx, shiftName, highIntensityShiftNames);
+            let bConsecutive = checkCausesConsecutiveHigh(newSchedule, bIdx, dayIdx, shiftName, highIntensityShiftNames);
+
+            if (aConsecutive !== bConsecutive) {
+              return aConsecutive ? 1 : -1; // 會造成連三的排後面
+            }
+
             let countA = shiftCounts[aIdx][shiftName] || 0;
             let countB = shiftCounts[bIdx][shiftName] || 0;
 
@@ -802,12 +839,13 @@
             return scoreA - scoreB;
           });
 
+          // 選出最合適的人
           let chosenIdx = availableStaff.shift();
           newSchedule[chosenIdx][dayIdx] = shiftName;
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
         }
 
-        // 🎯 階段 B：12個基礎崗位通通發完後，如果還有剩餘的人，才全部派去「支援崗」！
+        // 🎯 階段 B：基礎崗完畢，多餘人員派去「支援崗」
         while (availableStaff.length > 0) {
           let extraIdx = availableStaff.shift();
           newSchedule[extraIdx][dayIdx] = supportShift.name;
@@ -815,7 +853,7 @@
         }
       }
 
-      // 3. 階段三：削峰填谷迴圈 (消除 0 次，嚴禁產生空白)
+      // 3. 階段三：削峰填谷迴圈 (消除 0 次 + 嚴防高強度連三)
       let maxLoops = 25;
       while (maxLoops-- > 0) {
         let hasZero = false;
@@ -845,10 +883,15 @@
                   if (lockedMap[donorIdx][dayIdx] || newSchedule[donorIdx][dayIdx] !== shiftName) continue;
 
                   let targetOriginalShift = newSchedule[zeroStaffIdx][dayIdx];
-                  // 必須確保交換目標不是空的或休假
                   if (!targetOriginalShift || targetOriginalShift === "休(预)" || targetOriginalShift === "休") continue;
 
-                  // 安全進行班次交換
+                  // 🛡️ 換班防護：檢查換班後是否會造成任何一人高強度連三
+                  let testCausesZero = checkCausesConsecutiveHigh(newSchedule, zeroStaffIdx, dayIdx, shiftName, highIntensityShiftNames);
+                  let testCausesDonor = checkCausesConsecutiveHigh(newSchedule, donorIdx, dayIdx, targetOriginalShift, highIntensityShiftNames);
+
+                  if (testCausesZero || testCausesDonor) continue; // 會引發高強度連三則放棄此換班選項
+
+                  // 安全交換
                   newSchedule[zeroStaffIdx][dayIdx] = shiftName;
                   newSchedule[donorIdx][dayIdx] = targetOriginalShift;
 
@@ -867,7 +910,7 @@
         if (!hasZero) break;
       }
 
-      // 4. 🔥 最終防禦：全局掃描，任何沒有排到班的人強制補「休(預)」
+      // 4. 🔥 最終防禦：補齊空白
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
@@ -881,8 +924,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 完美排班完成，12崗位完整發放且無空白！`;
-      alert(`[${monthKey}] 排班成功！\n✔ 12 個基礎崗位已優先排滿\n✔ 多出的人員已正確補入支援崗位\n✔ 全表無任何空白格子`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 完美排班完成，12崗位完整且防高強度連三！`;
+      alert(`[${monthKey}] 排班成功！\n✔ 12 個基礎崗位優先派滿\n✔ 嚴格防護：高強度崗位（🔴）不連續三天值班\n✔ 多出人員派入支援崗\n✔ 全表無任何空白`);
 
     } catch (err) {
       console.error(err);
