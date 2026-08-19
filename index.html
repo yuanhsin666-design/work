@@ -881,7 +881,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班成功！\n✔ 崗位均勻覆蓋（不為 0）\n✔ 高強度無連續 3 天且每人最多 2 次\n✔ 每個崗位最多 3 次\n✔ 支援崗位嚴格階梯式輪替`);
+      alert(`[${monthKey}] 智能排班成功！\n✔ 崗位均勻覆蓋（不為 0）\n✔ 高強度無連續 3 天且每個高強度崗位每人最多 2 次\n✔ 每個崗位最多 3 次\n✔ 支援崗位嚴格階梯式輪替`);
 
     } catch (err) {
       console.error(err);
