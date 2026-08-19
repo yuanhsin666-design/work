@@ -22,6 +22,11 @@
     button.danger { background: #d9534f; }
     button.danger:hover { background: #c9302c; }
 
+    .tag-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; padding: 6px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; max-height: 80px; overflow-y: auto; }
+    .tag { background: #e9ecef; color: #495057; padding: 2px 8px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 4px; }
+    .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; }
+    .tag .remove-btn:hover { color: #a94442; }
+
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
     th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; }
@@ -49,12 +54,12 @@
       </div>
     </div>
 
-    <!-- 2. 新增/移除员工 (支持输入休假日) -->
+    <!-- 2. 新增/移除员工 -->
     <div class="form-group">
       <label>👥 员工管理：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px;">
         <input type="text" id="newName" placeholder="姓名 (如: 小明)" style="flex: 1;">
-        <input type="text" id="newRests" placeholder="休假日 (用逗号分割, 如: 5,12,19)" style="flex: 2;">
+        <input type="text" id="newRests" placeholder="休假日 (如: 5,12,19)" style="flex: 2;">
       </div>
       <div style="display: flex; gap: 5px;">
         <button onclick="addStaff()" style="flex: 1;">添加员工及休假</button>
@@ -71,11 +76,21 @@
         <button class="secondary" onclick="addCustomRest()">追加休假</button>
       </div>
     </div>
+
+    <!-- 4. 工作岗位/班别管理 (新增) -->
+    <div class="form-group" style="grid-column: 1 / -1;">
+      <label>🏷️ 每日工作岗位/班别管理 (点击 × 可移除)：</label>
+      <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+        <input type="text" id="newShift" placeholder="输入新岗位/班别 (如: 柜台 或 JD/JY)" style="flex:1;">
+        <button onclick="addShift()">添加岗位</button>
+      </div>
+      <div class="tag-container" id="shiftsContainer"></div>
+    </div>
   </div>
 
   <div class="toolbar">
     <button onclick="generateSchedule()">✨ 执行自动排班</button>
-    <span id="status" style="color: #666; font-size: 13px;">添加员工或设定休假后直接预览班表</span>
+    <span id="status" style="color: #666; font-size: 13px;">选择月份与设置岗位后，点击执行自动排班</span>
   </div>
 </div>
 
@@ -90,7 +105,8 @@
   let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
   let staffs = defaultNames.map(name => ({ name, customRests: [] }));
 
-  const shiftsPool = ["JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
+  // 可动态增加或移除的岗位池
+  let shiftsPool = ["JD\nJY\nYS", "支援\nND", "RF\n1001", "HS大\n3001", "ND\n2500", "TD\n1000", "MT\nXO"];
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
 
   function initDateSelectors() {
@@ -116,7 +132,32 @@
     select.innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');
   }
 
-  // 新增员工并自动带入休假日
+  // 岗位管理逻辑
+  function renderShifts() {
+    const container = document.getElementById('shiftsContainer');
+    container.innerHTML = shiftsPool.map((shift, idx) => `
+      <div class="tag">
+        <span>${shift.replace(/\n/g, ' ')}</span>
+        <span class="remove-btn" onclick="removeShift(${idx})">×</span>
+      </div>
+    `).join('');
+  }
+
+  function addShift() {
+    const input = document.getElementById('newShift');
+    const val = input.value.trim();
+    if (!val) return alert('请输入岗位或班别名称');
+    shiftsPool.push(val);
+    input.value = '';
+    renderShifts();
+  }
+
+  function removeShift(idx) {
+    if (shiftsPool.length <= 1) return alert('请至少保留一个岗位！');
+    shiftsPool.splice(idx, 1);
+    renderShifts();
+  }
+
   function addStaff() {
     const name = document.getElementById('newName').value.trim();
     const restsInput = document.getElementById('newRests').value.trim();
@@ -129,7 +170,6 @@
 
     let parsedRests = [];
     if (restsInput) {
-      // 提取所有数字，过滤掉非法日期
       const rawNumbers = restsInput.split(/[,，\s]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
       parsedRests = rawNumbers.filter(day => day >= 1 && day <= totalDays);
     }
@@ -248,6 +288,7 @@
 
   initDateSelectors();
   updateSelect();
+  renderShifts();
   renderTable();
 </script>
 
