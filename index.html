@@ -563,9 +563,8 @@
   }
 
   function getShiftClass(shiftName) {
-    if (!shiftName) return "shift-empty";
-    if (shiftName === "休") return "shift-休";
-    if (shiftName === "休(预)") return "shift-休预";
+    if (!shiftName) return "";
+    if (shiftName === "休" || shiftName === "休(预)") return "";
     if (shiftName === supportShift.name) return "shift-support";
     let found = baseShifts.find(s => s.name === shiftName);
     if (!found) return "";
@@ -663,8 +662,6 @@
     return found ? found.level : "低";
   }
 
-  function isHighShift(shiftName) { return getShiftLevel(shiftName) === "高"; }
-
   async function copyTableWithStyles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
@@ -710,10 +707,12 @@
     initLockedMap();
 
     let bestSchedule = null, minPenalty = Infinity;
+
     for (let iter = 0; iter < 250; iter++) {
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
       let shiftCounts = staffs.map(() => ({}));
 
+      // 1. 填入已鎖定的班次
       for (let day = 1; day <= totalDays; day++) {
         staffs.forEach((_, sIdx) => {
           if (lockedMap[sIdx] && lockedMap[sIdx][day - 1] && lastGeneratedSchedule && lastGeneratedSchedule[sIdx] && lastGeneratedSchedule[sIdx][day - 1]) {
@@ -726,6 +725,7 @@
         });
       }
 
+      // 2. 進行每日智能分派
       for (let day = 1; day <= totalDays; day++) {
         let availableStaffIndexes = [];
         staffs.forEach((_, idx) => {
@@ -749,14 +749,19 @@
           return !staffRests.includes(day);
         }).length;
 
-        let neededShifts = (totalWorkingToday <= baseShifts.length) ? baseShifts.slice(0, totalWorkingToday).map(s => s.name) : [...baseShifts.map(s => s.name), ...Array(totalWorkingToday - baseShifts.length).fill(supportShift.name)];
-        lockedShiftsToday.forEach(lShift => { let idx = neededShifts.indexOf(lShift); if (idx !== -1) neededShifts.splice(idx, 1); });
+        let neededShifts = (totalWorkingToday <= baseShifts.length) 
+          ? baseShifts.slice(0, totalWorkingToday).map(s => s.name) 
+          : [...baseShifts.map(s => s.name), ...Array(totalWorkingToday - baseShifts.length).fill(supportShift.name)];
+        
+        lockedShiftsToday.forEach(lShift => { 
+          let idx = neededShifts.indexOf(lShift); 
+          if (idx !== -1) neededShifts.splice(idx, 1); 
+        });
 
         let shuffledShifts = [...neededShifts].sort(() => Math.random() - 0.5);
         let unassignedStaff = [...availableStaffIndexes];
 
         shuffledShifts.forEach(shiftName => {
-          let currentLevel = getShiftLevel(shiftName);
           if (unassignedStaff.length === 0) return;
 
           unassignedStaff.sort((a, b) => {
@@ -772,33 +777,39 @@
         });
       }
 
+      // 3. 計算均勻度懲罰值 (以找出最佳均勻解)
       let penalty = 0;
       let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
       staffs.forEach((_, sIdx) => {
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          if (count === 0) penalty += 10000;
+          if (count === 0) penalty += 1000;
+          penalty += Math.pow(count, 2);
         });
       });
 
-      if (penalty < minPenalty) { minPenalty = penalty; bestSchedule = scheduleData; if (penalty === 0) break; }
+      if (penalty < minPenalty) { 
+        minPenalty = penalty; 
+        bestSchedule = scheduleData; 
+      }
     }
 
     lastGeneratedSchedule = bestSchedule;
     renderAll();
     await saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 已生成最优排班方案！数据已同步至云端。`;
+    document.getElementById('status').innerText = "✅ 当月智能均摊排班完成！";
   }
 
-  async function initApp() {
+  // -------------------------------------------------------------
+  // 🚀 初始化載入
+  // -------------------------------------------------------------
+  window.onload = async function() {
     initDateSelectors();
-    await loadDataFromLocal();
     updateSelect();
     renderShifts();
+    await loadDataFromLocal();
     renderAll();
-  }
-
-  initApp();
+  };
 </script>
 </body>
 </html>
