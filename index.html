@@ -3,70 +3,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (高对比高饱和色彩版)</title>
+  <title>智能动态排班工作表 (柔和色彩与防连续高强度版)</title>
   <style>
-    body { font-family: system-ui, sans-serif; padding: 20px; background: #eef2f5; margin: 0; }
-    .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 20px; }
-    h2, h3 { margin-top: 0; color: #0f2b48; }
+    body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    h2, h3 { margin-top: 0; color: #1a4f8b; }
     
     .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 15px; }
     .form-group { display: flex; flex-direction: column; gap: 5px; }
-    label { font-size: 13px; font-weight: bold; color: #333; }
+    label { font-size: 13px; font-weight: bold; color: #555; }
     input, select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
     textarea { resize: vertical; font-family: inherit; }
     
     .toolbar { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
-    button { background: #0066cc; color: white; border: none; padding: 9px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
+    button { background: #0066cc; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
     button:hover { background: #0052a3; }
-    button.secondary { background: #5a6268; }
-    button.secondary:hover { background: #484e53; }
-    button.danger { background: #dc3545; }
-    button.danger:hover { background: #bd2130; }
-    button.warning { background: #ffc107; color: #000; }
-    button.warning:hover { background: #e0a800; }
+    button.secondary { background: #6c757d; }
+    button.secondary:hover { background: #5a6268; }
+    button.danger { background: #d9534f; }
+    button.danger:hover { background: #c9302c; }
+    button.warning { background: #f0ad4e; color: #333; }
+    button.warning:hover { background: #ec971f; }
     button.success { background: #198754; color: white; }
     button.success:hover { background: #157347; }
 
-    .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 10px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; max-height: 180px; overflow-y: auto; }
-    .tag { padding: 6px 12px; border-radius: 16px; font-size: 13px; display: flex; align-items: center; gap: 6px; font-weight: bold; cursor: pointer; transition: all 0.2s; user-select: none; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
-    .tag:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.15); }
+    .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; max-height: 180px; overflow-y: auto; }
+    .tag { padding: 5px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s; user-select: none; }
+    .tag:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     
-    /* 标签高饱和样式 */
-    .tag-low { background: #28a745; color: white; border: 1px solid #1e7e34; }
-    .tag-mid { background: #ffc107; color: #212529; border: 1px solid #d39e00; }
-    .tag-high { background: #dc3545; color: white; border: 1px solid #bd2130; }
-    .tag-support { background: #0d6efd; color: white; border: 1px solid #0b5ed7; cursor: default; }
-    
-    .tag .level-badge { background: rgba(0,0,0,0.2); padding: 2px 8px; border-radius: 10px; font-weight: bold; font-size: 11px; }
-    .tag-mid .level-badge { background: rgba(0,0,0,0.1); }
-    .tag .remove-btn { cursor: pointer; font-weight: bold; color: #ffffff; margin-left: 6px; font-size: 16px; line-height: 1; }
-    .tag-mid .remove-btn { color: #dc3545; }
-    .tag .remove-btn:hover { opacity: 0.8; }
+    /* 淡雅马卡龙标签配色 */
+    .tag-low { background: #d1e7dd; color: #0f5132; border: 1px solid #badbcc; }
+    .tag-mid { background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
+    .tag-high { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+    .tag-support { background: #cff4fc; color: #055160; border: 1px solid #b6effb; cursor: default; }
+    .tag .level-badge { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 8px; font-weight: bold; font-size: 11px; }
+    .tag .remove-btn { cursor: pointer; font-weight: bold; color: #d9534f; margin-left: 4px; font-size: 14px; }
+    .tag .remove-btn:hover { color: #a94442; }
 
-    .table-container { overflow-x: auto; max-width: 100%; border: 2px solid #333; margin-bottom: 10px; border-radius: 6px; }
-    table { border-collapse: collapse; text-align: center; font-size: 13px; width: 100%; font-weight: 500; }
-    th, td { border: 1px solid #777; padding: 7px 5px; min-width: 52px; white-space: pre-line; }
-    .header-month { background: #0f2b48; color: white; font-weight: bold; font-size: 16px; min-width: 75px; }
-    .header-day { background: #e2e8f0; color: #1e293b; font-weight: bold; }
-    .weekend { color: #b91c1c; font-weight: bold; background: #fee2e2; }
-    .staff-name { background: #ffffff; font-weight: bold; color: #111; position: sticky; left: 0; z-index: 5; min-width: 75px; border-right: 2px solid #333; }
+    .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
+    table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; }
+    .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
+    .header-day { background: #f0f0f0; }
+    .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
+    .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 70px; }
 
-    /* 🎨 显著高对比配色方案 (排班表) */
-    .shift-low { background-color: #22c55e !important; color: #ffffff !important; font-weight: bold; } /* 鲜艳绿 */
-    .shift-mid { background-color: #eab308 !important; color: #000000 !important; font-weight: bold; } /* 鲜艳黄 */
-    .shift-high { background-color: #ef4444 !important; color: #ffffff !important; font-weight: bold; } /* 鲜艳红 */
-    .shift-support { background-color: #3b82f6 !important; color: #ffffff !important; font-weight: bold; } /* 鲜艳蓝 */
-    .shift-休 { background-color: #f3f4f6 !important; color: #9ca3af !important; font-weight: normal; } /* 淡灰色 */
-    
-    .locked-day { position: relative; opacity: 0.75; filter: grayscale(20%); }
-    .locked-header { background-color: #cbd5e1 !important; color: #475569; }
-    .stat-total { background-color: #0f2b48; color: white; font-weight: bold; font-size: 14px; }
+    /* 🎨 柔和淡色排班表配色 */
+    .shift-low { background-color: #e8f5e9; color: #1b5e20; } /* 清爽淡绿 */
+    .shift-mid { background-color: #fffde7; color: #8c6b00; } /* 柔和淡黄 */
+    .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; } /* 淡雅浅红 */
+    .shift-support { background-color: #e0f7fa; color: #006064; } /* 淡优雅蓝 */
+    .shift-休 { background-color: #ffffff; color: #a0a0a0; }
+    .locked-day { position: relative; opacity: 0.85; }
+    .locked-header { background-color: #e2e8f0 !important; color: #475569; }
+    .stat-total { background-color: #d97706; color: white; font-weight: bold; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 (高饱和度配色版)</h2>
+  <h2>⚙️ 动态排班管理设置 (淡色系 + 避开连续高强度版)</h2>
   
   <div class="control-grid">
     <!-- 1. 选择年月 -->
@@ -103,7 +99,7 @@
 
     <!-- 4. 岗位与强度管理 -->
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 岗位与强度设置 <span style="font-size: 12px; font-weight: normal; color: #0066cc;">(💡 点击岗位标签直接切换 低/中/高 强度)</span>：</label>
+      <label>🏷️ 岗位与强度设置 <span style="font-size: 12px; font-weight: normal; color: #0066cc;">(💡 点击岗位标签可切换 低/中/高 强度)</span>：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
         <input type="text" id="newShiftName" placeholder="岗位名称 (换行用 \n)" style="flex:2; min-width: 150px;">
         <select id="newShiftLevel" style="flex:1; min-width: 100px;">
@@ -124,11 +120,11 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">✨ 执行自适应动态轮岗排班</button>
+    <button onclick="generateSchedule()">✨ 执行智能排班 (避开连续高强度)</button>
     <button class="warning" onclick="unlockAllDays()">🔓 强制解锁所有日期</button>
     <button class="secondary" onclick="lockPastDaysManually()">🔒 重新锁定历史日期</button>
     <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地数据</button>
-    <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
+    <span id="status" style="color: #666; font-size: 13px;"></span>
   </div>
 </div>
 
@@ -185,11 +181,11 @@
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
     
-    localStorage.setItem('auto_schedule_data_v7', JSON.stringify(dataToSave));
+    localStorage.setItem('auto_schedule_data_v8', JSON.stringify(dataToSave));
   }
 
   function loadDataFromLocal() {
-    const saved = localStorage.getItem('auto_schedule_data_v7');
+    const saved = localStorage.getItem('auto_schedule_data_v8');
     if (!saved) return false;
 
     try {
@@ -212,7 +208,7 @@
 
   function resetAllData() {
     if (confirm("确定要重置所有保存的数据吗？")) {
-      localStorage.removeItem('auto_schedule_data_v7');
+      localStorage.removeItem('auto_schedule_data_v8');
       location.reload();
     }
   }
@@ -559,7 +555,7 @@
           count = scheduleData[sIdx].filter(item => item === shiftName).length;
         }
         workCountTotal += count;
-        html += `<td style="font-weight:bold; font-size:14px;">${count}</td>`;
+        html += `<td>${count}</td>`;
       });
 
       html += `<td class="stat-total">${workCountTotal}</td></tr>`;
@@ -574,6 +570,12 @@
     renderStatsTable(lastGeneratedSchedule);
   }
 
+  // 判断某个岗位是否属于高强度
+  function isHighShift(shiftName) {
+    let found = baseShifts.find(s => s.name === shiftName);
+    return found && found.level === "高";
+  }
+
   function generateSchedule() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -586,6 +588,7 @@
     let shiftCounts = staffs.map(() => ({}));
 
     for (let day = 1; day <= totalDays; day++) {
+      // 如果日期被锁定，保留旧数据并记录次数
       if (isDayLocked(year, month, day) && lastGeneratedSchedule && lastGeneratedSchedule[0][day - 1] !== undefined) {
         staffs.forEach((_, sIdx) => {
           let currentShift = scheduleData[sIdx][day - 1];
@@ -596,10 +599,12 @@
         continue;
       }
 
+      // 重置当天排班
       staffs.forEach((_, idx) => {
         scheduleData[idx][day - 1] = "休";
       });
 
+      // 筛选今天不休假的员工
       let availableStaffIndexes = [];
       staffs.forEach((staff, idx) => {
         if (!staff.customRests.includes(day)) {
@@ -609,6 +614,7 @@
 
       let workingCount = availableStaffIndexes.length;
       
+      // 确定今天需要排哪些岗位
       let todayShifts = [];
       if (workingCount <= baseShifts.length) {
         todayShifts = baseShifts.slice(0, workingCount);
@@ -622,14 +628,30 @@
 
       let unassignedStaff = [...availableStaffIndexes];
 
+      // 为每个岗位安排人选（高强度岗位优先避免连排）
       todayShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
+        let isCurrentHigh = (shiftObj.level === "高");
+
         if (unassignedStaff.length === 0) return;
 
         unassignedStaff.sort((a, b) => {
+          // 🛑 防连续高强度机制：如果今天要排高强度岗位，且员工 A 昨天刚排了高强度，极大提高其排序权重（避开 A）
+          let yesterdayShiftA = (day > 1) ? scheduleData[a][day - 2] : null;
+          let yesterdayShiftB = (day > 1) ? scheduleData[b][day - 2] : null;
+          
+          let aWasHighYesterday = isCurrentHigh && isHighShift(yesterdayShiftA);
+          let bWasHighYesterday = isCurrentHigh && isHighShift(yesterdayShiftB);
+
+          if (aWasHighYesterday !== bWasHighYesterday) {
+            return aWasHighYesterday ? 1 : -1; // 昨天上过高强度的排在后面
+          }
+
+          // 次数最少的优先
           let countA = shiftCounts[a][shiftName] || 0;
           let countB = shiftCounts[b][shiftName] || 0;
           if (countA !== countB) return countA - countB;
+
           return Math.random() - 0.5;
         });
 
@@ -642,7 +664,7 @@
     lastGeneratedSchedule = scheduleData;
     renderAll();
     saveDataToLocal();
-    document.getElementById('status').innerText = `${year}年${month}月 排班表格生成成功！`;
+    document.getElementById('status').innerText = `${year}年${month}月 排班已成功生成！(已避开连续高强度)`;
   }
 
   // 初始化
