@@ -593,15 +593,15 @@
     document.getElementById('currentMonthTitle').innerText = `${year}年${month}月`;
     initLockedMap();
 
-let html = `<thead><tr><th rowspan="2" class="header-month">${month}月</th>`;
-for(let i=1; i<=totalDays; i++) {
-  let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
-  html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${i} ${isColLocked ? '🔒' : ''}</th>`;
-}
-// 1. 在日期上面加入跨 2 列的「計數總休假日」標頭
-html += `<th rowspan="2" class="stat-total" style="min-width: 80px;">計數總休假日</th>`;
+    let html = `<thead><tr><th rowspan="2" class="header-month">${month}月</th>`;
+    for(let i=1; i<=totalDays; i++) {
+      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
+      html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${i} ${isColLocked ? '🔒' : ''}</th>`;
+    }
+    // 主表右側加上「計數總休假日」標頭
+    html += `<th rowspan="2" class="stat-total" style="min-width: 80px;">計數總休假日</th>`;
 
-html += `</tr><tr class="header-day">`;
+    html += `</tr><tr class="header-day">`;
     for(let i=1; i<=totalDays; i++) {
       let dateObj = new Date(year, month - 1, i);
       let dayOfWeek = dateObj.getDay();
@@ -630,27 +630,25 @@ html += `</tr><tr class="header-day">`;
         let cellClass = getShiftClass(cellContent);
         if (isLocked) cellClass += " cell-locked";
 
- html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${cellContent}</td>`;
-    }
+        html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${cellContent}</td>`;
+      }
 
-    // 2. 計算該員工總休假日數 (包含 "休" 與 "休(预)")
-    let restDaysCount = 0;
-    for(let day=1; day<=totalDays; day++) {
-      let content = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx][day - 1] : "";
-      if (!content && (currentMonthRests[sIdx] || []).includes(day)) content = "休(预)";
-      if (content === "休" || content === "休(预)") restDaysCount++;
-    }
-    html += `<td class="stat-total">${restDaysCount} 天</td>`;
+      // 計算個人「休」與「休(预)」總天數
+      let restDaysCount = 0;
+      for(let day=1; day<=totalDays; day++) {
+        let content = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx][day - 1] : "";
+        if (!content && staffRests.includes(day)) content = "休(预)";
+        if (content === "休" || content === "休(预)") restDaysCount++;
+      }
+      html += `<td class="stat-total">${restDaysCount} 天</td>`;
 
-    html += `</tr>`;
-  });
-  
-  html += `<tr class="row-daily-total"><td class="staff-name">当日上班人数</td>`;
-  for(let day=1; day<=totalDays; day++) html += `<td>${dailyWorkingTotals[day - 1]}人</td>`;
-  
-  // 3. 底部「當日上班人數」列的最右側對齊空格
-  html += `<td>-</td>`;
-  html += `</tr></tbody>`;
+      html += `</tr>`;
+    });
+    
+    html += `<tr class="row-daily-total"><td class="staff-name">当日上班人数</td>`;
+    for(let day=1; day<=totalDays; day++) html += `<td>${dailyWorkingTotals[day - 1]}人</td>`;
+    html += `<td>-</td>`;
+    html += `</tr></tbody>`;
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
