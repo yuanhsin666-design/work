@@ -286,7 +286,6 @@
     return true;
   }
 
-  // 💥 僅重置「當前月份」數據
   async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
     if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？\n（此操作仅清除当月休假、锁定与排班，不影响其他月份及员工/岗位设置）`)) {
@@ -726,7 +725,7 @@
   }
 
   // -------------------------------------------------------------
-  // ✨ 智能均攤排班演算法 (優化與相容修正版)
+  // ✨ 智能均攤排班演算法 (嚴格遵循 5 大排班規則版)
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -736,18 +735,14 @@
 
       initLockedMap();
 
-      // 當前可用的所有崗位清單
       const allShifts = [...baseShifts, supportShift];
       const highIntensityShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
 
-      // 初始化排班資料陣列 (staffs.length x totalDays)
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
-
-      // 追蹤每位員工全月各崗位次數與連續高強度天數
       let shiftCounts = staffs.map(() => ({}));
       let consecutiveHigh = staffs.map(() => 0);
 
-      // 第一步：先將「手動鎖定」或「預約休假」固定進班表並統計基礎數據
+      // 第一步：填入手動鎖定 & 預約休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -766,11 +761,11 @@
         });
       }
 
-      // 第二步：逐日進行動態智能排班
+      // 第二步：逐日進行智能排班
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
 
-        // 找出當天未被鎖定且非休假的可用員工 index
+        // 當天可受排班員工 index
         let availableStaffIndexes = staffs
           .map((_, idx) => idx)
           .filter(sIdx => {
@@ -779,7 +774,7 @@
             return !isLocked && currentVal !== "休(预)";
           });
 
-        // 找出當天已被鎖定佔用的崗位
+        // 剔除已鎖定的班別
         let usedShiftsInDay = [];
         staffs.forEach((_, sIdx) => {
           const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
@@ -789,7 +784,6 @@
           }
         });
 
-        // 當天待指派的崗位 (剔除已被鎖定排走的崗位)
         let todayShiftsToAssign = allShifts.map(s => s.name).filter(sName => {
           const uIdx = usedShiftsInDay.indexOf(sName);
           if (uIdx !== -1) {
@@ -799,59 +793,59 @@
           return true;
         });
 
-        // 開始對待指派崗位進行配對
+        // 逐一派班
         for (let shiftName of todayShiftsToAssign) {
           const isHigh = highIntensityShiftNames.includes(shiftName);
           const isSupport = (shiftName === supportShift.name);
 
-          // 條件 1：篩選可承接此班別的候選人 (高強度不能連三)
+          // 規則 2：高強度不能連三 (連續 2 天高強度者第 3 天排除)
           let candidates = availableStaffIndexes.filter(sIdx => {
             if (isHigh && consecutiveHigh[sIdx] >= 2) return false;
             return true;
           });
 
-          // 若因高強度限制導致無人可用，解鎖限制（不得已情況）
+          // 保底備案：若無人可用，解除連三限制
           if (candidates.length === 0) candidates = [...availableStaffIndexes];
 
-          // 條件 2：動態評分與優先順序排序
+          // 評分排序演算法 (分數越低越優先)
           candidates.sort((aIdx, bIdx) => {
             let scoreA = 0, scoreB = 0;
             const countA = shiftCounts[aIdx][shiftName] || 0;
             const countB = shiftCounts[bIdx][shiftName] || 0;
 
             if (isSupport) {
-              // 規則 4：支援輪替 (全員 1 次後才 2 次，滿 2 次後才 3 次)
+              // 規則 4：支援階梯輪替 (全員 1 次後才 2 次，滿 2 次後才 3 次)
               scoreA += countA * 10000;
               scoreB += countB * 10000;
             } else {
-              // 規則 1：每人都要輪到 (0 次擁有極高優先權)
-              if (countA === 0) scoreA -= 2000;
-              if (countB === 0) scoreB -= 2000;
+              // 規則 1：每人都要輪到 (0 次者獲得大幅度優先權)
+              if (countA === 0) scoreA -= 5000;
+              if (countB === 0) scoreB -= 5000;
 
               scoreA += countA * 100;
               scoreB += countB * 100;
 
               if (isHigh) {
-                // 規則 2：高強度一人最多 2 次 (滿 2 次給予高額懲罰分，不得已才第 3 次)
-                if (countA >= 2) scoreA += 5000;
-                if (countB >= 2) scoreB += 5000;
+                // 規則 2：高強度最多 2 次 (滿 2 次施加極高懲罰分)
+                if (countA >= 2) scoreA += 50000;
+                if (countB >= 2) scoreB += 50000;
               } else {
-                // 規則 3：一般崗位最多 3 次 (滿 3 次給予懲罰分)
-                if (countA >= 3) scoreA += 3000;
-                if (countB >= 3) scoreB += 3000;
+                // 規則 3：一般崗位最多 3 次 (滿 3 次施加懲罰分，不得已才超過)
+                if (countA >= 3) scoreA += 30000;
+                if (countB >= 3) scoreB += 30000;
               }
             }
 
-            // 輔助規則：優先讓連續高強度天數少的人上高強度
+            // 輔助排序：高強度優先派給連續高強度天數較少的人
             if (isHigh) {
-              scoreA += consecutiveHigh[aIdx] * 200;
-              scoreB += consecutiveHigh[bIdx] * 200;
+              scoreA += consecutiveHigh[aIdx] * 300;
+              scoreB += consecutiveHigh[bIdx] * 300;
             }
 
             return scoreA - scoreB;
           });
 
-          // 指派人選
+          // 指派最高優先度者
           if (candidates.length > 0) {
             let chosenIdx = candidates[0];
             newSchedule[chosenIdx][dayIdx] = shiftName;
@@ -863,25 +857,24 @@
               consecutiveHigh[chosenIdx] = 0;
             }
 
-            // 指派後從當天可用名單中移除
             availableStaffIndexes = availableStaffIndexes.filter(idx => idx !== chosenIdx);
           }
         }
 
-        // 當天未排班的員工，連續高強度天數清零
+        // 當天未排到班的同仁，連續高強度天數歸零
         availableStaffIndexes.forEach(sIdx => {
           consecutiveHigh[sIdx] = 0;
         });
       }
 
-      // 儲存結果並刷新頁面
+      // 保存並呈現
       lastGeneratedSchedule = newSchedule;
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班成功！\n✔ 崗位均勻覆蓋（不為 0）\n✔ 高強度無連續 3 天且每個高強度崗位每人最多 2 次\n✔ 每個崗位最多 3 次\n✔ 支援崗位嚴格階梯式輪替`);
+      alert(`[${monthKey}] 智能排班成功！\n✔ 崗位均勻覆蓋（全員至少 1 次，無 0 次）\n✔ 高強度無連續 3 天，且每人最多 2 次\n✔ 一般崗位最多 3 次（不得已才超過）\n✔ 支援崗位嚴格階梯式輪替（全員 1 次後才 2 次，全員 2 次後才 3 次）`);
 
     } catch (err) {
       console.error(err);
