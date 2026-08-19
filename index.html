@@ -117,7 +117,7 @@
 
   <div class="toolbar">
     <button onclick="generateSchedule()">✨ 执行当月智能均摊排班 (保留当月锁定)</button>
-    <button class="danger" onclick="resetAllData()">🗑️ 重置所有本地数据</button>
+    <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
 </div>
@@ -286,10 +286,32 @@
     return true;
   }
 
-  function resetAllData() {
-    if (confirm("确定要彻底重置所有月份的数据吗？")) {
-      localStorage.clear();
-      location.reload();
+  // 💥 僅重置「當前月份」數據
+  async function resetCurrentMonthData() {
+    const monthKey = getMonthKey();
+    if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？\n（此操作仅清除当月休假、锁定与排班，不影响其他月份及员工/岗位设置）`)) {
+      // 1. 重置內存變數
+      currentMonthRests = {};
+      lastGeneratedSchedule = null;
+      initLockedMap(true);
+      document.getElementById('cloudUrlInput').value = "";
+
+      // 2. 清除當月 LocalStorage
+      localStorage.removeItem(`auto_schedule_month_${monthKey}`);
+
+      // 3. 清除當月 Supabase 資料
+      try {
+        await supabaseClient
+          .from('schedules')
+          .delete()
+          .eq('month_key', monthKey);
+      } catch (err) {
+        console.error("雲端重置失敗：", err);
+      }
+
+      renderAll();
+      document.getElementById('status').innerText = `🗑️ 已重置 [${monthKey}] 的數據！`;
+      alert(`[${monthKey}] 月份數據已成功重置！`);
     }
   }
 
@@ -708,7 +730,6 @@
 
     let bestSchedule = null, minPenalty = Infinity;
 
-    // 多次疊代以尋找符合條件的最佳解答
     for (let iter = 0; iter < 400; iter++) {
       let scheduleData = Array.from({ length: staffs.length }, () => Array(totalDays).fill("休"));
       let shiftCounts = staffs.map(() => ({}));
@@ -767,7 +788,6 @@
 
           let shiftLevel = getShiftLevel(shiftName);
 
-          // 排序候選人，套用排班限制規則
           unassignedStaff.sort((a, b) => {
             // 規則二：檢查高強度連三
             if (shiftLevel === "高") {
@@ -777,20 +797,19 @@
               if (!aRecentHigh && bRecentHigh) return -1;
             }
 
-            // 規則三：支援崗位輪流平攤（滿1次才許第2次，滿2次才許第3次）
+            // 規則三：支援崗位輪流平攤
             if (shiftName === supportShift.name) {
               let aSupp = shiftCounts[a][supportShift.name] || 0;
               let bSupp = shiftCounts[b][supportShift.name] || 0;
               if (aSupp !== bSupp) return aSupp - bSupp;
             }
 
-            // 規則一與三：優先安排該崗位次數較少者（追求 >0 且不超過 3 次）
+            // 規則一與三：優先安排該崗位次數較少者
             let countA = shiftCounts[a][shiftName] || 0;
             let countB = shiftCounts[b][shiftName] || 0;
 
             if (countA !== countB) return countA - countB;
 
-            // 若次數相同，優先指派「總排班次數較少者」
             let totalA = Object.values(shiftCounts[a]).reduce((sum, v) => sum + v, 0);
             let totalB = Object.values(shiftCounts[b]).reduce((sum, v) => sum + v, 0);
             if (totalA !== totalB) return totalA - totalB;
@@ -804,26 +823,23 @@
         });
       }
 
-      // 3. 評估與計算懲罰分數 (Penalty Score)
+      // 3. 評估與計算懲罰分數
       let penalty = 0;
       let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
 
-      // A. 全員每個崗位不可為 0 (強懲罰)
       staffs.forEach((_, sIdx) => {
         allShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
-          if (count === 0) penalty += 5000; // 違背「每個人都要輪到」
-          if (count > 3 && shiftName !== supportShift.name) penalty += (count - 3) * 2000; // 違背「最多3次」
+          if (count === 0) penalty += 5000; 
+          if (count > 3 && shiftName !== supportShift.name) penalty += (count - 3) * 2000; 
         });
       });
 
-      // B. 支援崗位極致平攤懲罰
       let supportCounts = staffs.map((_, sIdx) => shiftCounts[sIdx][supportShift.name] || 0);
       let minSupp = Math.min(...supportCounts);
       let maxSupp = Math.max(...supportCounts);
       if (maxSupp - minSupp > 1) penalty += (maxSupp - minSupp) * 3000;
 
-      // C. 高強度不可連三
       staffs.forEach((_, sIdx) => {
         for (let d = 0; d < totalDays - 2; d++) {
           if (getShiftLevel(scheduleData[sIdx][d]) === "高" &&
