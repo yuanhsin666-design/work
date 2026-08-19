@@ -662,7 +662,7 @@ html += `</tr><tr class="header-day">`;
       let headerClass = shift.level === '高' ? 'shift-high' : (shift.level === '中' ? 'shift-mid' : 'shift-low');
       html += `<th class="${headerClass}">${badge}<br>${shift.name.replace(/\n/g, '<br>')}</th>`;
     });
-    html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th><th class="stat-total">上班总天数</th><th class="stat-total">休假总天数</th></tr></thead><tbody>`;
+    html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th><th class="stat-total">上班总天数</th></tr></thead><tbody>`;
 
     staffs.forEach((staff, sIdx) => {
       html += `<tr><td class="staff-name">${staff.name}</td>`;
@@ -689,8 +689,6 @@ html += `</tr><tr class="header-day">`;
         html += `<td style="${countStyle}">${count}</td>`;
       });
       html += `<td class="stat-total">${workCountTotal}</td></tr>`;
-      let restTotal = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === '休' || item === '休(预)').length : 0;
-html += `<td class="stat-total">${restTotal}</td></tr>`;
     });
     html += `</tbody>`;
     document.getElementById('statsTable').innerHTML = html;
