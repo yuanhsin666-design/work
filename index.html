@@ -624,7 +624,7 @@
         if (scheduleData && scheduleData[sIdx]) cellContent = scheduleData[sIdx][day - 1] || "";
         else if (staffRests.includes(day)) cellContent = "休(预)";
 
-        if (cellContent && cellContent !== "休" && cellContent !== "休(预)") dailyWorkingTotals[day - 1]++;
+        if (cellContent === "休(預)") cellContent = "休";
 
         let cellClass = getShiftClass(cellContent);
         if (isLocked) cellClass += " cell-locked";
