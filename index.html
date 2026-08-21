@@ -136,6 +136,16 @@
 
   <div class="table-container">
     <table id="scheduleTable"></table>
+    <!-- 主排班表 -->
+<table id="scheduleTable"></table>
+
+<!-- 新增：高强度人员记录表容器 -->
+<div style="margin-top: 24px;">
+  <h3 style="margin-bottom: 8px; color: #1e293b; font-size: 16px;">📌 1号与16号高强度人员/岗位记录表</h3>
+  <table id="highIntensityTable" class="schedule-table" style="width: 100%; border-collapse: collapse;">
+    <!-- 独立表格内容将由 JS 动态渲染 -->
+  </table>
+</div>
   </div>
 </div>
 
@@ -591,7 +601,12 @@
     return "";
   }
 
- function renderTable(scheduleData = null) {
+// 判断是否为高强度班次的逻辑（可根据您的实际班次代号调整，如 "高"、"H"、"夜" 等）
+  function isHighIntensity(shift) {
+    return shift === "高" || shift === "H" || shift === "夜班";
+  }
+
+  function renderTable(scheduleData = null) {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -632,7 +647,6 @@
 
         if (cellContent === "休(预)" || cellContent === "休(預)") cellContent = "休";
 
-        // 统计上班与休假人数
         if (cellContent && cellContent !== "休") {
           dailyWorkingTotals[day - 1]++;
         } else if (cellContent === "休") {
@@ -658,54 +672,76 @@
       html += `</tr>`;
     });
     
-    // 1. 当日休假人数（调换至上方）
+    // 1. 当日休假人数
     html += `<tr class="row-daily-total" style="background-color: #f1f5f9; color: #dc2626;"><td class="staff-name">当日休假人数</td>`;
     for(let day=1; day<=totalDays; day++) html += `<td>${dailyRestTotals[day - 1]}人</td>`;
     html += `<td>-</td></tr>`;
 
-    // 2. 当日上班人数（调换至下方）
+    // 2. 当日上班人数
     html += `<tr class="row-daily-total"><td class="staff-name">当日上班人数</td>`;
     for(let day=1; day<=totalDays; day++) html += `<td>${dailyWorkingTotals[day - 1]}人</td>`;
     html += `<td>-</td></tr>`;
 
     html += `</tbody>`;
     document.getElementById('scheduleTable').innerHTML = html;
+
+    // 渲染独立的高强度记录表
+    renderHighIntensityTable(scheduleData);
   }
 
-  function renderStatsTable(scheduleData = null) {
-    let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
-    let html = `<thead><tr><th class="header-month">姓名</th>`;
-    baseShifts.forEach(shift => {
-      let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');
-      let headerClass = shift.level === '高' ? 'shift-high' : (shift.level === '中' ? 'shift-mid' : 'shift-low');
-      html += `<th class="${headerClass}">${badge}<br>${shift.name.replace(/\n/g, '<br>')}</th>`;
-    });
-    html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th><th class="stat-total">上班总天数</th></tr></thead><tbody>`;
+  // 新增：专门渲染独立记录表格的函数
+  function renderHighIntensityTable(scheduleData) {
+    let records = [];
 
-    staffs.forEach((staff, sIdx) => {
-      html += `<tr><td class="staff-name">${staff.name}</td>`;
-      let workCountTotal = 0;
-      allShifts.forEach(shiftName => {
-        let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
-        workCountTotal += count;
+    if (scheduleData) {
+      staffs.forEach((staff, sIdx) => {
+        let shift1 = scheduleData[sIdx] ? scheduleData[sIdx][0] : "";  // 1号班次
+        let shift16 = scheduleData[sIdx] ? scheduleData[sIdx][15] : ""; // 16号班次
 
-        let countStyle = '';
-        if (count > 2 && shiftName !== supportShift.name) {
-          countStyle = 'color: #ffffff; background-color: #dc3545; font-weight: bold;'; 
-        } else if (shiftName === supportShift.name && count > 1) {
-          countStyle = 'color: #ffffff; background-color: #dc3545; font-weight: bold;'; 
-        } else if (count === 0 && shiftName !== supportShift.name) {
-          countStyle = 'color: #d97706; background-color: #fef3c7; font-weight: bold;'; 
-        } else if (shiftName === supportShift.name) {
-          countStyle = 'color: #0f5132; font-weight: bold;';
+        if (isHighIntensity(shift1)) {
+          records.push({ date: '1号', name: staff.name, role: staff.role || '未设定', shift: shift1 });
         }
-        
-        html += `<td style="${countStyle}">${count}</td>`;
+        if (isHighIntensity(shift16)) {
+          records.push({ date: '16号', name: staff.name, role: staff.role || '未设定', shift: shift16 });
+        }
       });
-      html += `<td class="stat-total">${workCountTotal}</td></tr>`;
-    });
-    html += `</tbody>`;
-    document.getElementById('statsTable').innerHTML = html;
+    }
+
+    let subHtml = `
+      <thead>
+        <tr style="background-color: #f8fafc;">
+          <th style="padding: 8px; border: 1px solid #e2e8f0; width: 120px;">日期</th>
+          <th style="padding: 8px; border: 1px solid #e2e8f0; width: 160px;">人员姓名</th>
+          <th style="padding: 8px; border: 1px solid #e2e8f0; width: 160px;">岗位/职务</th>
+          <th style="padding: 8px; border: 1px solid #e2e8f0; width: 120px;">安排班次</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    if (records.length === 0) {
+      subHtml += `
+        <tr>
+          <td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px; border: 1px solid #e2e8f0;">
+            暂无 1号 或 16号 拿高强度的人员记录
+          </td>
+        </tr>
+      `;
+    } else {
+      records.forEach(item => {
+        subHtml += `
+          <tr style="text-align: center;">
+            <td style="padding: 8px; border: 1px solid #e2e8f0; font-weight: bold; color: #ea580c;">${item.date}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${item.name}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${item.role}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;"><span class="shift-tag">${item.shift}</span></td>
+          </tr>
+        `;
+      });
+    }
+
+    subHtml += `</tbody>`;
+    document.getElementById('highIntensityTable').innerHTML = subHtml;
   }
 
   function renderAll() {
