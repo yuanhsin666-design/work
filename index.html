@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (休假字串強制修正版)</title>
+  <title>智能动态排班工作表 (公平轮流与规则优化版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -151,7 +151,7 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号高强度人员/岗位记录表</h3>
+    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号 (分红日) 高强度人员/岗位记录表</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
@@ -159,7 +159,6 @@
   </div>
 </div>
 
-<!-- ================= 新增：最底部的每月拿支援的人员记录表 ================= -->
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表</h3>
@@ -199,6 +198,9 @@
   let currentMonthRests = {}; 
   let lastGeneratedSchedule = null;
   let lockedMap = [];
+  
+  // 用于追踪分红日 (1号, 16号) 的高强度轮流历史记录：{ staffName: { shiftName: true/false } }
+  let profitSharingHistory = {};
 
   function getMonthKey() {
     const year = document.getElementById('yearSelect').value;
@@ -217,7 +219,7 @@
   }
 
   function saveGlobalConfig() {
-    localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify({ staffs, baseShifts, supportShift }));
+    localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify({ staffs, baseShifts, supportShift, profitSharingHistory }));
   }
 
   function loadGlobalConfig() {
@@ -228,6 +230,7 @@
         if (data.staffs) staffs = data.staffs;
         if (data.baseShifts) baseShifts = data.baseShifts;
         if (data.supportShift) supportShift = data.supportShift;
+        if (data.profitSharingHistory) profitSharingHistory = data.profitSharingHistory;
       } catch(e) { console.error(e); }
     }
   }
@@ -778,7 +781,6 @@
     document.getElementById('highIntensityTable').innerHTML = html;
   }
 
-  // 新增：渲染最底部的每月拿支援的人员记录表
   function renderSupportStaffTable(scheduleData = null) {
     let records = [];
 
@@ -883,15 +885,16 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
+  // 严格检查高强度岗位是否会引发连续三天
   function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {
     let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;
     let dayM1 = dayIdx - 1 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 1]) : false;
     let dayP1 = dayIdx + 1 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 1]) : false;
     let dayP2 = dayIdx + 2 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 2]) : false;
 
-    if (dayM2 && dayM1) return true;
-    if (dayM1 && dayP1) return true;
-    if (dayP1 && dayP2) return true;
+    if (dayM2 && dayM1) return true; // 前两天都是高强度 -> 今天不能高强度
+    if (dayM1 && dayP1) return true; // 昨天和明天都是高强度 -> 今天不能高强度
+    if (dayP1 && dayP2) return true; // 未来两天都是高强度 -> 今天不能高强度
 
     return false;
   }
@@ -910,6 +913,7 @@
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
+      // 初始化已锁定单元格与预设休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -929,11 +933,15 @@
         });
       }
 
+      // 按天推进排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+        let isProfitSharingDay = (dayIdx === 0 || dayIdx === 15); // 1号 (0) 和 16号 (15)
+
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
+        // 1. 优先排高强度岗位 (上限 2 次，不能连 3 天，1与16号需全局轮流)
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -941,10 +949,38 @@
           let validCandidates = availableStaff.filter(sIdx => {
             let currentCount = shiftCounts[sIdx][hShift] || 0;
             let isConsecutive3 = checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts);
-            return currentCount < 2 && !isConsecutive3;
+            
+            // 高强度岗位上限 2 次
+            if (currentCount >= 2 || isConsecutive3) return false;
+
+            // 分红日 (1号, 16号) 校验：是否已在此分红日轮流过该高强度岗位
+            if (isProfitSharingDay) {
+              let sName = staffs[sIdx].name;
+              if (!profitSharingHistory[sName]) profitSharingHistory[sName] = {};
+              
+              // 如果所有人都在分红日做过该高强度岗位，重置轮流记录
+              let allDone = staffs.every(s => profitSharingHistory[s.name] && profitSharingHistory[s.name][hShift]);
+              if (allDone) {
+                staffs.forEach(s => {
+                  if (profitSharingHistory[s.name]) profitSharingHistory[s.name][hShift] = false;
+                });
+              }
+
+              // 如果该员工已做过，优先留给没做过的人
+              if (profitSharingHistory[sName][hShift]) {
+                let hasUnassignedStaff = availableStaff.some(otherIdx => {
+                  let otherName = staffs[otherIdx].name;
+                  return !profitSharingHistory[otherName] || !profitSharingHistory[otherName][hShift];
+                });
+                if (hasUnassignedStaff) return false;
+              }
+            }
+
+            return true;
           });
 
           if (validCandidates.length > 0) {
+            // 排序规则：优先当月排过该岗位少的、排过高强度少的，保证全局均分且不为 0
             validCandidates.sort((a, b) => {
               let countA = shiftCounts[a][hShift] || 0;
               let countB = shiftCounts[b][hShift] || 0;
@@ -952,20 +988,31 @@
 
               let totalHighA = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[a][s.name] || 0) : sum, 0);
               let totalHighB = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[b][s.name] || 0) : sum, 0);
-              return totalHighA - totalHighB || (Math.random() - 0.5);
+              if (totalHighA !== totalHighB) return totalHighA - totalHighB;
+
+              return Math.random() - 0.5;
             });
 
             let chosenIdx = validCandidates[0];
             newSchedule[chosenIdx][dayIdx] = hShift;
             shiftCounts[chosenIdx][hShift] = (shiftCounts[chosenIdx][hShift] || 0) + 1;
+
+            if (isProfitSharingDay) {
+              let sName = staffs[chosenIdx].name;
+              if (!profitSharingHistory[sName]) profitSharingHistory[sName] = {};
+              profitSharingHistory[sName][hShift] = true;
+            }
+
             availableStaff = availableStaff.filter(id => id !== chosenIdx);
           }
         });
 
+        // 2. 依次排一般岗位（必须排完一般岗位后才可以轮到支援，上限 2 次，强制轮流均分）
         let remainingNormalShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
 
+        // 打乱一般岗位的安排顺序
         remainingNormalShifts.sort(() => Math.random() - 0.5);
 
         remainingNormalShifts.forEach(shiftName => {
@@ -975,9 +1022,16 @@
 
           if (validCandidates.length > 0) {
             validCandidates.sort((a, b) => {
+              // 1. 该特定岗位排班次数少的优先（解决0次问题，强制均分）
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
+
+              // 2. 总体上班天数少的优先
+              let totalWorkA = Object.values(shiftCounts[a]).reduce((sum, v) => sum + v, 0);
+              let totalWorkB = Object.values(shiftCounts[b]).reduce((sum, v) => sum + v, 0);
+              if (totalWorkA !== totalWorkB) return totalWorkA - totalWorkB;
+
               return Math.random() - 0.5;
             });
 
@@ -988,10 +1042,35 @@
           }
         });
 
+        // 3. 一般岗位全部分配完毕后，多余的在岗人员轮到【支援】（限制 0 次或 1 次，必须全员轮流过后才能再次排序）
         let supName = supportShift.name;
-        let validSupportStaff = availableStaff.filter(sIdx => (shiftCounts[sIdx][supName] || 0) < 1);
+        
+        // 检查支援岗位的全局轮流状态
+        let allTookSupport = staffs.every(sIdx => (shiftCounts[sIdx][supName] || 0) >= 1);
 
-        validSupportStaff.sort(() => Math.random() - 0.5);
+        let validSupportStaff = availableStaff.filter(sIdx => {
+          let currentSupCount = shiftCounts[sIdx][supName] || 0;
+          // 当月支援上限为 1 次
+          if (currentSupCount >= 1) return false;
+
+          // 轮流校验：如果还没到全员轮流完，优先安排从未排过支援的人
+          if (!allTookSupport) {
+            let hasUnassignedSup = availableStaff.some(otherIdx => (shiftCounts[otherIdx][supName] || 0) === 0);
+            if (hasUnassignedSup && currentSupCount > 0) return false;
+          }
+
+          return true;
+        });
+
+        validSupportStaff.sort((a, b) => {
+          let supA = shiftCounts[a][supName] || 0;
+          let supB = shiftCounts[b][supName] || 0;
+          if (supA !== supB) return supA - supB;
+
+          let totalWorkA = Object.values(shiftCounts[a]).reduce((sum, v) => sum + v, 0);
+          let totalWorkB = Object.values(shiftCounts[b]).reduce((sum, v) => sum + v, 0);
+          return totalWorkA - totalWorkB || (Math.random() - 0.5);
+        });
 
         validSupportStaff.forEach(sIdx => {
           newSchedule[sIdx][dayIdx] = supName;
@@ -999,6 +1078,7 @@
         });
       }
 
+      // 未安排岗位的默认为休
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
@@ -1013,7 +1093,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
-      alert(`[${monthKey}] 排班成功！休假已全部顯示為「休」。`);
+      alert(`[${monthKey}] 智能排班成功！已满足：岗位均分不为0、分红日高强度轮流、支援上限1次且最后安排。`);
 
     } catch (err) {
       console.error(err);
