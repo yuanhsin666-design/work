@@ -115,7 +115,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">🎲 執行智能排班</button>
+    <button onclick="generateSchedule()">🎲 执行智能排班</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -737,7 +737,6 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  // 检查高强度岗位是否连续三天
   function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {
     let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;
     let dayM1 = dayIdx - 1 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 1]) : false;
@@ -751,7 +750,6 @@
     return false;
   }
 
-  // 计算岗位上一次排班日期以均匀拉开间隔
   function getLastAssignedDay(schedule, sIdx, currentDayIdx, shiftName) {
     for (let d = currentDayIdx - 1; d >= 0; d--) {
       if (schedule[sIdx][d] === shiftName) return d;
@@ -774,7 +772,7 @@
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 1. 【核心休假保护】优先锁死预约休假与手动锁定班次
+      // 1. 【絕對休假保護】優先寫入休假與鎖定班次
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -783,16 +781,16 @@
           let existingShift = lastGeneratedSchedule && lastGeneratedSchedule[sIdx] ? lastGeneratedSchedule[sIdx][dayIdx] : "";
           if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
 
-          // 若為已鎖定欄位且有舊班次
-          if (isLocked && existingShift) {
+          // 若屬雲端/預約休假，強制寫入「休」
+          if (staffRests.includes(day)) {
+            newSchedule[sIdx][dayIdx] = "休";
+          }
+          // 若為手動鎖定欄位且已有班次，保持原樣
+          else if (isLocked && existingShift) {
             newSchedule[sIdx][dayIdx] = existingShift;
             if (existingShift !== "休") {
               shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
             }
-          } 
-          // 若屬當月雲端/預約休假，強制填入「休」
-          else if (staffRests.includes(day)) {
-            newSchedule[sIdx][dayIdx] = "休";
           }
         });
       }
