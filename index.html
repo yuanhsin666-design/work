@@ -759,15 +759,7 @@
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 1. 填入鎖定與預約休假
-      for (let day = 1; day <= totalDays; day++) {
-        const dayIdx = day - 1;
-        staffs.forEach((_, sIdx) => {
-          const staffRests = currentMonthRests[sIdx] || [];
-          const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
-          const existingShift = lastGeneratedSchedule && lastGeneratedSchedule[sIdx] ? lastGeneratedSchedule[sIdx][dayIdx] : "";
-
-          // 1. 填入鎖定與預約休假
+     // 1. 填入鎖定與預約休假
 if (isLocked && existingShift) {
   newSchedule[sIdx][dayIdx] = existingShift;
   if (existingShift !== "休") {
