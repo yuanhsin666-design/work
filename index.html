@@ -744,14 +744,14 @@
     let dayP1 = dayIdx + 1 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 1]) : false;
     let dayP2 = dayIdx + 2 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 2]) : false;
 
-    if (dayM1 && dayM2) return true; // 前两天都是高强度，今天不能排
-    if (dayM1 && dayP1) return true; // 夹在中间
-    if (dayP1 && dayP2) return true; // 后两天都是高强度
+    if (dayM1 && dayM2) return true;
+    if (dayM1 && dayP1) return true;
+    if (dayP1 && dayP2) return true;
 
     return false;
   }
 
-  // 智能均匀算法核心：计算岗位在月份中的上一次排班日期，拉开排班间隔
+  // 计算岗位上一次排班日期以均匀拉开间隔
   function getLastAssignedDay(schedule, sIdx, currentDayIdx, shiftName) {
     for (let d = currentDayIdx - 1; d >= 0; d--) {
       if (schedule[sIdx][d] === shiftName) return d;
@@ -774,7 +774,7 @@
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 1. 填入锁定与预约休假
+      // 1. 【核心休假保护】优先锁死预约休假与手动锁定班次
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -783,12 +783,15 @@
           let existingShift = lastGeneratedSchedule && lastGeneratedSchedule[sIdx] ? lastGeneratedSchedule[sIdx][dayIdx] : "";
           if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
 
+          // 若為已鎖定欄位且有舊班次
           if (isLocked && existingShift) {
             newSchedule[sIdx][dayIdx] = existingShift;
             if (existingShift !== "休") {
               shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
             }
-          } else if (staffRests.includes(day)) {
+          } 
+          // 若屬當月雲端/預約休假，強制填入「休」
+          else if (staffRests.includes(day)) {
             newSchedule[sIdx][dayIdx] = "休";
           }
         });
@@ -796,11 +799,12 @@
 
       // 2. 逐日排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+        // 嚴格篩選：只有「未鎖定」且「不是休假」且「尚未排班」的人才能排班
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
-        // --- 阶段 A：高强度岗位 ---
+        // --- 階段 A：高強度崗位 ---
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -808,7 +812,6 @@
           let validCandidates = availableStaff.filter(sIdx => {
             let currentCount = shiftCounts[sIdx][hShift] || 0;
             let isConsecutive3 = checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts);
-            // 规则：上限2次，不能连三天
             return currentCount < 2 && !isConsecutive3;
           });
 
@@ -816,15 +819,12 @@
             validCandidates.sort((a, b) => {
               let countA = shiftCounts[a][hShift] || 0;
               let countB = shiftCounts[b][hShift] || 0;
-              // 优先让没轮到 (0次) 的人排
               if (countA !== countB) return countA - countB;
 
-              // 均匀规则：离上一次排该岗位越久的优先
               let lastA = getLastAssignedDay(newSchedule, a, dayIdx, hShift);
               let lastB = getLastAssignedDay(newSchedule, b, dayIdx, hShift);
               if (lastA !== lastB) return lastA - lastB;
 
-              // 总高强度次数少者优先
               let totalHighA = highShifts.reduce((sum, s) => sum + (shiftCounts[a][s] || 0), 0);
               let totalHighB = highShifts.reduce((sum, s) => sum + (shiftCounts[b][s] || 0), 0);
               return totalHighA - totalHighB || (Math.random() - 0.5);
@@ -837,7 +837,7 @@
           }
         });
 
-        // --- 阶段 B：一般基础岗位 ---
+        // --- 階段 B：一般基礎崗位 ---
         let remainingNormalShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -849,7 +849,6 @@
 
           let validCandidates = availableStaff.filter(sIdx => {
             let currentCount = shiftCounts[sIdx][shiftName] || 0;
-            // 规则：一般岗位上限 2 次
             return currentCount < 2;
           });
 
@@ -857,10 +856,8 @@
             validCandidates.sort((a, b) => {
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
-              // 优先排 0 次者（保证每个人都轮到）
               if (countA !== countB) return countA - countB;
 
-              // 均匀规则：拉开同崗位排班间隔
               let lastA = getLastAssignedDay(newSchedule, a, dayIdx, shiftName);
               let lastB = getLastAssignedDay(newSchedule, b, dayIdx, shiftName);
               if (lastA !== lastB) return lastA - lastB;
@@ -875,13 +872,12 @@
           }
         });
 
-        // --- 阶段 C：支援岗位 (先排完所有一般岗位才轮到，限制上限 1 次) ---
+        // --- 階段 C：支援崗位 ---
         let supName = supportShift.name;
         let validSupportStaff = availableStaff.filter(sIdx => {
           let supCount = shiftCounts[sIdx][supName] || 0;
-          if (supCount >= 1) return false; // 支援只能 1 次或 0 次
+          if (supCount >= 1) return false;
 
-          // 条件：必须所有基础岗位都至少排过了，才允许排支援
           let hasAssignedAllBase = allBaseShifts.every(bShift => (shiftCounts[sIdx][bShift] || 0) >= 1);
           return hasAssignedAllBase;
         });
@@ -898,7 +894,7 @@
         });
       }
 
-      // 3. 未排到的空位填入休假
+      // 3. 剩餘未排班的格子全部補上休假
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
@@ -912,8 +908,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
-      alert(`[${monthKey}] 排班成功！已严格执行轮岗与均匀排班规则。`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 排班完成（假表已完全保護）！`;
+      alert(`[${monthKey}] 排班成功！所有預約休假皆已完全鎖定保護。`);
 
     } catch (err) {
       console.error(err);
