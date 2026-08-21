@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (全崗位輪替+次數上限版)</title>
+  <title>智能动态排班工作表 (全崗位輪替+嚴格上限版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -67,7 +67,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #d9534f; font-weight: normal;">(🛑 嚴格防連三 + 全員輪替上限版)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #d9534f; font-weight: normal;">(🛑 上限2次 + 支援階梯輪替版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -115,7 +115,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">🎲 執行【公平階梯+嚴格防連三】智能排班</button>
+    <button onclick="generateSchedule()">🎲 執行【嚴格上限2次+支援階梯】智能排班</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -520,7 +520,7 @@
 
   function toggleColumnLock(dayIdx) {
     initLockedMap();
-    let allLocked = staffs.every((_, sIdx) => lockedMap[sIdx][dayIdx]);
+    let allLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][dayIdx]);
     staffs.forEach((_, sIdx) => { lockedMap[sIdx][dayIdx] = !allLocked; });
     renderAll();
     saveDataToLocal();
@@ -598,7 +598,6 @@
       let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
       html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${i} ${isColLocked ? '🔒' : ''}</th>`;
     }
-    // 主表右側加上「計數總休假日」標頭
     html += `<th rowspan="2" class="stat-total" style="min-width: 80px;">計數總休假日</th>`;
 
     html += `</tr><tr class="header-day">`;
@@ -633,7 +632,6 @@
         html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${cellContent}</td>`;
       }
 
-      // 計算個人「休」與「休(预)」總天數
       let restDaysCount = 0;
       for(let day=1; day<=totalDays; day++) {
         let content = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx][day - 1] : "";
@@ -672,12 +670,9 @@
         let shiftObj = baseShifts.find(s => s.name === shiftName);
         let isHigh = shiftObj && shiftObj.level === '高';
 
-        // 🛑 警示顏色：高強度 > 2 或 一般崗位 > 3 標紅，0 次標黃
         let countStyle = '';
-        if (isHigh && count > 2) {
+        if ((isHigh && count > 2) || (!isHigh && shiftName !== supportShift.name && count > 2)) {
           countStyle = 'color: #ffffff; background-color: #dc3545; font-weight: bold;'; 
-        } else if (!isHigh && shiftName !== supportShift.name && count > 3) {
-          countStyle = 'color: #ffffff; background-color: #d9534f; font-weight: bold;';
         } else if (count === 0 && shiftName !== supportShift.name) {
           countStyle = 'color: #d97706; background-color: #fef3c7; font-weight: bold;'; 
         } else if (shiftName === supportShift.name) {
@@ -735,28 +730,21 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  // 檢查某人如果今天排高強度，是否會導致「連續三天高強度」
   function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {
     let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;
     let dayM1 = dayIdx - 1 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 1]) : false;
     let dayP1 = dayIdx + 1 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 1]) : false;
     let dayP2 = dayIdx + 2 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 2]) : false;
 
-    // 前兩天都是高強度 + 今天 = 連三
     if (dayM2 && dayM1) return true;
-    // 前一天是高強度 + 今天 + 後一天是高強度 = 連三
     if (dayM1 && dayP1) return true;
-    // 今天 + 後兩天都是高強度 = 連三
     if (dayP1 && dayP2) return true;
 
     return false;
   }
 
   // -------------------------------------------------------------
-  // 🎲 重構版：全崗位輪替 + 防連三 + 上限控制演算法
-  // -------------------------------------------------------------
- // -------------------------------------------------------------
-  // 🎲 精確版：全員消滅0次 + 一般崗位限2(極限3) + 支援階梯輪替
+  // 🎲 精確演算法：消除0次 + 高/一般崗位嚴格上限2次 + 支援階梯輪替
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -797,25 +785,23 @@
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)" && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
-        // --- 階段 A：優先排滿高強度崗位 (🔴 防連三 + 嚴格上限 2 次 + 優先消除0次) ---
+        // --- 階段 A：優先排滿高強度崗位 (🔴 嚴格上限 2 次 + 防連三 + 優先消除 0 次) ---
         highShifts.forEach(hShift => {
-          let isAlreadyAssigned = staffs.some(s => newSchedule[s.idx || 0]?.[dayIdx] === hShift);
+          let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
 
           let validCandidates = availableStaff.filter(sIdx => {
             let currentCount = shiftCounts[sIdx][hShift] || 0;
             let isConsecutive3 = checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts);
-            return currentCount < 2 && !isConsecutive3; // 嚴格上限 2 次
+            return currentCount < 2 && !isConsecutive3; // 硬性限制 ≤ 2 次
           });
 
           if (validCandidates.length > 0) {
             validCandidates.sort((a, b) => {
               let countA = shiftCounts[a][hShift] || 0;
               let countB = shiftCounts[b][hShift] || 0;
-              // 第一優先：消滅 0 次
-              if (countA !== countB) return countA - countB;
+              if (countA !== countB) return countA - countB; // 0 次者優先
 
-              // 第二優先：總高強度次數較少者
               let totalHighA = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[a][s.name] || 0) : sum, 0);
               let totalHighB = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[b][s.name] || 0) : sum, 0);
               return totalHighA - totalHighB || (Math.random() - 0.5);
@@ -828,48 +814,42 @@
           }
         });
 
-        // --- 階段 B：排滿一般基礎崗位 (🟡🟢 上限 2 次，不得已才第 3 次 + 優先消除 0 次) ---
+        // --- 階段 B：排滿一般基礎崗位 (🟡🟢 硬性上限 2 次 + 強制消除 0 次) ---
         let remainingNormalShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
 
-        // 隨機打亂當天一般崗位順序，增加排班靈活性
         remainingNormalShifts.sort(() => Math.random() - 0.5);
 
         remainingNormalShifts.forEach(shiftName => {
           if (availableStaff.length === 0) return;
 
-          availableStaff.sort((a, b) => {
-            let countA = shiftCounts[a][shiftName] || 0;
-            let countB = shiftCounts[b][shiftName] || 0;
+          // 篩選出次數 < 2 次的人員
+          let validCandidates = availableStaff.filter(sIdx => (shiftCounts[sIdx][shiftName] || 0) < 2);
 
-            // 1. 強制優先：該崗位為 0 次的人
-            if ((countA === 0) !== (countB === 0)) return countA === 0 ? -1 : 1;
+          if (validCandidates.length > 0) {
+            validCandidates.sort((a, b) => {
+              let countA = shiftCounts[a][shiftName] || 0;
+              let countB = shiftCounts[b][shiftName] || 0;
+              if (countA !== countB) return countA - countB; // 0 次者優先
+              return Math.random() - 0.5;
+            });
 
-            // 2. 嚴格限制：優先選擇 < 2 次的人，非不得已不上 3 次
-            let isUnder2A = countA < 2 ? 0 : 1;
-            let isUnder2B = countB < 2 ? 0 : 1;
-            if (isUnder2A !== isUnder2B) return isUnder2A - isUnder2B;
-
-            // 3. 該崗位次數較少者優先
-            if (countA !== countB) return countA - countB;
-            return Math.random() - 0.5;
-          });
-
-          let chosenIdx = availableStaff.shift();
-          newSchedule[chosenIdx][dayIdx] = shiftName;
-          shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
+            let chosenIdx = validCandidates[0];
+            newSchedule[chosenIdx][dayIdx] = shiftName;
+            shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
+            availableStaff = availableStaff.filter(id => id !== chosenIdx);
+          }
         });
 
-        // --- 階段 C：一般崗位全排完後，剩餘人員才排「支援崗位」 (🔵 階梯式輪替) ---
+        // --- 階段 C：一般崗位 12 個全部填滿後，剩餘人員才排「支援崗位」 (🔵 階梯輪替：1次→2次→3次) ---
         while (availableStaff.length > 0) {
           let supName = supportShift.name;
 
-          // 支援崗位極限平攤邏輯：1次 -> 2次 -> 3次
           availableStaff.sort((a, b) => {
             let supA = shiftCounts[a][supName] || 0;
             let supB = shiftCounts[b][supName] || 0;
-            if (supA !== supB) return supA - supB; // 次數少者優先
+            if (supA !== supB) return supA - supB; // 次數少者優先，確保全員滿1次後才會有第2次
             return Math.random() - 0.5;
           });
 
@@ -894,7 +874,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
-      alert(`[${monthKey}] 排班完成！\n✔ 每人保證輪到所有崗位（消滅0次）\n✔ 高強度絕對不連三，上限 ≤ 2 次\n✔ 一般崗位上限 2 次（不得已才第 3 次）\n✔ 支援嚴格遵守「全員1次→全員2次→第3次」階梯輪替！`);
+      alert(`[${monthKey}] 排班完成！\n✔ 所有人皆會輪到所有崗位（無0次）\n✔ 高強度上限 2 次，且絕對不連三\n✔ 一般崗位硬性上限 2 次\n✔ 支援崗位於一般崗位排滿後安排，並嚴格按「1次→2次→3次」階梯輪替！`);
 
     } catch (err) {
       console.error(err);
