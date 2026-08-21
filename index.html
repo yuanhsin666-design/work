@@ -767,16 +767,24 @@
           const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
           const existingShift = lastGeneratedSchedule && lastGeneratedSchedule[sIdx] ? lastGeneratedSchedule[sIdx][dayIdx] : "";
 
-          if (isLocked && existingShift) {
-            newSchedule[sIdx][dayIdx] = existingShift;
-            if (existingShift !== "休" && existingShift !== "休(预)") {
-              shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
-            }
-          } else if (staffRests.includes(day)) {
-            newSchedule[sIdx][dayIdx] = "休(预)";
-          }
-        });
-      }
+          // 1. 填入鎖定與預約休假
+if (isLocked && existingShift) {
+  newSchedule[sIdx][dayIdx] = existingShift;
+  if (existingShift !== "休") {
+    shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
+  }
+} else if (staffRests.includes(day)) {
+  newSchedule[sIdx][dayIdx] = "休"; // 已去除 (預)
+}
+
+// 2. 剩餘空位自動補齊
+for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
+  for (let dIdx = 0; dIdx < totalDays; dIdx++) {
+    if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
+      newSchedule[sIdx][dIdx] = "休"; // 已去除 (預)
+    }
+  }
+}
 
       // 2. 逐日排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
