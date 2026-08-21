@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (支援嚴格限0~1次版)</title>
+  <title>智能动态排班工作表 (嚴格規則版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -67,7 +67,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #d9534f; font-weight: normal;">(🛑 上限2次 + 支援限0~1次版)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #d9534f; font-weight: normal;">(🛑 上限2次 + 先一般後支援 + 支援限0~1次)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -115,7 +115,7 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">🎲 執行【崗位上限2次+支援0~1次】智能排班</button>
+    <button onclick="generateSchedule()">🎲 執行智能排班</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -671,7 +671,7 @@
         if (count > 2 && shiftName !== supportShift.name) {
           countStyle = 'color: #ffffff; background-color: #dc3545; font-weight: bold;'; 
         } else if (shiftName === supportShift.name && count > 1) {
-          countStyle = 'color: #ffffff; background-color: #dc3545; font-weight: bold;'; // 支援大於 1 次警示
+          countStyle = 'color: #ffffff; background-color: #dc3545; font-weight: bold;'; 
         } else if (count === 0 && shiftName !== supportShift.name) {
           countStyle = 'color: #d97706; background-color: #fef3c7; font-weight: bold;'; 
         } else if (shiftName === supportShift.name) {
@@ -743,7 +743,7 @@
   }
 
   // -------------------------------------------------------------
-  // 🎲 演算法：消滅0次 + 基礎崗位上限2次 + 支援崗位極限 0~1 次
+  // 🎲 核心演算法：消除 0 次 + 基礎上限 2 次 + 防連三 + 先一般後支援 + 支援限 0~1 次
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -778,13 +778,13 @@
         });
       }
 
-      // 2. 逐日進行排班
+      // 2. 逐日排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)" && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
-        // --- 階段 A：優先排滿高強度崗位 (🔴 硬性上限 2 次 + 防連三 + 優先消除 0 次) ---
+        // --- 階段 A：高強度崗位 (上限 2 次 + 防連三 + 消除 0 次) ---
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -792,14 +792,14 @@
           let validCandidates = availableStaff.filter(sIdx => {
             let currentCount = shiftCounts[sIdx][hShift] || 0;
             let isConsecutive3 = checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts);
-            return currentCount < 2 && !isConsecutive3; // 硬性限制 ≤ 2 次
+            return currentCount < 2 && !isConsecutive3;
           });
 
           if (validCandidates.length > 0) {
             validCandidates.sort((a, b) => {
               let countA = shiftCounts[a][hShift] || 0;
               let countB = shiftCounts[b][hShift] || 0;
-              if (countA !== countB) return countA - countB; // 0 次者優先
+              if (countA !== countB) return countA - countB;
 
               let totalHighA = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[a][s.name] || 0) : sum, 0);
               let totalHighB = baseShifts.reduce((sum, s) => s.level === '高' ? sum + (shiftCounts[b][s.name] || 0) : sum, 0);
@@ -813,7 +813,7 @@
           }
         });
 
-        // --- 階段 B：排滿一般基礎崗位 (🟡🟢 硬性上限 2 次 + 強制消除 0 次) ---
+        // --- 階段 B：一般基礎崗位 (排完一般崗位，上限 2 次 + 消除 0 次) ---
         let remainingNormalShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -829,7 +829,7 @@
             validCandidates.sort((a, b) => {
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
-              if (countA !== countB) return countA - countB; // 0 次者優先
+              if (countA !== countB) return countA - countB;
               return Math.random() - 0.5;
             });
 
@@ -840,10 +840,8 @@
           }
         });
 
-        // --- 階段 C：一般崗位排滿後，排「支援崗位」(🔵 嚴格限定 0~1 次) ---
+        // --- 階段 C：一般崗位排滿後才輪到支援 (支援上限 0~1 次) ---
         let supName = supportShift.name;
-        
-        // 篩選出「支援次數目前只有 0 次」的員工
         let validSupportStaff = availableStaff.filter(sIdx => (shiftCounts[sIdx][supName] || 0) < 1);
 
         validSupportStaff.sort(() => Math.random() - 0.5);
@@ -854,7 +852,7 @@
         });
       }
 
-      // 3. 補齊未排到的空白格為「休(预)」
+      // 3. 未排到的空位填入休假
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
@@ -869,7 +867,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
-      alert(`[${monthKey}] 排班完成！\n✔ 所有人皆會輪到所有崗位（無0次）\n✔ 高強度上限 2 次，且絕對不連三\n✔ 一般崗位硬性上限 2 次\n✔ 支援崗位於一般崗位排滿後安排，且【最多只排 1 次】！`);
+      alert(`[${monthKey}] 排班成功！\n✔ 每個人皆輪到所有基礎崗位（無 0 次）\n✔ 高強度上限 2 次，且絕對不連三\n✔ 一般崗位上限 2 次\n✔ 先排滿一般崗位才輪到支援\n✔ 支援崗位每人僅能排 0 次或 1 次`);
 
     } catch (err) {
       console.error(err);
