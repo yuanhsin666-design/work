@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (嚴格規則版)</title>
+  <title>智能动态排班工作表 (休假字串強制修正版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -67,7 +67,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #d9534f; font-weight: normal;">(🛑 上限2次 + 先一般後支援 + 支援限0~1次)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 14px; color: #d9534f; font-weight: normal;">(🛑 休假一律顯示"休")</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -211,13 +211,19 @@
     }
   }
 
+  // 清除舊資料中的 "休(预)" 或 "休(預)" 的清理函式
+  function sanitizeSchedule(sched) {
+    if (!sched) return null;
+    return sched.map(row => row.map(cell => (cell === "休(预)" || cell === "休(預)") ? "休" : cell));
+  }
+
   async function saveDataToLocal() {
     saveGlobalConfig();
     const monthKey = getMonthKey();
     
     const monthData = {
       currentMonthRests: currentMonthRests,
-      lastGeneratedSchedule: lastGeneratedSchedule,
+      lastGeneratedSchedule: sanitizeSchedule(lastGeneratedSchedule),
       lockedMap: lockedMap,
       cloudUrl: document.getElementById('cloudUrlInput').value
     };
@@ -267,7 +273,7 @@
     }
 
     currentMonthRests = data.currentMonthRests || {};
-    lastGeneratedSchedule = data.lastGeneratedSchedule || null;
+    lastGeneratedSchedule = sanitizeSchedule(data.lastGeneratedSchedule);
     lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
     document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
     return true;
@@ -575,8 +581,7 @@
   }
 
   function getShiftClass(shiftName) {
-    if (!shiftName) return "";
-    if (shiftName === "休" || shiftName === "休(预)") return "";
+    if (!shiftName || shiftName === "休") return "";
     if (shiftName === supportShift.name) return "shift-support";
     let found = baseShifts.find(s => s.name === shiftName);
     if (!found) return "";
@@ -622,9 +627,12 @@
         let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
 
         if (scheduleData && scheduleData[sIdx]) cellContent = scheduleData[sIdx][day - 1] || "";
-        else if (staffRests.includes(day)) cellContent = "休(预)";
+        else if (staffRests.includes(day)) cellContent = "休";
 
-        if (cellContent === "休(預)") cellContent = "休";
+        // 核心渲染清洗：只要遇到任何舊標籤，直接清洗為 "休"
+        if (cellContent === "休(预)" || cellContent === "休(預)") cellContent = "休";
+
+        if (cellContent && cellContent !== "休") dailyWorkingTotals[day - 1]++;
 
         let cellClass = getShiftClass(cellContent);
         if (isLocked) cellClass += " cell-locked";
@@ -635,8 +643,10 @@
       let restDaysCount = 0;
       for(let day=1; day<=totalDays; day++) {
         let content = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx][day - 1] : "";
-        if (!content && staffRests.includes(day)) content = "休(预)";
-        if (content === "休" || content === "休(预)") restDaysCount++;
+        if (!content && staffRests.includes(day)) content = "休";
+        if (content === "休(预)" || content === "休(預)") content = "休";
+        
+        if (content === "休") restDaysCount++;
       }
       html += `<td class="stat-total">${restDaysCount} 天</td>`;
 
@@ -742,9 +752,6 @@
     return false;
   }
 
-  // -------------------------------------------------------------
-  // 🎲 核心演算法：消除 0 次 + 基礎上限 2 次 + 防連三 + 先一般後支援 + 支援限 0~1 次
-  // -------------------------------------------------------------
   function generateSchedule() {
     try {
       const year = parseInt(document.getElementById('yearSelect').value);
@@ -759,32 +766,33 @@
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
-     // 1. 填入鎖定與預約休假
-if (isLocked && existingShift) {
-  newSchedule[sIdx][dayIdx] = existingShift;
-  if (existingShift !== "休") {
-    shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
-  }
-} else if (staffRests.includes(day)) {
-  newSchedule[sIdx][dayIdx] = "休"; // 已去除 (預)
-}
+      // 1. 填入鎖定與預約休假
+      for (let day = 1; day <= totalDays; day++) {
+        const dayIdx = day - 1;
+        staffs.forEach((_, sIdx) => {
+          const staffRests = currentMonthRests[sIdx] || [];
+          const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
+          let existingShift = lastGeneratedSchedule && lastGeneratedSchedule[sIdx] ? lastGeneratedSchedule[sIdx][dayIdx] : "";
+          if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
 
-// 2. 剩餘空位自動補齊
-for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
-  for (let dIdx = 0; dIdx < totalDays; dIdx++) {
-    if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
-      newSchedule[sIdx][dIdx] = "休"; // 已去除 (預)
-    }
-  }
-}
+          if (isLocked && existingShift) {
+            newSchedule[sIdx][dayIdx] = existingShift;
+            if (existingShift !== "休") {
+              shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
+            }
+          } else if (staffRests.includes(day)) {
+            newSchedule[sIdx][dayIdx] = "休";
+          }
+        });
+      }
 
       // 2. 逐日排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
-          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休(预)" && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
+          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
-        // --- 階段 A：高強度崗位 (上限 2 次 + 防連三 + 消除 0 次) ---
+        // --- 階段 A：高強度崗位 ---
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -813,7 +821,7 @@ for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
           }
         });
 
-        // --- 階段 B：一般基礎崗位 (排完一般崗位，上限 2 次 + 消除 0 次) ---
+        // --- 階段 B：一般基礎崗位 ---
         let remainingNormalShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -840,7 +848,7 @@ for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
           }
         });
 
-        // --- 階段 C：一般崗位排滿後才輪到支援 (支援上限 0~1 次) ---
+        // --- 階段 C：支援崗位 ---
         let supName = supportShift.name;
         let validSupportStaff = availableStaff.filter(sIdx => (shiftCounts[sIdx][supName] || 0) < 1);
 
@@ -856,18 +864,18 @@ for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
-            newSchedule[sIdx][dIdx] = "休(预)";
+            newSchedule[sIdx][dIdx] = "休";
           }
         }
       }
 
-      lastGeneratedSchedule = newSchedule;
+      lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
-      alert(`[${monthKey}] 排班成功！\n✔ 每個人皆輪到所有基礎崗位（無 0 次）\n✔ 高強度上限 2 次，且絕對不連三\n✔ 一般崗位上限 2 次\n✔ 先排滿一般崗位才輪到支援\n✔ 支援崗位每人僅能排 0 次或 1 次`);
+      alert(`[${monthKey}] 排班成功！休假已全部顯示為「休」。`);
 
     } catch (err) {
       console.error(err);
