@@ -149,7 +149,6 @@
   </div>
 </div>
 
-<!-- ================= 新增：最底部的 1 号与 16 号高强度人员/岗位记录表 ================= -->
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号高强度人员/岗位记录表</h3>
@@ -157,6 +156,17 @@
   </div>
   <div class="table-container">
     <table id="highIntensityTable"></table>
+  </div>
+</div>
+
+<!-- ================= 新增：最底部的每月拿支援的人员记录表 ================= -->
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+    <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表</button>
+  </div>
+  <div class="table-container">
+    <table id="supportStaffTable"></table>
   </div>
 </div>
 
@@ -715,15 +725,14 @@
     document.getElementById('statsTable').innerHTML = html;
   }
 
-  // 新增：渲染最底部的 1号 与 16号 高强度记录表
   function renderHighIntensityTable(scheduleData = null) {
     const highShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
     let records = [];
 
     if (scheduleData) {
       staffs.forEach((staff, sIdx) => {
-        let shift1 = scheduleData[sIdx] ? scheduleData[sIdx][0] : "";   // 1号 (索引 0)
-        let shift16 = scheduleData[sIdx] ? scheduleData[sIdx][15] : ""; // 16号 (索引 15)
+        let shift1 = scheduleData[sIdx] ? scheduleData[sIdx][0] : "";
+        let shift16 = scheduleData[sIdx] ? scheduleData[sIdx][15] : "";
 
         if (shift1 && highShiftNames.includes(shift1)) {
           records.push({ date: '1号', name: staff.name, shift: shift1 });
@@ -769,10 +778,71 @@
     document.getElementById('highIntensityTable').innerHTML = html;
   }
 
+  // 新增：渲染最底部的每月拿支援的人员记录表
+  function renderSupportStaffTable(scheduleData = null) {
+    let records = [];
+
+    if (scheduleData) {
+      staffs.forEach((staff, sIdx) => {
+        let supportDays = [];
+        let totalDays = scheduleData[sIdx] ? scheduleData[sIdx].length : 0;
+        
+        for (let d = 0; d < totalDays; d++) {
+          if (scheduleData[sIdx][d] === supportShift.name) {
+            supportDays.push(`${d + 1}号`);
+          }
+        }
+
+        if (supportDays.length > 0) {
+          records.push({
+            name: staff.name,
+            count: supportDays.length,
+            days: supportDays.join('、')
+          });
+        }
+      });
+    }
+
+    let html = `
+      <thead>
+        <tr style="background-color: #f8fafc; font-weight: bold;">
+          <th style="padding: 8px; width: 25%;">人员姓名</th>
+          <th style="padding: 8px; width: 20%;">支援总天数</th>
+          <th style="padding: 8px; width: 55%;">支援的具体日期</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    if (records.length === 0) {
+      html += `
+        <tr>
+          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
+            当前月份无安排支援岗位的记录
+          </td>
+        </tr>
+      `;
+    } else {
+      records.forEach(item => {
+        html += `
+          <tr>
+            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
+            <td style="font-weight: bold; color: #006064; padding: 8px;">${item.count} 天</td>
+            <td class="shift-support" style="padding: 8px;">${item.days}</td>
+          </tr>
+        `;
+      });
+    }
+
+    html += `</tbody>`;
+    document.getElementById('supportStaffTable').innerHTML = html;
+  }
+
   function renderAll() {
     renderTable(lastGeneratedSchedule);
     renderStatsTable(lastGeneratedSchedule);
     renderHighIntensityTable(lastGeneratedSchedule);
+    renderSupportStaffTable(lastGeneratedSchedule);
   }
 
   async function copyTableWithStyles(tableId) {
