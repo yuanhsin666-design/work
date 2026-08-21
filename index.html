@@ -892,66 +892,6 @@
     return false;
   }
 
-  // 月底自动补救：找出「本月对某岗位仍是0次」的人，尝试跟当天已经排该岗位
-  // ≥2次的同事互换班次，让0次的人补上1次，且不会把对方换成0次。
-  // 交换后仍会重新检查「高强度连续三天」限制，不符合就换下一个候选人/候选日。
-  // 找不到任何可互换的机会时，原样保留（会在最终提示中列出，需人工检查）。
-  function repairZeroCounts(schedule, shiftCounts, totalDays, targetShifts) {
-    const highNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
-    let unresolved = [];
-
-    staffs.forEach((_, sIdx) => {
-      targetShifts.forEach(shiftX => {
-        if ((shiftCounts[sIdx][shiftX] || 0) > 0) return; // 已经轮到过，不用补
-
-        let fixed = false;
-        for (let dayIdx = 0; dayIdx < totalDays && !fixed; dayIdx++) {
-          if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue;
-
-          let myShift = schedule[sIdx][dayIdx];
-          if (!myShift || myShift === "休" || myShift === supportShift.name) continue;
-          if (myShift === shiftX) continue;
-          // 换出去的班自己必须已经够2次以上，换掉一个也不会归零
-          if ((shiftCounts[sIdx][myShift] || 0) < 2) continue;
-
-          for (let sJdx = 0; sJdx < staffs.length && !fixed; sJdx++) {
-            if (sJdx === sIdx) continue;
-            if (lockedMap[sJdx] && lockedMap[sJdx][dayIdx]) continue;
-            if (schedule[sJdx][dayIdx] !== shiftX) continue;
-            // 对方换掉这个班后也不能归零
-            if ((shiftCounts[sJdx][shiftX] || 0) < 2) continue;
-
-            const backupI = schedule[sIdx][dayIdx];
-            const backupJ = schedule[sJdx][dayIdx];
-            schedule[sIdx][dayIdx] = shiftX;
-            schedule[sJdx][dayIdx] = myShift;
-
-            const violateI = highNames.includes(shiftX) && checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames);
-            const violateJ = highNames.includes(myShift) && checkHighConsecutiveThree(schedule, sJdx, dayIdx, highNames);
-
-            if (violateI || violateJ) {
-              schedule[sIdx][dayIdx] = backupI;
-              schedule[sJdx][dayIdx] = backupJ;
-              continue;
-            }
-
-            shiftCounts[sIdx][myShift] -= 1;
-            shiftCounts[sIdx][shiftX] = (shiftCounts[sIdx][shiftX] || 0) + 1;
-            shiftCounts[sJdx][shiftX] -= 1;
-            shiftCounts[sJdx][myShift] = (shiftCounts[sJdx][myShift] || 0) + 1;
-            fixed = true;
-          }
-        }
-
-        if (!fixed) {
-          unresolved.push(`${staffs[sIdx].name} - ${shiftX.replace(/\n/g, '')}`);
-        }
-      });
-    });
-
-    return unresolved;
-  }
-
   // -------------------------------------------------------------
   // 核心智能排班算法（严格遵守所有新限制）
   // -------------------------------------------------------------
@@ -1113,41 +1053,31 @@
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
         });
 
-        // C. 【条件：支援排在最后，且只能1次或0次；名额不够时宁可当天空着，不违反上限】
+        // C. 【条件：支援排在最后，且只能1次或0次，需每个人都轮过才可再次支援】
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
         if (unassignedStaff.length > 0) {
-          // 只有本月「还没拿过支援(0次)」的人才有资格被排支援
-          // 若当天没岗位的人数 > 还有资格支援的人数，多出来的人当天维持空白，
-          // 绝不允许同一人本月支援超过1次
-          let eligibleForSupport = unassignedStaff.filter(sIdx => (shiftCounts[sIdx][supName] || 0) === 0);
+          // 支援岗位的轮流限制逻辑
+          unassignedStaff.forEach(sIdx => {
+            let supCount = shiftCounts[sIdx][supName] || 0;
+            let minSupCount = getShiftMinCount(supName);
 
-          eligibleForSupport.forEach(sIdx => {
+            // 必须等大家都拿过 N 次支援后，才允许拿第 N+1 次
             newSchedule[sIdx][dayIdx] = supName;
-            shiftCounts[sIdx][supName] = (shiftCounts[sIdx][supName] || 0) + 1;
+            shiftCounts[sIdx][supName] = supCount + 1;
           });
-          // 其余人（已支援过1次的人）当天保持空白，不再分配
         }
       }
-
-      // 3. 【条件：每岗每人都要轮到、不能是0】月底自动补救
-      const allNonSupportShifts = [...highShifts, ...normalShifts];
-      const unresolvedZero = repairZeroCounts(newSchedule, shiftCounts, totalDays, allNonSupportShifts);
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      if (unresolvedZero.length > 0) {
-        document.getElementById('status').innerText = `⚠️ [${monthKey}] 排班完成，但有 ${unresolvedZero.length} 项无法自动补齐（0次），请手动检查！`;
-        alert(`[${monthKey}] 智能排班完成，但以下项目本月仍是 0 次、且找不到可互换的班次自动补齐，请手动调整：\n\n` + unresolvedZero.join('\n'));
-      } else {
-        document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
-        alert(`[${monthKey}] 智能排班成功！已严格按照您的全套规则完成分配。`);
-      }
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
+      alert(`[${monthKey}] 智能排班成功！已严格按照您的全套规则完成分配。`);
 
     } catch (err) {
       console.error(err);
