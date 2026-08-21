@@ -149,6 +149,17 @@
   </div>
 </div>
 
+<!-- ================= 新增：最底部的 1 号与 16 号高强度人员/岗位记录表 ================= -->
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号高强度人员/岗位记录表</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
+  </div>
+  <div class="table-container">
+    <table id="highIntensityTable"></table>
+  </div>
+</div>
+
 <script>
   const SUPABASE_URL = 'https://sgtxweyklcyimerwvuhu.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_IiIoN5F_XaIqEsvmKmzdqg_7jqR7Qcb'; 
@@ -211,7 +222,6 @@
     }
   }
 
-  // 清除舊資料中的 "休(预)" 或 "休(預)" 的清理函式
   function sanitizeSchedule(sched) {
     if (!sched) return null;
     return sched.map(row => row.map(cell => (cell === "休(预)" || cell === "休(預)") ? "休" : cell));
@@ -591,7 +601,7 @@
     return "";
   }
 
- function renderTable(scheduleData = null) {
+  function renderTable(scheduleData = null) {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -632,7 +642,6 @@
 
         if (cellContent === "休(预)" || cellContent === "休(預)") cellContent = "休";
 
-        // 统计上班与休假人数
         if (cellContent && cellContent !== "休") {
           dailyWorkingTotals[day - 1]++;
         } else if (cellContent === "休") {
@@ -658,12 +667,10 @@
       html += `</tr>`;
     });
     
-    // 1. 当日休假人数（调换至上方）
     html += `<tr class="row-daily-total" style="background-color: #f1f5f9; color: #dc2626;"><td class="staff-name">当日休假人数</td>`;
     for(let day=1; day<=totalDays; day++) html += `<td>${dailyRestTotals[day - 1]}人</td>`;
     html += `<td>-</td></tr>`;
 
-    // 2. 当日上班人数（调换至下方）
     html += `<tr class="row-daily-total"><td class="staff-name">当日上班人数</td>`;
     for(let day=1; day<=totalDays; day++) html += `<td>${dailyWorkingTotals[day - 1]}人</td>`;
     html += `<td>-</td></tr>`;
@@ -708,9 +715,64 @@
     document.getElementById('statsTable').innerHTML = html;
   }
 
+  // 新增：渲染最底部的 1号 与 16号 高强度记录表
+  function renderHighIntensityTable(scheduleData = null) {
+    const highShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
+    let records = [];
+
+    if (scheduleData) {
+      staffs.forEach((staff, sIdx) => {
+        let shift1 = scheduleData[sIdx] ? scheduleData[sIdx][0] : "";   // 1号 (索引 0)
+        let shift16 = scheduleData[sIdx] ? scheduleData[sIdx][15] : ""; // 16号 (索引 15)
+
+        if (shift1 && highShiftNames.includes(shift1)) {
+          records.push({ date: '1号', name: staff.name, shift: shift1 });
+        }
+        if (shift16 && highShiftNames.includes(shift16)) {
+          records.push({ date: '16号', name: staff.name, shift: shift16 });
+        }
+      });
+    }
+
+    let html = `
+      <thead>
+        <tr style="background-color: #f8fafc; font-weight: bold;">
+          <th style="padding: 8px; width: 20%;">日期</th>
+          <th style="padding: 8px; width: 40%;">人员姓名</th>
+          <th style="padding: 8px; width: 40%;">高强度岗位名称</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    if (records.length === 0) {
+      html += `
+        <tr>
+          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
+            当前无 1号 或 16号 安排高强度岗位的人员记录
+          </td>
+        </tr>
+      `;
+    } else {
+      records.forEach(item => {
+        html += `
+          <tr>
+            <td style="font-weight: bold; color: #d9534f; padding: 8px;">${item.date}</td>
+            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
+            <td class="shift-high" style="padding: 8px;">${item.shift.replace(/\n/g, ' ')}</td>
+          </tr>
+        `;
+      });
+    }
+
+    html += `</tbody>`;
+    document.getElementById('highIntensityTable').innerHTML = html;
+  }
+
   function renderAll() {
     renderTable(lastGeneratedSchedule);
     renderStatsTable(lastGeneratedSchedule);
+    renderHighIntensityTable(lastGeneratedSchedule);
   }
 
   async function copyTableWithStyles(tableId) {
@@ -746,7 +808,7 @@
         const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
         const blobText = new Blob([cloneTable.innerText], { type: "text/plain" });
         await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
-        alert("✅ 已复制整表（含颜色 + 直式换行）！直接在 Excel 中按 Ctrl+V 粘贴即可！");
+        alert("✅ 已复制表格！直接在 Excel 中按 Ctrl+V 粘贴即可！");
       }
     } catch (err) { alert("复制失败，请重试。"); }
   }
@@ -778,7 +840,6 @@
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = staffs.map(() => ({}));
 
-      // 1. 填入鎖定與預約休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -798,13 +859,11 @@
         });
       }
 
-      // 2. 逐日排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
-        // --- 階段 A：高強度崗位 ---
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -833,7 +892,6 @@
           }
         });
 
-        // --- 階段 B：一般基礎崗位 ---
         let remainingNormalShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -860,7 +918,6 @@
           }
         });
 
-        // --- 階段 C：支援崗位 ---
         let supName = supportShift.name;
         let validSupportStaff = availableStaff.filter(sIdx => (shiftCounts[sIdx][supName] || 0) < 1);
 
@@ -872,7 +929,6 @@
         });
       }
 
-      // 3. 未排到的空位填入休假
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
