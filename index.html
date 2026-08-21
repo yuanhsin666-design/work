@@ -159,7 +159,6 @@
   </div>
 </div>
 
-<!-- ================= 新增：最底部的每月拿支援的人员记录表 ================= -->
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表</h3>
@@ -778,7 +777,6 @@
     document.getElementById('highIntensityTable').innerHTML = html;
   }
 
-  // 新增：渲染最底部的每月拿支援的人员记录表
   function renderSupportStaffTable(scheduleData = null) {
     let records = [];
 
@@ -908,9 +906,10 @@
       const normalShifts = baseShifts.filter(s => s.level !== '高').map(s => s.name);
       
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
-      // 修正 1: 使用 Array.from 确保每个元素都是独立的属性对象
+      // 修正 1: 使用 Array.from 确保每个员工获得独立的计数对象，修复全局污染 Bug
       let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
 
+      // 预先填充锁定与休假，保证休假不可被篡改
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -930,11 +929,13 @@
         });
       }
 
+      // 按天开始按规则动态分配岗位
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] !== "休" && newSchedule[sIdx][dayIdx] === "";
         });
 
+        // 1. 先排高强度岗位（上限 2 次，不能连三天）
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -964,6 +965,7 @@
           }
         });
 
+        // 2. 先把一般岗位排完（上限 2 次）
         let remainingNormalShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -991,7 +993,7 @@
           }
         });
 
-        // 修正 2: 给支援岗位分配加上空值与类型保护
+        // 3. 才会轮到支援（支援只能 1 次或 0 次）
         let supName = supportShift.name;
         
         staffs.forEach((_, idx) => {
@@ -1011,6 +1013,7 @@
         });
       }
 
+      // 4. 补齐空档为休假
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
         for (let dIdx = 0; dIdx < totalDays; dIdx++) {
           if (!newSchedule[sIdx][dIdx] || newSchedule[sIdx][dIdx].trim() === "") {
