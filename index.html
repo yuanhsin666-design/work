@@ -67,7 +67,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 全岗位轮换与分红日平摊规则版)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 严格规则与智能后置互换修正版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -707,8 +707,8 @@
         let countStyle = '';
         if (count === 0 && shiftName !== supportShift.name) {
           countStyle = 'color: #dc2626; background-color: #fee2e2; font-weight: bold;'; // 未轮到警示
-        } else if (count > 2 && shiftName !== supportShift.name) {
-          countStyle = 'color: #15803d; background-color: #dcfce7; font-weight: bold;'; // 超过2次标绿
+        } else if (count >= 2 && shiftName !== supportShift.name) {
+          countStyle = 'color: #15803d; background-color: #dcfce7; font-weight: bold;'; // 达标标绿
         } else if (shiftName === supportShift.name) {
           countStyle = 'color: #006064; font-weight: bold;';
         }
@@ -878,7 +878,7 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  // 检查高强度岗位是否连续三天
+  // 辅助检测：高强度岗位是否连续三天
   function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {
     let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;
     let dayM1 = dayIdx - 1 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 1]) : false;
@@ -893,7 +893,7 @@
   }
 
   // -------------------------------------------------------------
-  // 核心智能排班算法（含全套规则 + 智能放宽互换修复）
+  // 核心智能排班算法（严格符合 7 大规则 + 后置互换扫频补漏）
   // -------------------------------------------------------------
   function generateSchedule() {
     try {
@@ -919,7 +919,7 @@
         return Math.min(...counts);
       }
 
-      // 1. 休假锁定
+      // 规则 1：休假锁定 (休假不可变动)
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -939,23 +939,27 @@
         });
       }
 
+      // 验证算法规则 (规则 3 & 规则 4)
       function canAssign(sIdx, sName, isHigh) {
         let currentCount = shiftCounts[sIdx][sName] || 0;
         let minCount = getShiftMinCount(sName);
 
+        // 规则 3：高强度上限 2 次
         if (isHigh && currentCount >= 2) return false;
+        
+        // 规则 4：其余岗位最多 2 次，全员排满 2 次才可排第 3 次
         if (currentCount >= 2 && minCount < 2) return false;
         if (currentCount >= 3) return false;
 
         return true;
       }
 
-      // 2. 逐日排班
+      // 2. 逐日安排班次
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         const currentDay = dayIdx + 1;
         const isBonusDay = (currentDay === 1 || currentDay === 16);
 
-        // 高强度岗位
+        // 先排高强度岗位 (规则 3, 规则 7)
         highShifts.forEach(hShift => {
           if (staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift)) return;
 
@@ -963,8 +967,10 @@
           if (availableStaff.length === 0) return;
 
           let validCandidates = availableStaff.filter(sIdx => {
+            // 规则 3：高强度防连三
             if (checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts)) return false;
 
+            // 规则 7：1号与16号分红日轮流机制
             if (isBonusDay) {
               let key = `${sIdx}_${hShift}`;
               let userBonusCount = globalBonusHistory[key] || 0;
@@ -992,7 +998,7 @@
           }
         });
 
-        // 一般岗位
+        // 再排一般岗位
         let unassignedShifts = normalShifts.filter(sName => !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName));
         unassignedShifts.sort(() => Math.random() - 0.5);
 
@@ -1010,25 +1016,23 @@
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
         });
 
-        // 支援岗位
+        // 规则 5：每日把一般岗位排完才轮到支援，支援只能 1 次或 0 次，当月不重复
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "");
         if (unassignedStaff.length > 0) {
-          unassignedStaff.sort((a, b) => {
-            let supA = globalSupportHistory[a] || 0;
-            let supB = globalSupportHistory[b] || 0;
-            return supA - supB || (Math.random() - 0.5);
-          });
-
           unassignedStaff.forEach(sIdx => {
-            newSchedule[sIdx][dayIdx] = supName;
-            shiftCounts[sIdx][supName] = (shiftCounts[sIdx][supName] || 0) + 1;
-            globalSupportHistory[sIdx] = (globalSupportHistory[sIdx] || 0) + 1;
+            let currentSupCount = shiftCounts[sIdx][supName] || 0;
+            // 当月最多 1 次支援
+            if (currentSupCount < 1) {
+              newSchedule[sIdx][dayIdx] = supName;
+              shiftCounts[sIdx][supName] = (shiftCounts[sIdx][supName] || 0) + 1;
+              globalSupportHistory[sIdx] = (globalSupportHistory[sIdx] || 0) + 1;
+            }
           });
         }
       }
 
       // -------------------------------------------------------------
-      // 3. 后置补漏机制（强化修复：解决 0 次岗位）
+      // 3. 严格后置扫频互换机制 (针对 0 次的目标岗位)
       // -------------------------------------------------------------
       let unresolvableAlerts = [];
       let swapSuccessCount = 0;
@@ -1039,7 +1043,7 @@
         allOfficialShifts.forEach(shiftName => {
           let count = shiftCounts[sIdx][shiftName] || 0;
 
-          // 发现有正式岗位为 0 次！
+          // 规则 2 检查：发现有正式岗位为 0 次！
           if (count === 0) {
             let swappedSuccess = false;
 
@@ -1048,8 +1052,11 @@
 
               let currentShiftForS = newSchedule[sIdx][dayIdx];
 
-              // 不得改动休假、支援和锁定岗位
+              // 不得修改休假、支援岗位以及锁定单元格
               if (currentShiftForS === "休" || currentShiftForS === supName || (lockedMap[sIdx] && lockedMap[sIdx][dayIdx])) continue;
+
+              // 检查发起人当天的这个班次是否已排过 2 次以上
+              let sCurrentShiftCount = shiftCounts[sIdx][currentShiftForS] || 0;
 
               // 找当天刚好拿着目标岗位的同事
               let targetPartnerIdx = staffs.findIndex((_, pIdx) => newSchedule[pIdx][dayIdx] === shiftName);
@@ -1058,16 +1065,21 @@
                 let partnerShiftName = shiftName;
                 let partnerCount = shiftCounts[targetPartnerIdx][partnerShiftName] || 0;
 
-                // 条件放宽：只要对方该岗位天数 > 1（拿了2次及以上），或者对方拥有多余的岗位
-                if (partnerCount > 1 || (partnerCount === 1 && shiftCounts[sIdx][currentShiftForS] > 1)) {
+                // 互换条件：
+                // 1. 发起人当前排的班次已 >= 2 次（或者换走后不破坏平衡）
+                // 2. 同事在目标岗位上也已 >= 2 次（或者换给发起人后对方仍不为 0 次）
+                if ((sCurrentShiftCount >= 2 || sCurrentShiftCount > 1) && (partnerCount >= 2 || partnerCount > 1)) {
+                  
                   // 尝试互换
                   newSchedule[sIdx][dayIdx] = partnerShiftName;
                   newSchedule[targetPartnerIdx][dayIdx] = currentShiftForS;
 
+                  // 校验：互换后双方均不得触发高强度连续 3 天限制
                   let isAValid = !checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts);
                   let isBValid = !checkHighConsecutiveThree(newSchedule, targetPartnerIdx, dayIdx, highShifts);
 
                   if (isAValid && isBValid) {
+                    // 互换成功，更新数据
                     shiftCounts[sIdx][currentShiftForS]--;
                     shiftCounts[sIdx][partnerShiftName] = (shiftCounts[sIdx][partnerShiftName] || 0) + 1;
 
@@ -1077,7 +1089,7 @@
                     swappedSuccess = true;
                     swapSuccessCount++;
                   } else {
-                    // 撤销
+                    // 撤销互换
                     newSchedule[sIdx][dayIdx] = currentShiftForS;
                     newSchedule[targetPartnerIdx][dayIdx] = partnerShiftName;
                   }
@@ -1085,6 +1097,7 @@
               }
             }
 
+            // 实在换不开，照实列出来
             if (!swappedSuccess) {
               unresolvableAlerts.push(`员工【${staffName}】岗位【${shiftName.replace(/\n/g, ' ')}】当月为 0 次（受限于休假/高强度连三规则，需人工微调）`);
             }
@@ -1104,10 +1117,10 @@
 
       let msg = `[${monthKey}] 智能排班完成！\n`;
       if (swapSuccessCount > 0) {
-        msg += `🎉 已成功进行 ${swapSuccessCount} 次自动调换，消除 0 次班次！\n`;
+        msg += `🎉 已成功进行 ${swapSuccessCount} 次自动班次调换，消除 0 次班次！\n`;
       }
       if (unresolvableAlerts.length > 0) {
-        msg += `\n⚠️ 注意：以下班次因休假过密或高强度限制无法自动换开，请查看：\n` + unresolvableAlerts.join("\n");
+        msg += `\n⚠️ 注意：以下班次因休假过密或高强度连三限制无法自动换开，已照实列出供人工微调：\n` + unresolvableAlerts.join("\n");
       }
       alert(msg);
 
