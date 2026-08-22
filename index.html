@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (支持单格锁定版)</title>
+  <title>智能动态排班工作表 (支持跨月支援累积版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -75,7 +75,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支持单格/全表锁定+跨月独立岗位)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支持跨月支援累积记录)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -125,6 +125,7 @@
   <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
+    <button class="secondary" onclick="resetCumulativeSupport()">🔄 重置支援跨月累积计数</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
   <div id="warningLog" class="log-box"></div>
@@ -182,7 +183,7 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表</h3>
+    <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表（含跨月累积）</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
@@ -220,6 +221,7 @@
   let lastGeneratedSchedule = null;
   let lockedMap = [];
   let isManualEditMode = false;
+  let supportCumulativeMap = {}; // 📌 跨月支援累积记录对象 { "员工名": 次数 }
 
   function toggleManualEditMode() {
     isManualEditMode = !isManualEditMode;
@@ -259,7 +261,12 @@
   }
 
   function saveGlobalConfig() {
-    localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify({ staffs, baseShifts, supportShift }));
+    localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify({ 
+      staffs, 
+      baseShifts, 
+      supportShift,
+      supportCumulativeMap 
+    }));
   }
 
   function loadGlobalConfig() {
@@ -270,7 +277,17 @@
         if (data.staffs) staffs = data.staffs;
         if (data.baseShifts) baseShifts = data.baseShifts;
         if (data.supportShift) supportShift = data.supportShift;
+        if (data.supportCumulativeMap) supportCumulativeMap = data.supportCumulativeMap;
       } catch(e) { console.error(e); }
+    }
+  }
+
+  function resetCumulativeSupport() {
+    if (confirm("确定要重置所有员工的【跨月支援累积次数】吗？")) {
+      supportCumulativeMap = {};
+      saveGlobalConfig();
+      renderAll();
+      alert("已成功重置支援跨月累积计数！");
     }
   }
 
@@ -302,6 +319,7 @@
   }
 
   async function loadDataFromLocal() {
+    loadGlobalConfig();
     const monthKey = getMonthKey();
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -327,7 +345,6 @@
     }
 
     if (!data) {
-      loadGlobalConfig();
       currentMonthRests = {};
       lastGeneratedSchedule = null;
       lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
@@ -586,7 +603,6 @@
     renderAll();
   }
 
-  // 🔥 【關鍵修正點】：修復手動修改選項處理邏輯
   function handleManualSelectChange(sIdx, dayIdx, selectElem) {
     const newShift = selectElem.value;
     const totalDays = getDaysInMonth(
@@ -600,7 +616,6 @@
 
     lastGeneratedSchedule[sIdx][dayIdx] = newShift;
 
-    // 鎖定該單格，確保手動調整的崗位或休假不被覆蓋
     initLockedMap();
     lockedMap[sIdx][dayIdx] = true;
 
@@ -675,7 +690,6 @@
     return "";
   }
 
-  // 🔥 【關鍵修正點】：修正渲染表格邏輯，防休假丟失
   function renderTable(scheduleData = null) {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -685,7 +699,7 @@
 
     const allOptions = [
       { name: "", label: "-- 未安排 --" },
-      { name: "休", label: "休 (休假)" }, // 🔥 下拉選單中明確加入休假
+      { name: "休", label: "休 (休假)" },
       ...baseShifts.map(s => ({ name: s.name, label: s.name.replace(/\n/g, ' ') })),
       { name: supportShift.name, label: supportShift.name.replace(/\n/g, ' ') }
     ];
@@ -719,11 +733,9 @@
         let cellContent = "";
         let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
 
-        // 優先讀取排班/手動修改資料
         if (scheduleData && scheduleData[sIdx] && scheduleData[sIdx][day - 1] !== undefined && scheduleData[sIdx][day - 1] !== "") {
           cellContent = scheduleData[sIdx][day - 1];
         } else if (staffRests.includes(day)) {
-          // 若排班紀錄中此格無內容，則預設套用導入的休假
           cellContent = "休";
         }
 
@@ -941,37 +953,44 @@
     container.innerHTML = html;
   }
 
+  // 📌 核心新功能：渲染支援人员记录表，加入【跨月累积】计算
   function renderSupportStaffTable(scheduleData = null) {
     let records = [];
 
-    if (scheduleData) {
-      staffs.forEach((staff, sIdx) => {
-        let supportDays = [];
-        let totalDays = scheduleData[sIdx] ? scheduleData[sIdx].length : 0;
-        
+    staffs.forEach((staff, sIdx) => {
+      let supportDays = [];
+      let currentMonthCount = 0;
+
+      if (scheduleData && scheduleData[sIdx]) {
+        let totalDays = scheduleData[sIdx].length;
         for (let d = 0; d < totalDays; d++) {
           if (scheduleData[sIdx][d] === supportShift.name) {
             supportDays.push(`${d + 1}号`);
           }
         }
+        currentMonthCount = supportDays.length;
+      }
 
-        if (supportDays.length > 0) {
-          records.push({
-            name: staff.name,
-            count: supportDays.length,
-            days: supportDays.join('、')
-          });
-        }
-      });
-    }
+      // 取得或初始化跨月累积支援数
+      let totalCumulative = (supportCumulativeMap[staff.name] || 0);
+
+      if (currentMonthCount > 0 || totalCumulative > 0) {
+        records.push({
+          name: staff.name,
+          currentCount: currentMonthCount,
+          days: supportDays.length > 0 ? supportDays.join('、') : '无',
+          totalCumulative: totalCumulative
+        });
+      }
+    });
 
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
           <th style="padding: 8px; width: 20%;">人员姓名</th>
-          <th style="padding: 8px; width: 15%;">支援总天数</th>
-          <th style="padding: 8px; width: 45%;">支援的具体日期</th>
-          <th style="padding: 8px; width: 20%; color: #0d6efd;">拿过支援的总次数</th>
+          <th style="padding: 8px; width: 15%;">当月支援天数</th>
+          <th style="padding: 8px; width: 45%;">当月支援的具体日期</th>
+          <th style="padding: 8px; width: 20%; color: #0d6efd;">跨月累积支援总次数</th>
         </tr>
       </thead>
       <tbody>
@@ -981,7 +1000,7 @@
       html += `
         <tr>
           <td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px;">
-            当前月份无安排支援岗位的记录
+            暂无支援岗位的排班及累积记录
           </td>
         </tr>
       `;
@@ -990,9 +1009,9 @@
         html += `
           <tr>
             <td style="font-weight: bold; padding: 8px;">${item.name}</td>
-            <td style="font-weight: bold; color: #006064; padding: 8px;">${item.count} 天</td>
+            <td style="font-weight: bold; color: #006064; padding: 8px;">${item.currentCount} 天</td>
             <td class="shift-support" style="padding: 8px;">${item.days}</td>
-            <td style="font-weight: bold; color: #0d6efd; padding: 8px;">第 ${item.count} 次</td>
+            <td style="font-weight: bold; color: #0d6efd; padding: 8px;">共 ${item.totalCumulative} 次</td>
           </tr>
         `;
       });
@@ -1001,6 +1020,7 @@
     html += `</tbody>`;
     document.getElementById('supportStaffTable').innerHTML = html;
   }
+
   function renderAll() {
     renderTable(lastGeneratedSchedule);
     renderStatsTable(lastGeneratedSchedule);
@@ -1355,17 +1375,28 @@
           }
         });
 
+        // 📌 分配支援岗位逻辑：优先分给跨月累积支援次数最少的员工
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
         if (unassignedStaff.length > 0) {
+          unassignedStaff.sort((a, b) => {
+            let nameA = staffs[a].name;
+            let nameB = staffs[b].name;
+            let cumA = (supportCumulativeMap[nameA] || 0) + (shiftCounts[a][supName] || 0);
+            let cumB = (supportCumulativeMap[nameB] || 0) + (shiftCounts[b][supName] || 0);
+            return cumA - cumB;
+          });
+
           unassignedStaff.forEach(sIdx => {
             let supCount = shiftCounts[sIdx][supName] || 0;
-            if (supCount < 1) {
-              newSchedule[sIdx][dayIdx] = supName;
-              shiftCounts[sIdx][supName] = supCount + 1;
-            }
+            newSchedule[sIdx][dayIdx] = supName;
+            shiftCounts[sIdx][supName] = supCount + 1;
+
+            // 累加跨月计次
+            let sName = staffs[sIdx].name;
+            supportCumulativeMap[sName] = (supportCumulativeMap[sName] || 0) + 1;
           });
         }
       }
@@ -1384,7 +1415,7 @@
         warningBox.innerHTML = `<b>⚠️ 自动排班扫尾提示：</b><br>` + warningMessages.join('<br>');
         alert(`[${monthKey}] 排班已完成，部分规则受休假或锁定限制已自动微调。`);
       } else {
-        alert(`[${monthKey}] 智能排班成功！已成功应用当月独立岗位！`);
+        alert(`[${monthKey}] 智能排班成功！已更新跨月支援累积记录！`);
       }
 
     } catch (err) {
