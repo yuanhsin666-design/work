@@ -693,7 +693,7 @@
  function renderStatsTable(scheduleData = null) {
     let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
     
-    // 表头：新增“强度汇总”列
+    // 表头：移除强度汇总列
     let html = `<thead><tr><th class="header-month">姓名</th>`;
     baseShifts.forEach(shift => {
       let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');
@@ -701,7 +701,6 @@
       html += `<th class="${headerClass}">${badge}<br>${shift.name.replace(/\n/g, '<br>')}</th>`;
     });
     html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th>`;
-    html += `<th style="background-color: #f1f5f9; color: #1e293b; min-width: 90px;">当月强度汇总<br>(高/中/低)</th>`;
     html += `<th class="stat-total">上班总天数</th></tr></thead><tbody>`;
 
     staffs.forEach((staff, sIdx) => {
@@ -710,7 +709,7 @@
       let midCount = 0;
       let lowCount = 0;
 
-      // 1. 先统计各个岗位的次数与高中低汇总
+      // 1. 统计各个岗位的次数与高中低汇总
       let rowShiftCellsHtml = '';
       allShifts.forEach(shiftName => {
         let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
@@ -736,7 +735,7 @@
         rowShiftCellsHtml += `<td style="${countStyle}">${count}</td>`;
       });
 
-      // 2. 渲染整行内容（包含名字下方的细字提示 + 独立的强度汇总列）
+      // 2. 渲染整行内容（仅在姓名格下方展示高/中/低统计）
       html += `<tr>`;
       html += `<td class="staff-name" style="line-height: 1.3;">
                 <div>${staff.name}</div>
@@ -745,14 +744,6 @@
                 </div>
                </td>`;
       html += rowShiftCellsHtml;
-      
-      // 强度汇总单元格
-      html += `<td style="font-size: 11px; font-weight: bold; background-color: #f8fafc; text-align: center;">
-                <span style="color: #c62828;">高:${highCount}</span> | 
-                <span style="color: #8c6b00;">中:${midCount}</span> | 
-                <span style="color: #1b5e20;">低:${lowCount}</span>
-               </td>`;
-               
       html += `<td class="stat-total">${workCountTotal}</td></tr>`;
     });
     
