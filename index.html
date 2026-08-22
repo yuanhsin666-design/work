@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (绝对直式 TSV 复制版)</title>
+  <title>智能动态排班工作表 (标准直式复制版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 绝对直式 TSV 复制版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 标准直式复制版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -137,7 +137,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0;">📅 <span id="currentMonthTitle"></span> 排班工作表预览</h3>
-    <button class="copy-btn" onclick="copyTableTransposed('scheduleTable', '排班表')">📋 一键复制直式表格 (贴入云端不倒置)</button>
+    <button class="copy-btn" onclick="copyTableStandard('scheduleTable', '排班表')">📋 一键复制排班表 (贴入云端格式正确)</button>
   </div>
 
   <div class="lock-controls">
@@ -157,7 +157,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0;">📊 当月员工岗位及强度次数统计</h3>
-    <button class="copy-btn" onclick="copyTableTransposed('statsTable', '岗位统计表')">📋 一键复制表格</button>
+    <button class="copy-btn" onclick="copyTableStandard('statsTable', '岗位统计表')">📋 一键复制表格</button>
   </div>
   <div class="table-container">
     <table id="statsTable"></table>
@@ -167,7 +167,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #1a4f8b;">📊 当月人员岗位强度次数汇总表</h3>
-    <button class="copy-btn" onclick="copyTableTransposed('intensitySummaryTable', '强度汇总表')">📋 一键复制表格</button>
+    <button class="copy-btn" onclick="copyTableStandard('intensitySummaryTable', '强度汇总表')">📋 一键复制表格</button>
   </div>
   <div class="table-container">
     <table id="intensitySummaryTable"></table>
@@ -177,7 +177,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日高强度人员/岗位记录表</h3>
-    <button class="copy-btn" onclick="copyTableTransposed('highIntensityTable', '分红日记录表')">📋 一键复制表格</button>
+    <button class="copy-btn" onclick="copyTableStandard('highIntensityTable', '分红日记录表')">📋 一键复制表格</button>
   </div>
   <div class="table-container">
     <table id="highIntensityTable"></table>
@@ -187,7 +187,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #006064;">🔵 全员支援岗位记录表 (跨月累计)</h3>
-    <button class="copy-btn" onclick="copyTableTransposed('supportStaffTable', '支援记录表')">📋 一键复制表格</button>
+    <button class="copy-btn" onclick="copyTableStandard('supportStaffTable', '支援记录表')">📋 一键复制表格</button>
   </div>
   <div class="table-container">
     <table id="supportStaffTable"></table>
@@ -691,34 +691,32 @@
       { name: supportShift.name, label: supportShift.name.replace(/\n/g, ' ') }
     ];
 
-    let html = `<thead><tr><th rowspan="2" class="header-month">${month}月</th>`;
-    for(let i=1; i<=totalDays; i++) {
-      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
-      html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${i} ${isColLocked ? '🔒' : ''}</th>`;
-    }
-    html += `<th rowspan="2" class="stat-total" style="min-width: 80px;">計數總休假日</th>`;
-
-    html += `</tr><tr class="header-day">`;
-    for(let i=1; i<=totalDays; i++) {
-      let dateObj = new Date(year, month - 1, i);
-      let dayOfWeek = dateObj.getDay();
-      let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
-      html += `<th class="header-day ${isWeekend ? 'weekend' : ''} ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${weekDays[dayOfWeek]}</th>`;
-    }
-    html += `</tr></thead><tbody>`;
-
-    let dailyWorkingTotals = Array(totalDays).fill(0);
-    let dailyRestTotals = Array(totalDays).fill(0);
-
+    // 标准直式结构：第一行是员工名称，左侧是日期
+    let html = `<thead><tr><th class="header-month">${month}月</th>`;
     staffs.forEach((staff, sIdx) => {
       let isRowLocked = lockedMap[sIdx] && lockedMap[sIdx].every(v => v);
-      let staffRests = currentMonthRests[sIdx] || [];
-      
-      html += `<tr><td class="staff-name cell-clickable ${isRowLocked ? 'locked-header' : ''}" onclick="toggleRowLock(${sIdx})">${staff.name} ${isRowLocked ? '🔒' : ''}</td>`;
-      for(let day=1; day<=totalDays; day++) {
+      html += `<th class="staff-name ${isRowLocked ? 'locked-header' : ''}" style="background-color: #1a4f8b; color: white;" onclick="toggleRowLock(${sIdx})">${staff.name} ${isRowLocked ? '🔒' : ''}</th>`;
+    });
+    html += `<th class="stat-total" style="min-width: 80px;">当日上班人数</th></tr></thead><tbody>`;
+
+    let staffWorkingTotals = Array(staffs.length).fill(0);
+    let staffRestTotals = Array(staffs.length).fill(0);
+
+    for (let day = 1; day <= totalDays; day++) {
+      let dateObj = new Date(year, month - 1, day);
+      let dayOfWeek = dateObj.getDay();
+      let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][day - 1]);
+
+      html += `<tr>`;
+      html += `<td class="header-day ${isWeekend ? 'weekend' : ''} ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${day - 1})"><b>${day}</b> (${weekDays[dayOfWeek]}) ${isColLocked ? '🔒' : ''}</td>`;
+
+      let dailyWorkingCount = 0;
+
+      staffs.forEach((staff, sIdx) => {
         let cellContent = "";
         let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
+        let staffRests = currentMonthRests[sIdx] || [];
 
         if (scheduleData && scheduleData[sIdx] && scheduleData[sIdx][day - 1] !== undefined && scheduleData[sIdx][day - 1] !== "") {
           cellContent = scheduleData[sIdx][day - 1];
@@ -729,14 +727,14 @@
         if (cellContent === "休(预)" || cellContent === "休(預)") cellContent = "休";
 
         if (cellContent && cellContent !== "休") {
-          dailyWorkingTotals[day - 1]++;
+          dailyWorkingCount++;
+          staffWorkingTotals[sIdx]++;
         } else if (cellContent === "休") {
-          dailyRestTotals[day - 1]++;
+          staffRestTotals[sIdx]++;
         }
 
         let cellClass = getShiftClass(cellContent);
         if (isLocked) cellClass += " cell-locked manual-edited";
-
         let cellId = `cell_${sIdx}_${day - 1}`;
 
         if (isManualEditMode) {
@@ -756,28 +754,18 @@
           let displayTxt = cellContent.replace(/\n/g, '<br>');
           html += `<td id="${cellId}" class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
         }
-      }
+      });
 
-      let restDaysCount = 0;
-      for(let day=1; day<=totalDays; day++) {
-        let content = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx][day - 1] : "";
-        if (!content && staffRests.includes(day)) content = "休";
-        if (content === "休(预)" || content === "休(預)") content = "休";
-        
-        if (content === "休") restDaysCount++;
-      }
-      html += `<td class="stat-total">${restDaysCount} 天</td>`;
-
+      html += `<td class="stat-total">${dailyWorkingCount} 人</td>`;
       html += `</tr>`;
-    });
-    
-    html += `<tr class="row-daily-total" style="background-color: #f1f5f9; color: #dc2626;"><td class="staff-name">当日休假人数</td>`;
-    for(let day=1; day<=totalDays; day++) html += `<td>${dailyRestTotals[day - 1]}人</td>`;
-    html += `<td>-</td></tr>`;
+    }
 
-    html += `<tr class="row-daily-total"><td class="staff-name">当日上班人数</td>`;
-    for(let day=1; day<=totalDays; day++) html += `<td>${dailyWorkingTotals[day - 1]}人</td>`;
-    html += `<td>-</td></tr>`;
+    // 底部统计行：总休假天数
+    html += `<tr class="row-daily-total"><td class="staff-name">計數總休假日</td>`;
+    staffs.forEach((_, sIdx) => {
+      html += `<td class="stat-total">${staffRestTotals[sIdx]} 天</td>`;
+    });
+    html += `<td class="stat-total">-</td></tr>`;
 
     html += `</tbody>`;
     document.getElementById('scheduleTable').innerHTML = html;
@@ -1123,14 +1111,13 @@
   }
 
   // -------------------------------------------------------------
-  // 📋 绝对直式 TSV 复制核心：直接对调矩阵再输出纯文本制表符
+  // 📋 标准 HTML 剪贴板复制：完美保留网页上的直式版型
   // -------------------------------------------------------------
-  async function copyTableTransposed(tableId, tableName) {
+  async function copyTableStandard(tableId, tableName) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
 
-    // 1. 读取原表格的二维矩阵
-    let matrix = [];
+    let tsvLines = [];
     const trs = table.querySelectorAll('tr');
     trs.forEach(tr => {
       let rowCells = [];
@@ -1152,32 +1139,16 @@
         text = text.replace(/\n/g, ' '); // 单元格内换行转化为空格
         rowCells.push(text);
       });
-      matrix.push(rowCells);
+      tsvLines.push(rowCells.join('\t'));
     });
 
-    if (matrix.length === 0) return alert("表格没有内容！");
+    let tsvString = tsvLines.join('\n');
 
-    // 2. 彻底对调行与列 (转置矩阵 Transpose)
-    let maxCols = Math.max(...matrix.map(row => row.length));
-    let transposed = [];
-    for (let c = 0; c < maxCols; c++) {
-      let newRow = [];
-      for (let r = 0; r < matrix.length; r++) {
-        newRow.push(matrix[r][c] !== undefined ? matrix[r][c] : "");
-      }
-      transposed.push(newRow);
-    }
-
-    // 3. 转为 TSV (Tab-Separated Values) 纯文本格式。这是让 Google 试算表完美辨识直式的关键！
-    let tsvString = transposed.map(row => row.join('\t')).join('\n');
-
-    // 4. 写入剪贴板
     try {
       await navigator.clipboard.writeText(tsvString);
-      alert(`✅ 已成功复制 [${tableName}]！\n\n请直接前往 Google 试算表点选储存格按 Ctrl+V，方向绝对是直式的！`);
+      alert(`✅ 已成功复制 [${tableName}]！\n\n请直接前往 Google 试算表点选储存格按 Ctrl+V，版型会跟网页上完全一致！`);
     } catch (err) {
       console.error(err);
-      // 降级兼容方案
       const textArea = document.createElement("textarea");
       textArea.value = tsvString;
       document.body.appendChild(textArea);
