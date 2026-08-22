@@ -690,22 +690,39 @@
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
-  function renderStatsTable(scheduleData = null) {
+ function renderStatsTable(scheduleData = null) {
     let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
+    
+    // 表头：新增“强度汇总”列
     let html = `<thead><tr><th class="header-month">姓名</th>`;
     baseShifts.forEach(shift => {
       let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');
       let headerClass = shift.level === '高' ? 'shift-high' : (shift.level === '中' ? 'shift-mid' : 'shift-low');
       html += `<th class="${headerClass}">${badge}<br>${shift.name.replace(/\n/g, '<br>')}</th>`;
     });
-    html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th><th class="stat-total">上班总天数</th></tr></thead><tbody>`;
+    html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th>`;
+    html += `<th style="background-color: #f1f5f9; color: #1e293b; min-width: 90px;">当月强度汇总<br>(高/中/低)</th>`;
+    html += `<th class="stat-total">上班总天数</th></tr></thead><tbody>`;
 
     staffs.forEach((staff, sIdx) => {
-      html += `<tr><td class="staff-name">${staff.name}</td>`;
       let workCountTotal = 0;
+      let highCount = 0;
+      let midCount = 0;
+      let lowCount = 0;
+
+      // 1. 先统计各个岗位的次数与高中低汇总
+      let rowShiftCellsHtml = '';
       allShifts.forEach(shiftName => {
         let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
         workCountTotal += count;
+
+        // 匹配当前岗位的强度等级并累加次数
+        let foundShift = baseShifts.find(s => s.name === shiftName);
+        if (foundShift) {
+          if (foundShift.level === '高') highCount += count;
+          else if (foundShift.level === '中') midCount += count;
+          else if (foundShift.level === '低') lowCount += count;
+        }
 
         let countStyle = '';
         if (count === 0 && shiftName !== supportShift.name) {
@@ -716,10 +733,29 @@
           countStyle = 'color: #006064; font-weight: bold;';
         }
         
-        html += `<td style="${countStyle}">${count}</td>`;
+        rowShiftCellsHtml += `<td style="${countStyle}">${count}</td>`;
       });
+
+      // 2. 渲染整行内容（包含名字下方的细字提示 + 独立的强度汇总列）
+      html += `<tr>`;
+      html += `<td class="staff-name" style="line-height: 1.3;">
+                <div>${staff.name}</div>
+                <div style="font-size: 10px; color: #666; font-weight: normal; margin-top: 2px;">
+                  🔴高:${highCount} 🟡中:${midCount} 🟢低:${lowCount}
+                </div>
+               </td>`;
+      html += rowShiftCellsHtml;
+      
+      // 强度汇总单元格
+      html += `<td style="font-size: 11px; font-weight: bold; background-color: #f8fafc; text-align: center;">
+                <span style="color: #c62828;">高:${highCount}</span> | 
+                <span style="color: #8c6b00;">中:${midCount}</span> | 
+                <span style="color: #1b5e20;">低:${lowCount}</span>
+               </td>`;
+               
       html += `<td class="stat-total">${workCountTotal}</td></tr>`;
     });
+    
     html += `</tbody>`;
     document.getElementById('statsTable').innerHTML = html;
   }
