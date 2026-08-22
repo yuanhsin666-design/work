@@ -25,6 +25,7 @@
     button.lock-btn { background: #6f42c1; color: white; }
     button.edit-btn { background: #d97706; color: white; }
     button.edit-btn.active { background: #dc2626; color: white; }
+    button.warning-btn { background: #d97706; color: white; }
 
     .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; max-height: 180px; overflow-y: auto; }
     .tag { padding: 5px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; }
@@ -48,6 +49,9 @@
     .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; } 
     .shift-support { background-color: #e0f7fa; color: #006064; } 
     
+    /* 重复岗位反红提醒样式 */
+    .shift-duplicate-error { background-color: #f8d7da !important; color: #842029 !important; border: 2px solid #dc2626 !important; font-weight: bold; }
+
     .shift-select { width: 100%; border: none; background: transparent; text-align: center; text-align-last: center; font-size: 11px; font-weight: inherit; color: inherit; cursor: pointer; padding: 4px 0; outline: none; }
     .manual-edited { box-shadow: inset 0 0 0 2px #d97706; border-radius: 3px; font-weight: bold; }
 
@@ -124,6 +128,7 @@
 
   <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
+    <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -733,6 +738,9 @@
         let cellClass = getShiftClass(cellContent);
         if (isLocked) cellClass += " cell-locked manual-edited";
 
+        // 给每个格子加上独立的 id，方便后续“校验重复岗位反红”时准确定位
+        let cellId = `cell_${sIdx}_${day - 1}`;
+
         if (isManualEditMode) {
           let selectOptionsHtml = allOptions.map(opt => {
             let isSelected = (opt.name === cellContent) ? "selected" : "";
@@ -740,7 +748,7 @@
           }).join('');
 
           html += `
-            <td class="${cellClass}">
+            <td id="${cellId}" class="${cellClass}">
               <select class="shift-select" onchange="handleManualSelectChange(${sIdx}, ${day - 1}, this)">
                 ${selectOptionsHtml}
               </select>
@@ -748,7 +756,7 @@
           `;
         } else {
           let displayTxt = cellContent.replace(/\n/g, '<br>');
-          html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
+          html += `<td id="${cellId}" class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
         }
       }
 
@@ -775,6 +783,84 @@
 
     html += `</tbody>`;
     document.getElementById('scheduleTable').innerHTML = html;
+  }
+
+  // -------------------------------------------------------------
+  // 🔍 新增：校验排班重复岗位功能
+  // -------------------------------------------------------------
+  function validateDuplicateShifts() {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    
+    // 先清理掉之前可能存在的反红样式
+    const allCells = document.querySelectorAll('#scheduleTable td');
+    allCells.forEach(td => td.classList.remove('shift-duplicate-error'));
+
+    let duplicateCount = 0;
+    let duplicateLogs = [];
+
+    // 逐天检查同一天内是否有相同的岗位出现两次以上
+    for (let day = 1; day <= totalDays; day++) {
+      let dayIdx = day - 1;
+      let shiftOccurrences = {}; // 记录岗位对应的员工索引列表
+
+      staffs.forEach((staff, sIdx) => {
+        let shiftVal = "";
+        if (isManualEditMode) {
+          // 手动模式下从 select 获取当前值
+          const selectElem = document.querySelector(`#cell_${sIdx}_${dayIdx} select`);
+          if (selectElem) shiftVal = selectElem.value;
+        } else {
+          // 普通模式下从 lastGeneratedSchedule 或休假判定
+          if (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) {
+            shiftVal = lastGeneratedSchedule[sIdx][dayIdx];
+          }
+          if (!shiftVal && currentMonthRests[sIdx] && currentMonthRests[sIdx].includes(day)) {
+            shiftVal = "休";
+          }
+        }
+
+        // 仅对有效岗位（非空、非休）进行查重
+        if (shiftVal && shiftVal !== "休") {
+          if (!shiftOccurrences[shiftVal]) {
+            shiftOccurrences[shiftVal] = [];
+          }
+          shiftOccurrences[shiftVal].push(sIdx);
+        }
+      });
+
+      // 检查是否有重复
+      Object.keys(shiftOccurrences).forEach(shiftName => {
+        let staffIndices = shiftOccurrences[shiftName];
+        if (staffIndices.length > 1) {
+          duplicateCount++;
+          let cleanName = shiftName.replace(/\n/g, ' ');
+          let staffNamesStr = staffIndices.map(sIdx => staffs[sIdx].name).join('、');
+          duplicateLogs.push(`📅 第 <b>${day}</b> 天：岗位 [<b>${cleanName}</b>] 重复出现，涉及人员：<b>${staffNamesStr}</b>`);
+
+          // 将重复的单元格反红提醒
+          staffIndices.forEach(sIdx => {
+            const cellElem = document.getElementById(`cell_${sIdx}_${dayIdx}`);
+            if (cellElem) {
+              cellElem.classList.add('shift-duplicate-error');
+            }
+          });
+        }
+      });
+    }
+
+    const warningBox = document.getElementById('warningLog');
+    if (duplicateCount > 0) {
+      warningBox.innerHTML = `<b>🚨 岗位重复校验提醒（共发现 ${duplicateCount } 处重复）：</b><br>` + duplicateLogs.join('<br>');
+      warningBox.style.display = 'block';
+      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${duplicateCount} 处岗位重复！`;
+      alert(`校验完成！发现有 ${duplicateCount} 天存在相同的岗位重复分配，相关格子已为您标红显示，请人工重新排班调整！`);
+    } else {
+      warningBox.style.display = 'none';
+      document.getElementById('status').innerText = `✅ 校验完毕：排班无岗位重复！`;
+      alert(`校验完成！当月排班结构良好，没有在同一天发现重复的岗位。`);
+    }
   }
 
   function renderStatsTable(scheduleData = null) {
@@ -1331,10 +1417,9 @@
           }
         });
 
-        // 2.3 徹底杜絕空白格：如果當天還有上班的人沒分到任何職位，強制指派一個現有正式崗位給他（確保每日滿編無空白）
+        // 2.3 徹底杜絕空白格：如果當天還有上班的人沒分到任何職位，強制指派一個現有正式崗位給他
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
-            // 隨機挑選一個該天已經有人排的正式崗位進行共用或補位，或者直接指派低強度崗位
             let fallbackShift = lowShifts[Math.floor(Math.random() * lowShifts.length)] || baseShifts[0].name;
             newSchedule[sIdx][dayIdx] = fallbackShift;
             shiftCounts[sIdx][fallbackShift] = (shiftCounts[sIdx][fallbackShift] || 0) + 1;
@@ -1343,7 +1428,6 @@
       }
 
       // 3. 【零次数二次扫尾与安全校验机制 (Post-Processing)】
-      // 若有人某岗位为 0 次，挑选已满 3 次该岗位的同班次人员进行岗位对调
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
         let isHigh = shiftObj.level === '高';
@@ -1365,7 +1449,6 @@
               if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
                 let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
                 
-                // 挑选已满 3 次（或以上）该岗位的同班次人员进行岗位对调
                 if (holderCurCount >= 3) {
                   let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
                   let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
