@@ -154,6 +154,16 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+    <h3 style="margin:0; color: #1a4f8b;">📊 当月人员岗位强度次数汇总表</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('intensitySummaryTable')">📋 复制汇总表</button>
+  </div>
+  <div class="table-container">
+    <table id="intensitySummaryTable"></table>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日高强度人员/岗位记录表</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
   </div>
@@ -690,7 +700,7 @@
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
-function renderStatsTable(scheduleData = null) {
+  function renderStatsTable(scheduleData = null) {
     let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
     
     let html = `<thead><tr><th class="header-month">姓名</th>`;
@@ -704,21 +714,11 @@ function renderStatsTable(scheduleData = null) {
 
     staffs.forEach((staff, sIdx) => {
       let workCountTotal = 0;
-      let highCount = 0;
-      let midCount = 0;
-      let lowCount = 0;
-
       let rowShiftCellsHtml = '';
+
       allShifts.forEach(shiftName => {
         let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
         workCountTotal += count;
-
-        let foundShift = baseShifts.find(s => s.name === shiftName);
-        if (foundShift) {
-          if (foundShift.level === '高') highCount += count;
-          else if (foundShift.level === '中') midCount += count;
-          else if (foundShift.level === '低') lowCount += count;
-        }
 
         let countStyle = '';
         if (count === 0 && shiftName !== supportShift.name) {
@@ -732,22 +732,58 @@ function renderStatsTable(scheduleData = null) {
         rowShiftCellsHtml += `<td style="${countStyle}">${count}</td>`;
       });
 
-      // 极限紧凑布局：间距 gap:0，消除内边距与行高限制
       html += `<tr>`;
-      html += `<td class="staff-name" style="padding: 1px 2px;">
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; line-height: 1;">
-                  <span style="font-weight: bold; font-size: 13px; margin-bottom: 1px;">${staff.name}</span>
-                  <span style="font-size: 10px; color: #444; font-weight: normal; white-space: nowrap; line-height: 1; transform: scale(0.9); transform-origin: center;">
-                    🔴高:${highCount} 🟡中:${midCount} 🟢低:${lowCount}
-                  </span>
-                </div>
-               </td>`;
+      html += `<td class="staff-name">${staff.name}</td>`;
       html += rowShiftCellsHtml;
       html += `<td class="stat-total">${workCountTotal}</td></tr>`;
     });
     
     html += `</tbody>`;
     document.getElementById('statsTable').innerHTML = html;
+  }
+
+  function renderIntensitySummaryTable(scheduleData = null) {
+    let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
+    
+    let html = `
+      <thead>
+        <tr style="background-color: #f8fafc; font-weight: bold;">
+          <th style="padding: 8px; width: 30%;">人员姓名</th>
+          <th style="padding: 8px; width: 70%;">当月岗位强度汇总记录</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    staffs.forEach((staff, sIdx) => {
+      let highCount = 0;
+      let midCount = 0;
+      let lowCount = 0;
+
+      allShifts.forEach(shiftName => {
+        let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
+        let foundShift = baseShifts.find(s => s.name === shiftName);
+        if (foundShift) {
+          if (foundShift.level === '高') highCount += count;
+          else if (foundShift.level === '中') midCount += count;
+          else if (foundShift.level === '低') lowCount += count;
+        }
+      });
+
+      html += `
+        <tr>
+          <td class="staff-name" style="padding: 8px;">${staff.name}</td>
+          <td style="padding: 8px; text-align: center; font-size: 13px; font-weight: bold;">
+            <span style="color: #c62828;">🔴高:${highCount}</span> &nbsp;&nbsp;&nbsp;&nbsp;
+            <span style="color: #8c6b00;">🟡中:${midCount}</span> &nbsp;&nbsp;&nbsp;&nbsp;
+            <span style="color: #1b5e20;">🟢低:${lowCount}</span>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `</tbody>`;
+    document.getElementById('intensitySummaryTable').innerHTML = html;
   }
 
   function renderHighIntensityTable(scheduleData = null) {
@@ -865,6 +901,7 @@ function renderStatsTable(scheduleData = null) {
   function renderAll() {
     renderTable(lastGeneratedSchedule);
     renderStatsTable(lastGeneratedSchedule);
+    renderIntensitySummaryTable(lastGeneratedSchedule);
     renderHighIntensityTable(lastGeneratedSchedule);
     renderSupportStaffTable(lastGeneratedSchedule);
   }
@@ -907,15 +944,12 @@ function renderStatsTable(scheduleData = null) {
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  // 辅助函数：从岗位名称中智能提取英文大写类型前缀（如 TD, ND, HS, RF, OL, FB 等）
   function getShiftPrefixes(shiftName) {
     if (!shiftName || shiftName === "休") return [];
-    // 匹配连续的大写英文字母
     let matches = shiftName.match(/[A-Z]{2,}/g);
     return matches ? Array.from(new Set(matches)) : [];
   }
 
-  // 1. 【高强度不能连三天校验】
   function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {
     let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;
     let dayM1 = dayIdx - 1 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 1]) : false;
@@ -929,31 +963,26 @@ function renderStatsTable(scheduleData = null) {
     return false;
   }
 
-  // 2. 【核心修复：包含相同名称或类型的岗位（如连排 TD 类或 ND 类），不得连续排 2 天】
   function checkSameNameConsecutiveTwo(schedule, sIdx, dayIdx, shiftName) {
     if (!shiftName || shiftName === "休") return false;
 
     let targetPrefixes = getShiftPrefixes(shiftName);
     
-    // 检查前一天 (dayIdx - 1)
     if (dayIdx - 1 >= 0) {
       let prevShift = schedule[sIdx][dayIdx - 1];
       if (prevShift && prevShift !== "休") {
-        if (prevShift === shiftName) return true; // 名称完全一致
+        if (prevShift === shiftName) return true; 
         let prevPrefixes = getShiftPrefixes(prevShift);
-        // 类型重叠（例如昨天排了 TD 1000以下，今天不能排 TD 1001-5000）
         let hasOverlap = targetPrefixes.some(p => prevPrefixes.includes(p));
         if (hasOverlap && targetPrefixes.length > 0) return true;
       }
     }
 
-    // 检查后一天 (dayIdx + 1)
     if (dayIdx + 1 < schedule[sIdx].length) {
       let nextShift = schedule[sIdx][dayIdx + 1];
       if (nextShift && nextShift !== "休") {
-        if (nextShift === shiftName) return true; // 名称完全一致
+        if (nextShift === shiftName) return true; 
         let nextPrefixes = getShiftPrefixes(nextShift);
-        // 类型重叠
         let hasOverlap = targetPrefixes.some(p => nextPrefixes.includes(p));
         if (hasOverlap && targetPrefixes.length > 0) return true;
       }
@@ -962,9 +991,6 @@ function renderStatsTable(scheduleData = null) {
     return false;
   }
 
-  // -------------------------------------------------------------
-  // 核心 Post-Processing：零次数二次扫尾与安全对调校验
-  // -------------------------------------------------------------
   function postProcessZeroCoverage(schedule, highShifts) {
     let warnings = [];
     let totalDays = schedule[0].length;
@@ -1009,15 +1035,12 @@ function renderStatsTable(scheduleData = null) {
                 let simTargetHigh = highShifts.includes(targetShift);
                 let simCandHigh = highShifts.includes(currentTargetDayShift);
 
-                // 临时模拟对调
                 schedule[targetStaffIdx][dayIdx] = targetShift;
                 schedule[candStaffIdx][dayIdx] = currentTargetDayShift;
 
-                // 校验高强度
                 let targetHighViolate = simTargetHigh && checkHighConsecutiveThree(schedule, targetStaffIdx, dayIdx, highShifts);
                 let candHighViolate = simCandHigh && checkHighConsecutiveThree(schedule, candStaffIdx, dayIdx, highShifts);
 
-                // 校验同类型/同名称连排避让
                 let targetSameNameViolate = checkSameNameConsecutiveTwo(schedule, targetStaffIdx, dayIdx, targetShift);
                 let candSameNameViolate = checkSameNameConsecutiveTwo(schedule, candStaffIdx, dayIdx, currentTargetDayShift);
 
@@ -1026,7 +1049,6 @@ function renderStatsTable(scheduleData = null) {
                   swapSuccess = true;
                   break;
                 } else {
-                  // 校验失败，撤销改动
                   schedule[targetStaffIdx][dayIdx] = currentTargetDayShift;
                   schedule[candStaffIdx][dayIdx] = targetShift;
                 }
@@ -1045,9 +1067,6 @@ function renderStatsTable(scheduleData = null) {
     return warnings;
   }
 
-  // -------------------------------------------------------------
-  // 核心智能排班主程序
-  // -------------------------------------------------------------
   function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
@@ -1069,7 +1088,6 @@ function renderStatsTable(scheduleData = null) {
       
       let bonusHighHistory = Array.from({ length: staffs.length }, () => ({}));
 
-      // 1. 休假硬性锁定
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1102,18 +1120,15 @@ function renderStatsTable(scheduleData = null) {
         if (currentCount >= 2 && isHigh) return false;
         if (currentCount >= 3) return false;
 
-        // 连排同类型/同名称岗位严格避让
         if (checkSameNameConsecutiveTwo(newSchedule, sIdx, dayIdx, sName)) return false;
 
         return true;
       }
 
-      // 2. 逐日排班引擎
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         const currentDay = dayIdx + 1;
         const isBonusDay = (currentDay === 1 || currentDay === 16);
 
-        // A. 高强度岗位优先
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -1153,7 +1168,6 @@ function renderStatsTable(scheduleData = null) {
           if (isBonusDay) bonusHighHistory[chosenIdx][hShift] = true;
         });
 
-        // B. 普通岗位排班
         let unassignedShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -1180,7 +1194,6 @@ function renderStatsTable(scheduleData = null) {
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
         });
 
-        // C. 支援岗位排班
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
@@ -1196,7 +1209,6 @@ function renderStatsTable(scheduleData = null) {
         }
       }
 
-      // 3. 执行【兜底扫尾与自动修正机制】
       let warningMessages = postProcessZeroCoverage(newSchedule, highShifts);
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
