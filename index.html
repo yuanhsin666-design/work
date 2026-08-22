@@ -69,7 +69,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 自动扫尾与全规则严格校验版)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 严防同类型/同名称岗位连排版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -709,7 +709,7 @@
 
         let countStyle = '';
         if (count === 0 && shiftName !== supportShift.name) {
-          countStyle = 'color: #dc2626; background-color: #fee2e2; font-weight: bold;'; // 0次警示
+          countStyle = 'color: #dc2626; background-color: #fee2e2; font-weight: bold;'; 
         } else if (count > 2 && shiftName !== supportShift.name) {
           countStyle = 'color: #15803d; background-color: #dcfce7; font-weight: bold;';
         } else if (shiftName === supportShift.name) {
@@ -881,6 +881,14 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
+  // 辅助函数：从岗位名称中智能提取英文大写类型前缀（如 TD, ND, HS, RF, OL, FB 等）
+  function getShiftPrefixes(shiftName) {
+    if (!shiftName || shiftName === "休") return [];
+    // 匹配连续的大写英文字母
+    let matches = shiftName.match(/[A-Z]{2,}/g);
+    return matches ? Array.from(new Set(matches)) : [];
+  }
+
   // 1. 【高强度不能连三天校验】
   function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {
     let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;
@@ -895,13 +903,36 @@
     return false;
   }
 
-  // 2. 【岗位名称重复不能连排2日校验】
+  // 2. 【核心修复：包含相同名称或类型的岗位（如连排 TD 类或 ND 类），不得连续排 2 天】
   function checkSameNameConsecutiveTwo(schedule, sIdx, dayIdx, shiftName) {
     if (!shiftName || shiftName === "休") return false;
-    let dayM1 = dayIdx - 1 >= 0 ? schedule[sIdx][dayIdx - 1] : "";
-    let dayP1 = dayIdx + 1 < schedule[sIdx].length ? schedule[sIdx][dayIdx + 1] : "";
 
-    if (dayM1 === shiftName || dayP1 === shiftName) return true;
+    let targetPrefixes = getShiftPrefixes(shiftName);
+    
+    // 检查前一天 (dayIdx - 1)
+    if (dayIdx - 1 >= 0) {
+      let prevShift = schedule[sIdx][dayIdx - 1];
+      if (prevShift && prevShift !== "休") {
+        if (prevShift === shiftName) return true; // 名称完全一致
+        let prevPrefixes = getShiftPrefixes(prevShift);
+        // 类型重叠（例如昨天排了 TD 1000以下，今天不能排 TD 1001-5000）
+        let hasOverlap = targetPrefixes.some(p => prevPrefixes.includes(p));
+        if (hasOverlap && targetPrefixes.length > 0) return true;
+      }
+    }
+
+    // 检查后一天 (dayIdx + 1)
+    if (dayIdx + 1 < schedule[sIdx].length) {
+      let nextShift = schedule[sIdx][dayIdx + 1];
+      if (nextShift && nextShift !== "休") {
+        if (nextShift === shiftName) return true; // 名称完全一致
+        let nextPrefixes = getShiftPrefixes(nextShift);
+        // 类型重叠
+        let hasOverlap = targetPrefixes.some(p => nextPrefixes.includes(p));
+        if (hasOverlap && targetPrefixes.length > 0) return true;
+      }
+    }
+
     return false;
   }
 
@@ -913,7 +944,6 @@
     let totalDays = schedule[0].length;
     let formalShifts = baseShifts.map(s => s.name);
 
-    // 计算当期各人对岗位的次数矩阵
     function getCountsMatrix() {
       let counts = Array.from({ length: staffs.length }, () => ({}));
       staffs.forEach((_, sIdx) => {
@@ -930,58 +960,47 @@
 
     let counts = getCountsMatrix();
 
-    // 扫描每个人的零覆盖岗位
     staffs.forEach((staff, targetStaffIdx) => {
       formalShifts.forEach(targetShift => {
         if (counts[targetStaffIdx][targetShift] === 0) {
           let swapSuccess = false;
 
-          // 在全月寻找同班次节点进行调配
           for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
             if (swapSuccess) break;
             
-            // 目标员工当天必须处于工作状态（不可破坏锁定休假）且不能已被锁盘
             if (lockedMap[targetStaffIdx][dayIdx] || schedule[targetStaffIdx][dayIdx] === "休") continue;
 
             let currentTargetDayShift = schedule[targetStaffIdx][dayIdx];
             if (currentTargetDayShift === targetShift) continue;
 
-            // 寻找拥有 >=2 次 targetShift 的候选同事 candidateIdx
             for (let candStaffIdx = 0; candStaffIdx < staffs.length; candStaffIdx++) {
               if (candStaffIdx === targetStaffIdx) continue;
-              if (lockedMap[candStaffIdx][dayIdx]) continue; // 不能对调锁定单元格
+              if (lockedMap[candStaffIdx][dayIdx]) continue;
 
-              // 候选同事当天刚好排的是 targetShift
               if (schedule[candStaffIdx][dayIdx] === targetShift) {
-                // 条件校验：候选同事的 targetShift 数量对调后不得降为 0
                 if (counts[candStaffIdx][targetShift] <= 1) continue;
 
-                // 模拟对调：
-                // targetStaffIdx 在 dayIdx 改排 targetShift
-                // candStaffIdx 在 dayIdx 改排 currentTargetDayShift
-
-                // 规则校验 1：高强度不连三天
                 let simTargetHigh = highShifts.includes(targetShift);
                 let simCandHigh = highShifts.includes(currentTargetDayShift);
 
-                // 临时替换以做严格校验
+                // 临时模拟对调
                 schedule[targetStaffIdx][dayIdx] = targetShift;
                 schedule[candStaffIdx][dayIdx] = currentTargetDayShift;
 
+                // 校验高强度
                 let targetHighViolate = simTargetHigh && checkHighConsecutiveThree(schedule, targetStaffIdx, dayIdx, highShifts);
                 let candHighViolate = simCandHigh && checkHighConsecutiveThree(schedule, candStaffIdx, dayIdx, highShifts);
 
-                // 规则校验 2：岗位名称重复不得连排2日
+                // 校验同类型/同名称连排避让
                 let targetSameNameViolate = checkSameNameConsecutiveTwo(schedule, targetStaffIdx, dayIdx, targetShift);
                 let candSameNameViolate = checkSameNameConsecutiveTwo(schedule, candStaffIdx, dayIdx, currentTargetDayShift);
 
                 if (!targetHighViolate && !candHighViolate && !targetSameNameViolate && !candSameNameViolate) {
-                  // 对调成功！更新计数矩阵
                   counts = getCountsMatrix();
                   swapSuccess = true;
                   break;
                 } else {
-                  // 校验失败，回滚对调，寻找下一个候选者
+                  // 校验失败，撤销改动
                   schedule[targetStaffIdx][dayIdx] = currentTargetDayShift;
                   schedule[candStaffIdx][dayIdx] = targetShift;
                 }
@@ -989,7 +1008,6 @@
             }
           }
 
-          // 若全月搜寻无解，记录提示日志，保持原状
           if (!swapSuccess) {
             let cleanShiftName = targetShift.replace(/\n/g, ' ');
             warnings.push(`员工【${staff.name}】的岗位【${cleanShiftName}】无法自动调配（全月对调无解），请人工微调。`);
@@ -1025,7 +1043,7 @@
       
       let bonusHighHistory = Array.from({ length: staffs.length }, () => ({}));
 
-      // 1. 【休假硬性锁定】
+      // 1. 休假硬性锁定
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1054,12 +1072,11 @@
         let currentCount = shiftCounts[sIdx][sName] || 0;
         let minCount = getShiftMinCount(sName);
 
-        // 平摊规则：必须都轮过 2 次才可排第 3 次
         if (currentCount >= 2 && minCount < 2) return false;
-        if (currentCount >= 2 && isHigh) return false; // 高强度岗位上限 2 次
-        if (currentCount >= 3) return false; // 其余岗位最多 2 次（平摊后才可第3次）
+        if (currentCount >= 2 && isHigh) return false;
+        if (currentCount >= 3) return false;
 
-        // 连排同名岗位避让
+        // 连排同类型/同名称岗位严格避让
         if (checkSameNameConsecutiveTwo(newSchedule, sIdx, dayIdx, sName)) return false;
 
         return true;
@@ -1084,7 +1101,6 @@
           let validCandidates = availableStaff.filter(sIdx => {
             if (checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts)) return false;
             
-            // 7. 分红日高强度岗位平摊轮流
             if (isBonusDay && bonusHighHistory[sIdx][hShift]) {
               let allRotatedBonus = staffs.every((_, idx) => bonusHighHistory[idx][hShift]);
               if (!allRotatedBonus) return false; 
@@ -1111,7 +1127,7 @@
           if (isBonusDay) bonusHighHistory[chosenIdx][hShift] = true;
         });
 
-        // B. 普通岗位排班（每日先把岗位排完）
+        // B. 普通岗位排班
         let unassignedShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -1138,7 +1154,7 @@
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
         });
 
-        // C. 支援岗位排班（最后排，当月不重复支援）
+        // C. 支援岗位排班
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
@@ -1146,7 +1162,7 @@
         if (unassignedStaff.length > 0) {
           unassignedStaff.forEach(sIdx => {
             let supCount = shiftCounts[sIdx][supName] || 0;
-            if (supCount < 1) { // 当月不得重复支援（只能1次或0次）
+            if (supCount < 1) {
               newSchedule[sIdx][dayIdx] = supName;
               shiftCounts[sIdx][supName] = supCount + 1;
             }
@@ -1154,7 +1170,7 @@
         }
       }
 
-      // 3. 执行【兜底扫尾与自动修正机制（Post-Processing）】
+      // 3. 执行【兜底扫尾与自动修正机制】
       let warningMessages = postProcessZeroCoverage(newSchedule, highShifts);
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
@@ -1169,7 +1185,7 @@
         warningBox.innerHTML = `<b>⚠️ 自动排班扫尾提示：</b><br>` + warningMessages.join('<br>');
         alert(`[${monthKey}] 排班已完成，但部分岗位因休假限制无法自动调配为非0次，请查看下方提示框。`);
       } else {
-        alert(`[${monthKey}] 智能排班成功！已实现全员正式岗位全覆盖且通过所有安全校验！`);
+        alert(`[${monthKey}] 智能排班成功！已实现全员正式岗位全覆盖且避免所有同类型连排！`);
       }
 
     } catch (err) {
