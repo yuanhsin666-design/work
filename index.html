@@ -23,6 +23,8 @@
     button.success { background: #198754; color: white; }
     button.copy-btn { background: #0d6efd; color: white; }
     button.lock-btn { background: #6f42c1; color: white; }
+    button.edit-btn { background: #d97706; color: white; }
+    button.edit-btn.active { background: #dc2626; color: white; }
 
     .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; max-height: 180px; overflow-y: auto; }
     .tag { padding: 5px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; }
@@ -140,6 +142,8 @@
     <button class="lock-btn" onclick="lockAllCells()">🔒 一键锁定当月全表</button>
     <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月</button>
     <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期 (用于月中变动重新排班)</button>
+    <!-- 新增：控制手动编辑模式的按钮 -->
+    <button id="toggleEditBtn" class="edit-btn" onclick="toggleManualEditMode()">✏️ 开启手动修改模式</button>
   </div>
 
   <div class="table-container">
@@ -216,6 +220,22 @@
   let currentMonthRests = {}; 
   let lastGeneratedSchedule = null;
   let lockedMap = [];
+  
+  // 标志位：控制当前是否处于手动修改状态
+  let isManualEditMode = false;
+
+  function toggleManualEditMode() {
+    isManualEditMode = !isManualEditMode;
+    const btn = document.getElementById('toggleEditBtn');
+    if (isManualEditMode) {
+      btn.innerText = "❌ 退出手动修改模式";
+      btn.classList.add('active');
+    } else {
+      btn.innerText = "✏️ 开启手动修改模式";
+      btn.classList.remove('active');
+    }
+    renderTable(lastGeneratedSchedule);
+  }
 
   function getMonthKey() {
     const year = document.getElementById('yearSelect').value;
@@ -561,7 +581,6 @@
     renderAll();
   }
 
-  // 手动通过下拉框修改人员排班
   function handleManualSelectChange(sIdx, dayIdx, selectElem) {
     const newShift = selectElem.value;
     const totalDays = getDaysInMonth(
@@ -569,19 +588,15 @@
       parseInt(document.getElementById('monthSelect').value)
     );
 
-    // 如果还没有生成过排班，初始化空数组
     if (!lastGeneratedSchedule || lastGeneratedSchedule.length !== staffs.length) {
       lastGeneratedSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
     }
 
-    // 1. 更新内存数据
     lastGeneratedSchedule[sIdx][dayIdx] = newShift;
 
-    // 2. 自动将其锁定，避免自动重新排班时被覆盖
     initLockedMap();
     lockedMap[sIdx][dayIdx] = true;
 
-    // 3. 重新渲染并持久化保存
     renderAll();
     saveDataToLocal();
   }
@@ -653,7 +668,7 @@
     return "";
   }
 
-  // 核心修改：将原本的静态单元格渲染替换为包含下拉框 `<select>` 的手动选择单元格
+  // 根据 isManualEditMode 决定渲染普通文本还是下拉下拉框
   function renderTable(scheduleData = null) {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -661,7 +676,6 @@
     document.getElementById('currentMonthTitle').innerText = `${year}年${month}月`;
     initLockedMap();
 
-    // 收集当前当月所有可用岗位选项
     const allOptions = [
       { name: "", label: "-- 未安排 --" },
       { name: "休", label: "休 (休假)" },
@@ -712,19 +726,25 @@
         let cellClass = getShiftClass(cellContent);
         if (isLocked) cellClass += " cell-locked manual-edited";
 
-        // 构建单元格中的手动下拉选择框 <select>
-        let selectOptionsHtml = allOptions.map(opt => {
-          let isSelected = (opt.name === cellContent) ? "selected" : "";
-          return `<option value="${opt.name.replace(/"/g, '&quot;')}" ${isSelected}>${opt.label}</option>`;
-        }).join('');
+        if (isManualEditMode) {
+          // 手动修改模式：显示下拉控件 <select>
+          let selectOptionsHtml = allOptions.map(opt => {
+            let isSelected = (opt.name === cellContent) ? "selected" : "";
+            return `<option value="${opt.name.replace(/"/g, '&quot;')}" ${isSelected}>${opt.label}</option>`;
+          }).join('');
 
-        html += `
-          <td class="${cellClass}">
-            <select class="shift-select" onchange="handleManualSelectChange(${sIdx}, ${day - 1}, this)">
-              ${selectOptionsHtml}
-            </select>
-          </td>
-        `;
+          html += `
+            <td class="${cellClass}">
+              <select class="shift-select" onchange="handleManualSelectChange(${sIdx}, ${day - 1}, this)">
+                ${selectOptionsHtml}
+              </select>
+            </td>
+          `;
+        } else {
+          // 默认浏览模式：仅显示常规文本
+          let displayTxt = cellContent.replace(/\n/g, '<br>');
+          html += `<td class="${cellClass}">${displayTxt}</td>`;
+        }
       }
 
       let restDaysCount = 0;
@@ -984,12 +1004,8 @@
 
     const cloneTable = table.cloneNode(true);
     
-    // 如果是复制排班主表，把下拉框中的选中文本提出来放回单元格
-    if (tableId === 'scheduleTable') {
+    if (tableId === 'scheduleTable' && isManualEditMode) {
       const selects = table.querySelectorAll('select.shift-select');
-      const cloneCells = cloneTable.querySelectorAll('tbody td');
-      
-      let cellIndex = 0;
       const totalDays = getDaysInMonth(
         parseInt(document.getElementById('yearSelect').value),
         parseInt(document.getElementById('monthSelect').value)
