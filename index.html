@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (跨月支援轮替版)</title>
+  <title>智能动态排班工作表 (支持单格锁定版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -75,7 +75,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支持跨月独立岗位 + 支援跨月平摊轮替)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支持单格/全表锁定+跨月独立岗位)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -108,7 +108,7 @@
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 岗位与强度设置 <span style="color: #666; font-weight: normal;">(所作修改仅对当前选择月份生效)</span>：</label>
+      <label>🏷️ 岗位与强度设置：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
         <input type="text" id="newShiftName" placeholder="岗位名称 (换行用 \n)" style="flex:2; min-width: 150px;">
         <select id="newShiftLevel" style="flex:1; min-width: 100px;">
@@ -140,8 +140,9 @@
     <label><b>🔐 当月锁定控制台：</b></label>
     <button class="lock-btn" onclick="lockAllCells()">🔒 一键锁定当月全表</button>
     <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月</button>
-    <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期 (用于月中变动重新排班)</button>
+    <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期</button>
     <button id="toggleEditBtn" class="edit-btn" onclick="toggleManualEditMode()">✏️ 开启手动修改模式</button>
+    <span style="font-size: 12px; color: #666;">💡 提示：非修改模式下，点击表格任意單格可直接切换「單格鎖定」狀態。</span>
   </div>
 
   <div class="table-container">
@@ -181,7 +182,7 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #006064;">🔵 人员支援记录表 <span style="font-size:12px; font-weight:normal; color:#555;">(含跨月份历史累计)</span></h3>
+    <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
@@ -219,7 +220,6 @@
   let lastGeneratedSchedule = null;
   let lockedMap = [];
   let isManualEditMode = false;
-  let globalSupportHistory = {}; // 跨月份支援累计记录 { "大抠": 1, "宏": 0 }
 
   function toggleManualEditMode() {
     isManualEditMode = !isManualEditMode;
@@ -240,18 +240,6 @@
     return `${year}-${month}`;
   }
 
-  function getPrevMonthKey() {
-    let year = parseInt(document.getElementById('yearSelect').value);
-    let month = parseInt(document.getElementById('monthSelect').value);
-    if (month === 1) {
-      year -= 1;
-      month = 12;
-    } else {
-      month -= 1;
-    }
-    return `${year}-${month}`;
-  }
-
   function initLockedMap(forceReset = false) {
     const year = parseInt(document.getElementById('yearSelect').value || new Date().getFullYear());
     const month = parseInt(document.getElementById('monthSelect').value || (new Date().getMonth() + 1));
@@ -262,8 +250,17 @@
     }
   }
 
+  // 新增：切换单个单元格的锁定状态
+  function toggleCellLock(sIdx, dayIdx) {
+    if (isManualEditMode) return; // 手动修改模式下不触发锁定
+    initLockedMap();
+    lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];
+    renderAll();
+    saveDataToLocal();
+  }
+
   function saveGlobalConfig() {
-    localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify({ staffs, baseShifts, supportShift, globalSupportHistory }));
+    localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify({ staffs, baseShifts, supportShift }));
   }
 
   function loadGlobalConfig() {
@@ -274,7 +271,6 @@
         if (data.staffs) staffs = data.staffs;
         if (data.baseShifts) baseShifts = data.baseShifts;
         if (data.supportShift) supportShift = data.supportShift;
-        if (data.globalSupportHistory) globalSupportHistory = data.globalSupportHistory;
       } catch(e) { console.error(e); }
     }
   }
@@ -282,42 +278,6 @@
   function sanitizeSchedule(sched) {
     if (!sched) return null;
     return sched.map(row => row.map(cell => (cell === "休(预)" || cell === "休(預)") ? "休" : cell));
-  }
-
-  // 跨月计算历史支援次数
-  async function calculateHistoricalSupportCounts() {
-    let counts = {};
-    staffs.forEach(s => counts[s.name] = 0);
-
-    const prevMonthKey = getPrevMonthKey();
-    let prevData = null;
-
-    try {
-      const { data: cloudRes } = await supabaseClient
-        .from('schedules')
-        .select('data')
-        .eq('month_key', prevMonthKey)
-        .maybeSingle();
-      if (cloudRes && cloudRes.data) prevData = cloudRes.data;
-    } catch (e) {}
-
-    if (!prevData) {
-      const savedMonth = localStorage.getItem(`auto_schedule_month_${prevMonthKey}`);
-      if (savedMonth) {
-        try { prevData = JSON.parse(savedMonth); } catch(e){}
-      }
-    }
-
-    if (prevData && prevData.lastGeneratedSchedule) {
-      staffs.forEach((staff, sIdx) => {
-        if (prevData.lastGeneratedSchedule[sIdx]) {
-          let c = prevData.lastGeneratedSchedule[sIdx].filter(x => x === supportShift.name).length;
-          counts[staff.name] = (counts[staff.name] || 0) + c;
-        }
-      });
-    }
-
-    return counts;
   }
 
   async function saveDataToLocal() {
@@ -786,7 +746,8 @@
           `;
         } else {
           let displayTxt = cellContent.replace(/\n/g, '<br>');
-          html += `<td class="${cellClass}">${displayTxt}</td>`;
+          // 添加 onclick 事件，支持单击切换单元格锁定
+          html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
         }
       }
 
@@ -974,52 +935,63 @@
     container.innerHTML = html;
   }
 
-  async function renderSupportStaffTable(scheduleData = null) {
-    let container = document.getElementById('supportStaffTable');
-    if (!container) return;
+  function renderSupportStaffTable(scheduleData = null) {
+    let records = [];
 
-    let prevHist = await calculateHistoricalSupportCounts();
+    if (scheduleData) {
+      staffs.forEach((staff, sIdx) => {
+        let supportDays = [];
+        let totalDays = scheduleData[sIdx] ? scheduleData[sIdx].length : 0;
+        
+        for (let d = 0; d < totalDays; d++) {
+          if (scheduleData[sIdx][d] === supportShift.name) {
+            supportDays.push(`${d + 1}号`);
+          }
+        }
+
+        if (supportDays.length > 0) {
+          records.push({
+            name: staff.name,
+            count: supportDays.length,
+            days: supportDays.join('、')
+          });
+        }
+      });
+    }
 
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
-          <th style="padding: 8px; width: 20%;">人员姓名</th>
-          <th style="padding: 8px; width: 20%;">上月支援天数</th>
-          <th style="padding: 8px; width: 20%;">当月支援天数</th>
-          <th style="padding: 8px; width: 20%;">跨月总累计</th>
-          <th style="padding: 8px; width: 20%;">当月支援具体日期</th>
+          <th style="padding: 8px; width: 25%;">人员姓名</th>
+          <th style="padding: 8px; width: 20%;">支援总天数</th>
+          <th style="padding: 8px; width: 55%;">支援的具体日期</th>
         </tr>
       </thead>
       <tbody>
     `;
 
-    staffs.forEach((staff, sIdx) => {
-      let currentMonthSupportDays = [];
-      if (scheduleData && scheduleData[sIdx]) {
-        for (let d = 0; d < scheduleData[sIdx].length; d++) {
-          if (scheduleData[sIdx][d] === supportShift.name) {
-            currentMonthSupportDays.push(`${d + 1}号`);
-          }
-        }
-      }
-
-      let prevCount = prevHist[staff.name] || 0;
-      let currCount = currentMonthSupportDays.length;
-      let totalCount = prevCount + currCount;
-
+    if (records.length === 0) {
       html += `
         <tr>
-          <td style="font-weight: bold; padding: 8px;">${staff.name}</td>
-          <td style="padding: 8px; color: #666;">${prevCount} 天</td>
-          <td style="font-weight: bold; color: #006064; padding: 8px;">${currCount} 天</td>
-          <td style="font-weight: bold; color: #d97706; padding: 8px;">${totalCount} 天</td>
-          <td class="shift-support" style="padding: 8px;">${currentMonthSupportDays.length > 0 ? currentMonthSupportDays.join('、') : '-'}</td>
+          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
+            当前月份无安排支援岗位的记录
+          </td>
         </tr>
       `;
-    });
+    } else {
+      records.forEach(item => {
+        html += `
+          <tr>
+            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
+            <td style="font-weight: bold; color: #006064; padding: 8px;">${item.count} 天</td>
+            <td class="shift-support" style="padding: 8px;">${item.days}</td>
+          </tr>
+        `;
+      });
+    }
 
     html += `</tbody>`;
-    container.innerHTML = html;
+    document.getElementById('supportStaffTable').innerHTML = html;
   }
 
   function renderAll() {
@@ -1212,7 +1184,7 @@
     return warnings;
   }
 
-  async function generateSchedule() {
+  function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1223,9 +1195,6 @@
       const totalDays = getDaysInMonth(year, month);
 
       initLockedMap();
-
-      // 读取历史支援记录
-      const prevSupportHistory = await calculateHistoricalSupportCounts();
 
       const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
       const midShifts = baseShifts.filter(s => s.level === '中').map(s => s.name);
@@ -1379,35 +1348,16 @@
           }
         });
 
-        // 支援岗位跨月轮替核心逻辑
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
         if (unassignedStaff.length > 0) {
-          // 按照【跨月历史支援次数 + 当月已有支援次数】从小到大排序
-          unassignedStaff.sort((a, b) => {
-            let staffA = staffs[a].name;
-            let staffB = staffs[b].name;
-
-            let totalSupportA = (prevSupportHistory[staffA] || 0) + (shiftCounts[a][supName] || 0);
-            let totalSupportB = (prevSupportHistory[staffB] || 0) + (shiftCounts[b][supName] || 0);
-
-            if (totalSupportA !== totalSupportB) return totalSupportA - totalSupportB;
-            return (shiftCounts[a][supName] || 0) - (shiftCounts[b][supName] || 0);
-          });
-
           unassignedStaff.forEach(sIdx => {
-            let staffName = staffs[sIdx].name;
-            let totalHistSupport = (prevSupportHistory[staffName] || 0) + (shiftCounts[sIdx][supName] || 0);
-
-            // 寻找所有人中最小的累计支援次数
-            let globalMinSupport = Math.min(...staffs.map(s => (prevSupportHistory[s.name] || 0) + (shiftCounts[staffs.indexOf(s)][supName] || 0)));
-
-            // 只有当该人员的累计支援次数不超过全员最小值时才给予支援，保证全员轮替
-            if (totalHistSupport <= globalMinSupport) {
+            let supCount = shiftCounts[sIdx][supName] || 0;
+            if (supCount < 1) {
               newSchedule[sIdx][dayIdx] = supName;
-              shiftCounts[sIdx][supName] = (shiftCounts[sIdx][supName] || 0) + 1;
+              shiftCounts[sIdx][supName] = supCount + 1;
             }
           });
         }
@@ -1427,7 +1377,7 @@
         warningBox.innerHTML = `<b>⚠️ 自动排班扫尾提示：</b><br>` + warningMessages.join('<br>');
         alert(`[${monthKey}] 排班已完成，部分规则受休假或锁定限制已自动微调。`);
       } else {
-        alert(`[${monthKey}] 智能排班成功！支援岗位已成功应用跨月平摊轮替！`);
+        alert(`[${monthKey}] 智能排班成功！已成功应用当月独立岗位！`);
       }
 
     } catch (err) {
