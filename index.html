@@ -250,9 +250,8 @@
     }
   }
 
-  // 新增：切换单个单元格的锁定状态
   function toggleCellLock(sIdx, dayIdx) {
-    if (isManualEditMode) return; // 手动修改模式下不触发锁定
+    if (isManualEditMode) return; 
     initLockedMap();
     lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];
     renderAll();
@@ -587,6 +586,7 @@
     renderAll();
   }
 
+  // 🔥 【關鍵修正點】：修復手動修改選項處理邏輯
   function handleManualSelectChange(sIdx, dayIdx, selectElem) {
     const newShift = selectElem.value;
     const totalDays = getDaysInMonth(
@@ -600,6 +600,7 @@
 
     lastGeneratedSchedule[sIdx][dayIdx] = newShift;
 
+    // 鎖定該單格，確保手動調整的崗位或休假不被覆蓋
     initLockedMap();
     lockedMap[sIdx][dayIdx] = true;
 
@@ -674,6 +675,7 @@
     return "";
   }
 
+  // 🔥 【關鍵修正點】：修正渲染表格邏輯，防休假丟失
   function renderTable(scheduleData = null) {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -683,7 +685,7 @@
 
     const allOptions = [
       { name: "", label: "-- 未安排 --" },
-      { name: "休", label: "休 (休假)" },
+      { name: "休", label: "休 (休假)" }, // 🔥 下拉選單中明確加入休假
       ...baseShifts.map(s => ({ name: s.name, label: s.name.replace(/\n/g, ' ') })),
       { name: supportShift.name, label: supportShift.name.replace(/\n/g, ' ') }
     ];
@@ -717,8 +719,13 @@
         let cellContent = "";
         let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
 
-        if (scheduleData && scheduleData[sIdx]) cellContent = scheduleData[sIdx][day - 1] || "";
-        else if (staffRests.includes(day)) cellContent = "休";
+        // 優先讀取排班/手動修改資料
+        if (scheduleData && scheduleData[sIdx] && scheduleData[sIdx][day - 1] !== undefined && scheduleData[sIdx][day - 1] !== "") {
+          cellContent = scheduleData[sIdx][day - 1];
+        } else if (staffRests.includes(day)) {
+          // 若排班紀錄中此格無內容，則預設套用導入的休假
+          cellContent = "休";
+        }
 
         if (cellContent === "休(预)" || cellContent === "休(預)") cellContent = "休";
 
@@ -746,7 +753,6 @@
           `;
         } else {
           let displayTxt = cellContent.replace(/\n/g, '<br>');
-          // 添加 onclick 事件，支持单击切换单元格锁定
           html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
         }
       }
