@@ -968,9 +968,10 @@
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
-          <th style="padding: 8px; width: 25%;">人员姓名</th>
-          <th style="padding: 8px; width: 20%;">支援总天数</th>
-          <th style="padding: 8px; width: 55%;">支援的具体日期</th>
+          <th style="padding: 8px; width: 20%;">人员姓名</th>
+          <th style="padding: 8px; width: 15%;">支援总天数</th>
+          <th style="padding: 8px; width: 45%;">支援的具体日期</th>
+          <th style="padding: 8px; width: 20%; color: #0d6efd;">拿过支援的总次数</th>
         </tr>
       </thead>
       <tbody>
@@ -979,7 +980,7 @@
     if (records.length === 0) {
       html += `
         <tr>
-          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
+          <td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px;">
             当前月份无安排支援岗位的记录
           </td>
         </tr>
@@ -991,6 +992,7 @@
             <td style="font-weight: bold; padding: 8px;">${item.name}</td>
             <td style="font-weight: bold; color: #006064; padding: 8px;">${item.count} 天</td>
             <td class="shift-support" style="padding: 8px;">${item.days}</td>
+            <td style="font-weight: bold; color: #0d6efd; padding: 8px;">第 ${item.count} 次</td>
           </tr>
         `;
       });
@@ -999,7 +1001,6 @@
     html += `</tbody>`;
     document.getElementById('supportStaffTable').innerHTML = html;
   }
-
   function renderAll() {
     renderTable(lastGeneratedSchedule);
     renderStatsTable(lastGeneratedSchedule);
