@@ -770,10 +770,11 @@
         }
       });
 
+      // 强制单排无折行 (white-space: nowrap)
       html += `
         <tr>
           <td class="staff-name" style="padding: 8px;">${staff.name}</td>
-          <td style="padding: 8px; text-align: center; font-size: 13px; font-weight: bold;">
+          <td style="padding: 8px; text-align: center; font-size: 13px; font-weight: bold; white-space: nowrap;">
             <span style="color: #c62828;">🔴高:${highCount}</span> &nbsp;&nbsp;&nbsp;&nbsp;
             <span style="color: #8c6b00;">🟡中:${midCount}</span> &nbsp;&nbsp;&nbsp;&nbsp;
             <span style="color: #1b5e20;">🟢低:${lowCount}</span>
@@ -785,7 +786,6 @@
     html += `</tbody>`;
     document.getElementById('intensitySummaryTable').innerHTML = html;
   }
-
   function renderHighIntensityTable(scheduleData = null) {
     const highShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
     let records = [];
