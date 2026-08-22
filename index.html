@@ -690,7 +690,7 @@
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
- function renderStatsTable(scheduleData = null) {
+function renderStatsTable(scheduleData = null) {
     let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
     
     let html = `<thead><tr><th class="header-month">姓名</th>`;
@@ -732,12 +732,12 @@
         rowShiftCellsHtml += `<td style="${countStyle}">${count}</td>`;
       });
 
-      // 优化：采用 Flex 垂直紧凑布局，彻底消除姓名与统计数字之间的空白
+      // 极限紧凑布局：间距 gap:0，消除内边距与行高限制
       html += `<tr>`;
-      html += `<td class="staff-name" style="padding: 2px 4px;">
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;">
-                  <span style="font-weight: bold; font-size: 13px; line-height: 1.1;">${staff.name}</span>
-                  <span style="font-size: 10px; color: #444; font-weight: normal; white-space: nowrap; line-height: 1.1; transform: scale(0.95);">
+      html += `<td class="staff-name" style="padding: 1px 2px;">
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; line-height: 1;">
+                  <span style="font-weight: bold; font-size: 13px; margin-bottom: 1px;">${staff.name}</span>
+                  <span style="font-size: 10px; color: #444; font-weight: normal; white-space: nowrap; line-height: 1; transform: scale(0.9); transform-origin: center;">
                     🔴高:${highCount} 🟡中:${midCount} 🟢低:${lowCount}
                   </span>
                 </div>
