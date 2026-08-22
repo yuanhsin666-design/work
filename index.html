@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (全规则严格轮换版)</title>
+  <title>智能动态排班工作表 (一键直式复制版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -21,8 +21,11 @@
     button.secondary { background: #6c757d; }
     button.danger { background: #d9534f; }
     button.success { background: #198754; color: white; }
-    button.copy-btn { background: #0d6efd; color: white; }
+    button.copy-btn { background: #198754; color: white; }
     button.lock-btn { background: #6f42c1; color: white; }
+    button.edit-btn { background: #d97706; color: white; }
+    button.edit-btn.active { background: #dc2626; color: white; }
+    button.warning-btn { background: #d97706; color: white; }
 
     .tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; max-height: 180px; overflow-y: auto; }
     .tag { padding: 5px 10px; border-radius: 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; }
@@ -35,7 +38,7 @@
 
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; vertical-align: middle; position: relative; }
+    th, td { border: 1px solid #ccc; padding: 4px; min-width: 60px; white-space: pre-line; vertical-align: middle; position: relative; }
     .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
     .header-day { background: #f0f0f0; cursor: pointer; }
     .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
@@ -46,6 +49,11 @@
     .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; } 
     .shift-support { background-color: #e0f7fa; color: #006064; } 
     
+    .shift-duplicate-error { background-color: #f8d7da !important; color: #842029 !important; border: 2px solid #dc2626 !important; font-weight: bold; }
+
+    .shift-select { width: 100%; border: none; background: transparent; text-align: center; text-align-last: center; font-size: 11px; font-weight: inherit; color: inherit; cursor: pointer; padding: 4px 0; outline: none; }
+    .manual-edited { box-shadow: inset 0 0 0 2px #d97706; border-radius: 3px; font-weight: bold; }
+
     .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; position: sticky; bottom: 0; z-index: 4; }
     .row-daily-total .staff-name { background-color: #cbd5e1; color: #0f172a; position: sticky; left: 0; z-index: 6; }
 
@@ -57,17 +65,20 @@
       right: 1px;
       font-size: 9px;
       opacity: 0.8;
+      pointer-events: none;
     }
     
     .locked-header { background-color: #cbd5e1 !important; color: #334155; }
     .stat-total { background-color: #d97706; color: white; font-weight: bold; }
     .lock-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #f1f5f9; padding: 10px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
+    
+    .log-box { background: #fffbe6; border: 1px solid #ffe58f; padding: 10px; border-radius: 6px; font-size: 13px; color: #d46b08; margin-top: 10px; display: none; line-height: 1.6; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 全岗位轮换与分红日平摊规则版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支援一键直式复制版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -108,7 +119,7 @@
           <option value="中" selected>🟡 中强度</option>
           <option value="高">🔴 高强度</option>
         </select>
-        <button onclick="addShift()">添加基础岗位</button>
+        <button onclick="addShift()">添加岗位</button>
       </div>
       <div class="tag-container" id="shiftsContainer"></div>
     </div>
@@ -116,15 +127,17 @@
 
   <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
+    <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
+  <div id="warningLog" class="log-box"></div>
 </div>
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0;">📅 <span id="currentMonthTitle"></span> 排班工作表预览</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表</button>
+    <button class="copy-btn" onclick="copyTableTransposed('scheduleTable', '排班表')">📋 一键复制直式表格 (贴入云端不倒置)</button>
   </div>
 
   <div class="lock-controls">
@@ -132,6 +145,8 @@
     <button class="lock-btn" onclick="lockAllCells()">🔒 一键锁定当月全表</button>
     <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月</button>
     <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期</button>
+    <button id="toggleEditBtn" class="edit-btn" onclick="toggleManualEditMode()">✏️ 开启手动修改模式</button>
+    <span style="font-size: 12px; color: #666;">💡 提示：非修改模式下，点击表格任意單格可直接切换「單格鎖定」狀態。</span>
   </div>
 
   <div class="table-container">
@@ -142,7 +157,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0;">📊 当月员工岗位及强度次数统计</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('statsTable')">📋 复制统计表</button>
+    <button class="copy-btn" onclick="copyTableTransposed('statsTable', '岗位统计表')">📋 一键复制表格</button>
   </div>
   <div class="table-container">
     <table id="statsTable"></table>
@@ -151,8 +166,18 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+    <h3 style="margin:0; color: #1a4f8b;">📊 当月人员岗位强度次数汇总表</h3>
+    <button class="copy-btn" onclick="copyTableTransposed('intensitySummaryTable', '强度汇总表')">📋 一键复制表格</button>
+  </div>
+  <div class="table-container">
+    <table id="intensitySummaryTable"></table>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日高强度人员/岗位记录表</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
+    <button class="copy-btn" onclick="copyTableTransposed('highIntensityTable', '分红日记录表')">📋 一键复制表格</button>
   </div>
   <div class="table-container">
     <table id="highIntensityTable"></table>
@@ -161,8 +186,8 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表</button>
+    <h3 style="margin:0; color: #006064;">🔵 全员支援岗位记录表 (跨月累计)</h3>
+    <button class="copy-btn" onclick="copyTableTransposed('supportStaffTable', '支援记录表')">📋 一键复制表格</button>
   </div>
   <div class="table-container">
     <table id="supportStaffTable"></table>
@@ -171,11 +196,11 @@
 
 <script>
   const SUPABASE_URL = 'https://sgtxweyklcyimerwvuhu.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_IiIoN5F_XaIqEsvmKmzdqg_7jqR7Qcb';[cite: 2]
-  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);[cite: 2]
+  const SUPABASE_KEY = 'sb_publishable_IiIoN5F_XaIqEsvmKmzdqg_7jqR7Qcb'; 
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];[cite: 2]
-  let staffs = defaultNames.map(name => ({ name }));[cite: 2]
+  let defaultNames = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"];
+  let staffs = defaultNames.map(name => ({ name }));
 
   let baseShifts = [
     { name: "OL\nFB\nLY\nJY", level: "低" },
@@ -190,282 +215,312 @@
     { name: "TD\n1000\n以下", level: "低" },
     { name: "TD\n1001\n5000", level: "中" },
     { name: "TD\n5001\n以上", level: "高" }
-  ];[cite: 2]
+  ];
 
-  let supportShift = { name: "支援\nND\nHS\nYD", level: "支援" };[cite: 2]
-  const weekDays = ["日", "一", "二", "三", "四", "五", "六"];[cite: 2]
+  let supportShift = { name: "支援\nND\nHS\nYD", level: "支援" };
+  const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
   
-  let currentMonthRests = {};[cite: 2]
-  let lastGeneratedSchedule = null;[cite: 2]
-  let lockedMap = [];[cite: 2]
+  let currentMonthRests = {}; 
+  let lastGeneratedSchedule = null;
+  let lockedMap = [];
+  let isManualEditMode = false;
 
-  function getMonthKey() {[cite: 2]
-    const year = document.getElementById('yearSelect').value;[cite: 2]
-    const month = document.getElementById('monthSelect').value;[cite: 2]
-    return `${year}-${month}`;[cite: 2]
+  function toggleManualEditMode() {
+    isManualEditMode = !isManualEditMode;
+    const btn = document.getElementById('toggleEditBtn');
+    if (isManualEditMode) {
+      btn.innerText = "❌ 退出手动修改模式";
+      btn.classList.add('active');
+    } else {
+      btn.innerText = "✏️ 开启手动修改模式";
+      btn.classList.remove('active');
+    }
+    renderTable(lastGeneratedSchedule);
   }
 
-  function initLockedMap(forceReset = false) {[cite: 2]
-    const year = parseInt(document.getElementById('yearSelect').value || new Date().getFullYear());[cite: 2]
-    const month = parseInt(document.getElementById('monthSelect').value || (new Date().getMonth() + 1));[cite: 2]
-    const totalDays = getDaysInMonth(year, month);[cite: 2]
+  function getMonthKey() {
+    const year = document.getElementById('yearSelect').value;
+    const month = document.getElementById('monthSelect').value;
+    return `${year}-${month}`;
+  }
 
-    if (forceReset || !lockedMap || lockedMap.length !== staffs.length || (lockedMap[0] && lockedMap[0].length !== totalDays)) {[cite: 2]
-      lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));[cite: 2]
+  function initLockedMap(forceReset = false) {
+    const year = parseInt(document.getElementById('yearSelect').value || new Date().getFullYear());
+    const month = parseInt(document.getElementById('monthSelect').value || (new Date().getMonth() + 1));
+    const totalDays = getDaysInMonth(year, month);
+
+    if (forceReset || !lockedMap || lockedMap.length !== staffs.length || (lockedMap[0] && lockedMap[0].length !== totalDays)) {
+      lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
     }
   }
 
-  function saveGlobalConfig() {[cite: 2]
-    localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify({ staffs, baseShifts, supportShift }));[cite: 2]
+  function toggleCellLock(sIdx, dayIdx) {
+    if (isManualEditMode) return; 
+    initLockedMap();
+    lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];
+    renderAll();
+    saveDataToLocal();
   }
 
-  function loadGlobalConfig() {[cite: 2]
-    const saved = localStorage.getItem('auto_schedule_global_config_v2');[cite: 2]
-    if (saved) {[cite: 2]
-      try {[cite: 2]
-        const data = JSON.parse(saved);[cite: 2]
-        if (data.staffs) staffs = data.staffs;[cite: 2]
-        if (data.baseShifts) baseShifts = data.baseShifts;[cite: 2]
-        if (data.supportShift) supportShift = data.supportShift;[cite: 2]
-      } catch(e) { console.error(e); }[cite: 2]
+  function saveGlobalConfig() {
+    localStorage.setItem('auto_schedule_global_config_v4', JSON.stringify({ staffs, baseShifts, supportShift }));
+  }
+
+  function loadGlobalConfig() {
+    const saved = localStorage.getItem('auto_schedule_global_config_v4');
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        if (data.staffs) staffs = data.staffs;
+        if (data.baseShifts) baseShifts = data.baseShifts;
+        if (data.supportShift) supportShift = data.supportShift;
+      } catch(e) { console.error(e); }
     }
   }
 
-  function sanitizeSchedule(sched) {[cite: 2]
-    if (!sched) return null;[cite: 2]
-    return sched.map(row => row.map(cell => (cell === "休(预)" || cell === "休(預)") ? "休" : cell));[cite: 2]
+  function sanitizeSchedule(sched) {
+    if (!sched) return null;
+    return sched.map(row => row.map(cell => (cell === "休(预)" || cell === "休(預)") ? "休" : cell));
   }
 
-  async function saveDataToLocal() {[cite: 2]
-    saveGlobalConfig();[cite: 2]
-    const monthKey = getMonthKey();[cite: 2]
+  async function saveDataToLocal() {
+    saveGlobalConfig();
+    const monthKey = getMonthKey();
     
-    const monthData = {[cite: 2]
-      currentMonthRests: currentMonthRests,[cite: 2]
-      lastGeneratedSchedule: sanitizeSchedule(lastGeneratedSchedule),[cite: 2]
-      lockedMap: lockedMap,[cite: 2]
-      cloudUrl: document.getElementById('cloudUrlInput').value[cite: 2]
-    };[cite: 2]
+    const monthData = {
+      currentMonthRests: currentMonthRests,
+      lastGeneratedSchedule: sanitizeSchedule(lastGeneratedSchedule),
+      lockedMap: lockedMap,
+      cloudUrl: document.getElementById('cloudUrlInput').value,
+      baseShifts: baseShifts,
+      supportShift: supportShift
+    };
     
-    localStorage.setItem(`auto_schedule_month_${monthKey}`, JSON.stringify(monthData));[cite: 2]
+    localStorage.setItem(`auto_schedule_month_${monthKey}`, JSON.stringify(monthData));
 
-    try {[cite: 2]
-      await supabaseClient[cite: 2]
-        .from('schedules')[cite: 2]
-        .upsert({ month_key: monthKey, data: monthData }, { onConflict: 'month_key' });[cite: 2]
-    } catch (err) { console.error("Supabase 连线失败：", err); }[cite: 2]
+    try {
+      await supabaseClient
+        .from('schedules')
+        .upsert({ month_key: monthKey, data: monthData }, { onConflict: 'month_key' });
+    } catch (err) { console.error("Supabase 连线失败：", err); }
   }
 
-  async function loadDataFromLocal() {[cite: 2]
-    loadGlobalConfig();[cite: 2]
-    const monthKey = getMonthKey();[cite: 2]
-    const year = parseInt(document.getElementById('yearSelect').value);[cite: 2]
-    const month = parseInt(document.getElementById('monthSelect').value);[cite: 2]
-    const totalDays = getDaysInMonth(year, month);[cite: 2]
+  async function loadDataFromLocal() {
+    const monthKey = getMonthKey();
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
 
-    let data = null;[cite: 2]
+    let data = null;
 
-    try {[cite: 2]
-      const { data: cloudRes, error } = await supabaseClient[cite: 2]
-        .from('schedules')[cite: 2]
-        .select('data')[cite: 2]
-        .eq('month_key', monthKey)[cite: 2]
-        .maybeSingle();[cite: 2]
+    try {
+      const { data: cloudRes, error } = await supabaseClient
+        .from('schedules')
+        .select('data')
+        .eq('month_key', monthKey)
+        .maybeSingle();
 
-      if (!error && cloudRes && cloudRes.data) data = cloudRes.data;[cite: 2]
-    } catch (err) { console.warn("无法连接云端，改用本地缓存：", err); }[cite: 2]
+      if (!error && cloudRes && cloudRes.data) data = cloudRes.data;
+    } catch (err) { console.warn("无法连接云端，改用本地缓存：", err); }
 
-    if (!data) {[cite: 2]
-      const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);[cite: 2]
-      if (savedMonth) {[cite: 2]
-        try { data = JSON.parse(savedMonth); } catch(e) { console.error(e); }[cite: 2]
+    if (!data) {
+      const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
+      if (savedMonth) {
+        try { data = JSON.parse(savedMonth); } catch(e) { console.error(e); }
       }
     }
 
-    if (!data) {[cite: 2]
-      currentMonthRests = {};[cite: 2]
-      lastGeneratedSchedule = null;[cite: 2]
-      lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));[cite: 2]
-      document.getElementById('cloudUrlInput').value = "";[cite: 2]
-      return false;[cite: 2]
+    if (!data) {
+      loadGlobalConfig();
+      currentMonthRests = {};
+      lastGeneratedSchedule = null;
+      lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+      document.getElementById('cloudUrlInput').value = "";
+      renderShifts();
+      return false;
     }
 
-    currentMonthRests = data.currentMonthRests || {};[cite: 2]
-    lastGeneratedSchedule = sanitizeSchedule(data.lastGeneratedSchedule);[cite: 2]
-    lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));[cite: 2]
-    document.getElementById('cloudUrlInput').value = data.cloudUrl || "";[cite: 2]
-    return true;[cite: 2]
+    currentMonthRests = data.currentMonthRests || {};
+    lastGeneratedSchedule = sanitizeSchedule(data.lastGeneratedSchedule);
+    lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+    document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
+
+    if (data.baseShifts) baseShifts = data.baseShifts;
+    if (data.supportShift) supportShift = data.supportShift;
+
+    renderShifts();
+    return true;
   }
 
-  async function resetCurrentMonthData() {[cite: 2]
-    const monthKey = getMonthKey();[cite: 2]
-    if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？`)) {[cite: 2]
-      currentMonthRests = {};[cite: 2]
-      lastGeneratedSchedule = null;[cite: 2]
-      initLockedMap(true);[cite: 2]
-      document.getElementById('cloudUrlInput').value = "";[cite: 2]
+  async function resetCurrentMonthData() {
+    const monthKey = getMonthKey();
+    if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？`)) {
+      currentMonthRests = {};
+      lastGeneratedSchedule = null;
+      initLockedMap(true);
+      document.getElementById('cloudUrlInput').value = "";
 
-      localStorage.removeItem(`auto_schedule_month_${monthKey}`);[cite: 2]
+      localStorage.removeItem(`auto_schedule_month_${monthKey}`);
 
-      try {[cite: 2]
-        await supabaseClient.from('schedules').delete().eq('month_key', monthKey);[cite: 2]
-      } catch (err) { console.error("云端重置失败：", err); }[cite: 2]
+      try {
+        await supabaseClient.from('schedules').delete().eq('month_key', monthKey);
+      } catch (err) { console.error("云端重置失败：", err); }
 
-      renderAll();[cite: 2]
-      document.getElementById('status').innerText = `🗑️ 已重置 [${monthKey}] 的数据！`;[cite: 2]
-      alert(`[${monthKey}] 月份数据已成功重置！`);[cite: 2]
+      renderAll();
+      document.getElementById('status').innerText = `🗑️ 已重置 [${monthKey}] 的数据！`;
+      alert(`[${monthKey}] 月份数据已成功重置！`);
     }
   }
 
-  function parseCSV(text) {[cite: 2]
-    let lines = text.split(/\r\n|\n/);[cite: 2]
-    return lines.map(line => {[cite: 2]
-      let cells = [];[cite: 2]
-      let inQuotes = false;[cite: 2]
-      let cell = '';[cite: 2]
-      for (let i = 0; i < line.length; i++) {[cite: 2]
-        let char = line[i];[cite: 2]
-        if (char === '"') inQuotes = !inQuotes;[cite: 2]
-        else if (char === ',' && !inQuotes) { cells.push(cell.trim()); cell = ''; }[cite: 2]
-        else cell += char;[cite: 2]
+  function parseCSV(text) {
+    let lines = text.split(/\r\n|\n/);
+    return lines.map(line => {
+      let cells = [];
+      let inQuotes = false;
+      let cell = '';
+      for (let i = 0; i < line.length; i++) {
+        let char = line[i];
+        if (char === '"') inQuotes = !inQuotes;
+        else if (char === ',' && !inQuotes) { cells.push(cell.trim()); cell = ''; }
+        else cell += char;
       }
-      cells.push(cell.trim());[cite: 2]
-      return cells;[cite: 2]
+      cells.push(cell.trim());
+      return cells;
     });
   }
 
-  async function fetchCloudRests() {[cite: 2]
-    let rawUrl = document.getElementById('cloudUrlInput').value.trim();[cite: 2]
-    if (!rawUrl) return alert("请先输入当前月份的云端链接！");[cite: 2]
+  async function fetchCloudRests() {
+    let rawUrl = document.getElementById('cloudUrlInput').value.trim();
+    if (!rawUrl) return alert("请先输入当前月份的云端链接！");
 
-    let targetUrl = rawUrl;[cite: 2]
-    if (rawUrl.includes("docs.google.com/spreadsheets")) {[cite: 2]
-      const match = rawUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);[cite: 2]
-      if (match && match[1]) {[cite: 2]
-        const sheetId = match[1];[cite: 2]
-        let gidMatch = rawUrl.match(/gid=([0-9]+)/);[cite: 2]
-        let gidParam = gidMatch ? `&gid=${gidMatch[1]}` : "";[cite: 2]
-        targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;[cite: 2]
+    let targetUrl = rawUrl;
+    if (rawUrl.includes("docs.google.com/spreadsheets")) {
+      const match = rawUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      if (match && match[1]) {
+        const sheetId = match[1];
+        let gidMatch = rawUrl.match(/gid=([0-9]+)/);
+        let gidParam = gidMatch ? `&gid=${gidMatch[1]}` : "";
+        targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;
       }
     }
 
-    const monthKey = getMonthKey();[cite: 2]
-    document.getElementById('status').innerText = `⏳ 正在读取 [${monthKey}] 的云端假表...`;[cite: 2]
+    const monthKey = getMonthKey();
+    document.getElementById('status').innerText = `⏳ 正在读取 [${monthKey}] 的云端假表...`;
 
-    try {[cite: 2]
-      const response = await fetch(targetUrl);[cite: 2]
-      if (!response.ok) throw new Error("无法读取，请确认链接权限。");[cite: 2]
+    try {
+      const response = await fetch(targetUrl);
+      if (!response.ok) throw new Error("无法读取，请确认链接权限。");
       
-      const csvText = await response.text();[cite: 2]
-      const rows = parseCSV(csvText);[cite: 2]
+      const csvText = await response.text();
+      const rows = parseCSV(csvText);
 
-      const year = parseInt(document.getElementById('yearSelect').value);[cite: 2]
-      const month = parseInt(document.getElementById('monthSelect').value);[cite: 2]
-      const totalDays = getDaysInMonth(year, month);[cite: 2]
+      const year = parseInt(document.getElementById('yearSelect').value);
+      const month = parseInt(document.getElementById('monthSelect').value);
+      const totalDays = getDaysInMonth(year, month);
 
-      currentMonthRests = {};[cite: 2]
-      let dayColumnMap = {};[cite: 2]
-      let headerRowIndex = -1;[cite: 2]
+      currentMonthRests = {};
+      let dayColumnMap = {};
+      let headerRowIndex = -1;
 
-      for (let r = 0; r < rows.length; r++) {[cite: 2]
-        let row = rows[r];[cite: 2]
-        for (let c = 0; c < row.length; c++) {[cite: 2]
-          let num = parseInt(row[c]);[cite: 2]
-          if (!isNaN(num) && num >= 1 && num <= 31) {[cite: 2]
-            dayColumnMap[c] = num;[cite: 2]
-            headerRowIndex = r;[cite: 2]
+      for (let r = 0; r < rows.length; r++) {
+        let row = rows[r];
+        for (let c = 0; c < row.length; c++) {
+          let num = parseInt(row[c]);
+          if (!isNaN(num) && num >= 1 && num <= 31) {
+            dayColumnMap[c] = num;
+            headerRowIndex = r;
           }
         }
-        if (headerRowIndex !== -1) break;[cite: 2]
+        if (headerRowIndex !== -1) break;
       }
 
-      let updatedCount = 0;[cite: 2]
-      for (let r = 0; r < rows.length; r++) {[cite: 2]
-        let row = rows[r];[cite: 2]
-        if (row.length === 0) continue;[cite: 2]
+      let updatedCount = 0;
+      for (let r = 0; r < rows.length; r++) {
+        let row = rows[r];
+        if (row.length === 0) continue;
         
-        let rawName = row[0] ? row[0].replace(/"/g, '').trim() : '';[cite: 2]
-        let cleanNameInRow = rawName.replace(/\s+/g, '');[cite: 2]
-        if (!cleanNameInRow) continue;[cite: 2]
+        let rawName = row[0] ? row[0].replace(/"/g, '').trim() : '';
+        let cleanNameInRow = rawName.replace(/\s+/g, '');
+        if (!cleanNameInRow) continue;
 
-        const sIdx = staffs.findIndex(s => {[cite: 2]
-          let cleanStaffName = s.name.replace(/\s+/g, '');[cite: 2]
-          return cleanStaffName === cleanNameInRow ||[cite: 2]
-                 (cleanStaffName === "孫孫" && cleanNameInRow === "孙孙") ||[cite: 2]
-                 (cleanStaffName === "孙孙" && cleanNameInRow === "孫孫") ||[cite: 2]
-                 (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||[cite: 2]
-                 (cleanStaffName === "翔" && cleanNameInRow === "阿翔");[cite: 2]
+        const sIdx = staffs.findIndex(s => {
+          let cleanStaffName = s.name.replace(/\s+/g, '');
+          return cleanStaffName === cleanNameInRow ||
+                 (cleanStaffName === "孫孫" && cleanNameInRow === "孙孙") ||
+                 (cleanStaffName === "孙孙" && cleanNameInRow === "孫孫") ||
+                 (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||
+                 (cleanStaffName === "翔" && cleanNameInRow === "阿翔");
         });
 
-        if (sIdx !== -1) {[cite: 2]
-          updatedCount++;[cite: 2]
-          let rests = [];[cite: 2]
-          for (let c = 1; c < row.length; c++) {[cite: 2]
-            if (row[c] && row[c].trim() === '1') {[cite: 2]
-              let day = dayColumnMap[c] || c;[cite: 2]
-              if (day >= 1 && day <= totalDays) rests.push(day);[cite: 2]
+        if (sIdx !== -1) {
+          updatedCount++;
+          let rests = [];
+          for (let c = 1; c < row.length; c++) {
+            if (row[c] && row[c].trim() === '1') {
+              let day = dayColumnMap[c] || c;
+              if (day >= 1 && day <= totalDays) rests.push(day);
             }
           }
-          currentMonthRests[sIdx] = Array.from(new Set(rests));[cite: 2]
+          currentMonthRests[sIdx] = Array.from(new Set(rests));
         }
       }
 
-      renderAll();[cite: 2]
-      await saveDataToLocal();[cite: 2]
-      document.getElementById('status').innerText = `✅ [${monthKey}] 假表抓取成功！匹配 ${updatedCount} 人。`;[cite: 2]
-      alert(`[${monthKey}] 假表读取成功！已为 ${updatedCount} 位员工导入当月休假。`);[cite: 2]
-    } catch (err) {[cite: 2]
-      alert("抓取失败：" + err.message);[cite: 2]
-      document.getElementById('status').innerText = "❌ 读取失败";[cite: 2]
+      renderAll();
+      await saveDataToLocal();
+      document.getElementById('status').innerText = `✅ [${monthKey}] 假表抓取成功！匹配 ${updatedCount} 人。`;
+      alert(`[${monthKey}] 假表读取成功！已为 ${updatedCount} 位员工导入当月休假。`);
+    } catch (err) {
+      alert("抓取失败：" + err.message);
+      document.getElementById('status').innerText = "❌ 读取失败";
     }
   }
 
-  function initDateSelectors() {[cite: 2]
-    const yearSelect = document.getElementById('yearSelect');[cite: 2]
-    const monthSelect = document.getElementById('monthSelect');[cite: 2]
-    const currentYear = new Date().getFullYear();[cite: 2]
-    const currentMonth = new Date().getMonth() + 1;[cite: 2]
+  function initDateSelectors() {
+    const yearSelect = document.getElementById('yearSelect');
+    const monthSelect = document.getElementById('monthSelect');
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
 
-    yearSelect.innerHTML = "";[cite: 2]
-    monthSelect.innerHTML = "";[cite: 2]
+    yearSelect.innerHTML = "";
+    monthSelect.innerHTML = "";
 
-    for (let y = currentYear - 1; y <= currentYear + 2; y++) {[cite: 2]
-      yearSelect.innerHTML += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y} 年</option>`;[cite: 2]
+    for (let y = currentYear - 1; y <= currentYear + 2; y++) {
+      yearSelect.innerHTML += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y} 年</option>`;
     }
-    for (let m = 1; m <= 12; m++) {[cite: 2]
-      monthSelect.innerHTML += `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m} 月</option>`;[cite: 2]
+    for (let m = 1; m <= 12; m++) {
+      monthSelect.innerHTML += `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m} 月</option>`;
     }
   }
 
-  function getDaysInMonth(year, month) {[cite: 2]
-    return new Date(year, month, 0).getDate();[cite: 2]
+  function getDaysInMonth(year, month) {
+    return new Date(year, month, 0).getDate();
   }
 
-  function updateSelect() {[cite: 2]
-    document.getElementById('staffSelect').innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');[cite: 2]
+  function updateSelect() {
+    document.getElementById('staffSelect').innerHTML = staffs.map((s, idx) => `<option value="${idx}">${s.name}</option>`).join('');
   }
 
-  function toggleShiftLevel(idx, event) {[cite: 2]
-    if (event) event.stopPropagation();[cite: 2]
-    const nextLevel = { "低": "中", "中": "高", "高": "低" };[cite: 2]
-    baseShifts[idx].level = nextLevel[baseShifts[idx].level] || "中";[cite: 2]
-    renderShifts();[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
+  function toggleShiftLevel(idx, event) {
+    if (event) event.stopPropagation();
+    const nextLevel = { "低": "中", "中": "高", "高": "低" };
+    baseShifts[idx].level = nextLevel[baseShifts[idx].level] || "中";
+    renderShifts();
+    renderAll();
+    saveDataToLocal();
   }
 
-  function renderShifts() {[cite: 2]
-    const container = document.getElementById('shiftsContainer');[cite: 2]
-    let html = baseShifts.map((shift, idx) => {[cite: 2]
-      let levelClass = shift.level === "低" ? "tag-low" : (shift.level === "高" ? "tag-high" : "tag-mid");[cite: 2]
-      let icon = shift.level === "低" ? "🟢" : (shift.level === "高" ? "🔴" : "🟡");[cite: 2]
+  function renderShifts() {
+    const container = document.getElementById('shiftsContainer');
+    let html = baseShifts.map((shift, idx) => {
+      let levelClass = shift.level === "低" ? "tag-low" : (shift.level === "高" ? "tag-high" : "tag-mid");
+      let icon = shift.level === "低" ? "🟢" : (shift.level === "高" ? "🔴" : "🟡");
       return `
         <div class="tag ${levelClass}" onclick="toggleShiftLevel(${idx}, event)" title="点击切换岗位强度">
           <span class="level-badge">${icon} ${shift.level}</span>
           <span><b>${idx+1}.</b> ${shift.name.replace(/\n/g, ' ')}</span>
           <span class="remove-btn" onclick="removeShift(${idx}, event)">×</span>
         </div>
-      `;[cite: 2]
+      `;
     }).join('');
 
     html += `
@@ -473,592 +528,987 @@
         <span class="level-badge">🔵 支援</span>
         <span>${supportShift.name.replace(/\n/g, ' ')}</span>
       </div>
-    `;[cite: 2]
-    container.innerHTML = html;[cite: 2]
+    `;
+    container.innerHTML = html;
   }
 
-  function addShift() {[cite: 2]
-    const nameInput = document.getElementById('newShiftName');[cite: 2]
-    const levelSelect = document.getElementById('newShiftLevel');[cite: 2]
-    const name = nameInput.value.trim().replace(/\\n/g, '\n');[cite: 2]
-    const level = levelSelect.value;[cite: 2]
+  function addShift() {
+    const nameInput = document.getElementById('newShiftName');
+    const levelSelect = document.getElementById('newShiftLevel');
+    const name = nameInput.value.trim().replace(/\\n/g, '\n');
+    const level = levelSelect.value;
 
-    if (!name) return alert('请输入岗位名称');[cite: 2]
-    baseShifts.push({ name, level });[cite: 2]
-    nameInput.value = '';[cite: 2]
-    renderShifts();[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
+    if (!name) return alert('请输入岗位名称');
+    baseShifts.push({ name, level });
+    nameInput.value = '';
+    renderShifts();
+    renderAll();
+    saveDataToLocal();
   }
 
-  function removeShift(idx, event) {[cite: 2]
-    if (event) event.stopPropagation();[cite: 2]
-    if (baseShifts.length <= 1) return alert('请至少保留一个基础岗位！');[cite: 2]
-    baseShifts.splice(idx, 1);[cite: 2]
-    renderShifts();[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
+  function removeShift(idx, event) {
+    if (event) event.stopPropagation();
+    if (baseShifts.length <= 1) return alert('请至少保留一个基础岗位！');
+    baseShifts.splice(idx, 1);
+    renderShifts();
+    renderAll();
+    saveDataToLocal();
   }
 
-  function addStaff() {[cite: 2]
-    const name = document.getElementById('newName').value.trim();[cite: 2]
-    if (!name) return alert('请输入员工姓名');[cite: 2]
-    staffs.push({ name });[cite: 2]
-    initLockedMap(true);[cite: 2]
-    document.getElementById('newName').value = '';[cite: 2]
-    updateSelect();[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
+  function addStaff() {
+    const name = document.getElementById('newName').value.trim();
+    if (!name) return alert('请输入员工姓名');
+    staffs.push({ name });
+    initLockedMap(true);
+    document.getElementById('newName').value = '';
+    updateSelect();
+    renderAll();
+    saveDataToLocal();
   }
 
-  function removeStaff() {[cite: 2]
-    if (staffs.length === 0) return;[cite: 2]
-    const idx = document.getElementById('staffSelect').value;[cite: 2]
-    const removedName = staffs[idx].name;[cite: 2]
-    staffs.splice(idx, 1);[cite: 2]
-    initLockedMap(true);[cite: 2]
-    updateSelect();[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
-    alert(`已移除员工：${removedName}`);[cite: 2]
+  function removeStaff() {
+    if (staffs.length === 0) return;
+    const idx = document.getElementById('staffSelect').value;
+    const removedName = staffs[idx].name;
+    staffs.splice(idx, 1);
+    initLockedMap(true);
+    updateSelect();
+    renderAll();
+    saveDataToLocal();
+    alert(`已移除员工：${removedName}`);
   }
 
-  function clearCurrentMonthRests() {[cite: 2]
-    currentMonthRests = {};[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
-    alert(`已清空当前 [${getMonthKey()}] 月份的休假。`);[cite: 2]
+  function clearCurrentMonthRests() {
+    currentMonthRests = {};
+    renderAll();
+    saveDataToLocal();
+    alert(`已清空当前 [${getMonthKey()}] 月份的休假。`);
   }
 
-  async function onDateChange() {[cite: 2]
-    await loadDataFromLocal();[cite: 2]
-    renderAll();[cite: 2]
+  async function onDateChange() {
+    await loadDataFromLocal();
+    renderAll();
   }
 
-  function toggleCellLock(sIdx, dayIdx) {[cite: 2]
-    if (!lockedMap[sIdx]) return;[cite: 2]
-    lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
+  function handleManualSelectChange(sIdx, dayIdx, selectElem) {
+    const newShift = selectElem.value;
+    const totalDays = getDaysInMonth(
+      parseInt(document.getElementById('yearSelect').value),
+      parseInt(document.getElementById('monthSelect').value)
+    );
+
+    if (!lastGeneratedSchedule || lastGeneratedSchedule.length !== staffs.length) {
+      lastGeneratedSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+    }
+
+    lastGeneratedSchedule[sIdx][dayIdx] = newShift;
+
+    initLockedMap();
+    lockedMap[sIdx][dayIdx] = true;
+
+    renderAll();
+    saveDataToLocal();
   }
 
-  function toggleColumnLock(dayIdx) {[cite: 2]
-    initLockedMap();[cite: 2]
-    let allLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][dayIdx]);[cite: 2]
-    staffs.forEach((_, sIdx) => { lockedMap[sIdx][dayIdx] = !allLocked; });[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
+  function toggleColumnLock(dayIdx) {
+    initLockedMap();
+    let allLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][dayIdx]);
+    staffs.forEach((_, sIdx) => { lockedMap[sIdx][dayIdx] = !allLocked; });
+    renderAll();
+    saveDataToLocal();
   }
 
-  function toggleRowLock(sIdx) {[cite: 2]
-    initLockedMap();[cite: 2]
-    const year = parseInt(document.getElementById('yearSelect').value);[cite: 2]
-    const month = parseInt(document.getElementById('monthSelect').value);[cite: 2]
-    const totalDays = getDaysInMonth(year, month);[cite: 2]
-    let allLocked = true;[cite: 2]
-    for (let d = 0; d < totalDays; d++) { if (!lockedMap[sIdx][d]) { allLocked = false; break; } }[cite: 2]
-    for (let d = 0; d < totalDays; d++) { lockedMap[sIdx][d] = !allLocked; }[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
+  function toggleRowLock(sIdx) {
+    initLockedMap();
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    let allLocked = true;
+    for (let d = 0; d < totalDays; d++) { if (!lockedMap[sIdx][d]) { allLocked = false; break; } }
+    for (let d = 0; d < totalDays; d++) { lockedMap[sIdx][d] = !allLocked; }
+    renderAll();
+    saveDataToLocal();
   }
 
-  function lockAllCells() {[cite: 2]
-    initLockedMap();[cite: 2]
-    staffs.forEach((_, sIdx) => { for (let d = 0; d < lockedMap[sIdx].length; d++) lockedMap[sIdx][d] = true; });[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
-    alert(`🔒 [${getMonthKey()}] 全表班次已锁定！`);[cite: 2]
+  function lockAllCells() {
+    initLockedMap();
+    staffs.forEach((_, sIdx) => { for (let d = 0; d < lockedMap[sIdx].length; d++) lockedMap[sIdx][d] = true; });
+    renderAll();
+    saveDataToLocal();
+    alert(`🔒 [${getMonthKey()}] 全表班次已锁定！`);
   }
 
-  function unlockAllCells() {[cite: 2]
-    initLockedMap();[cite: 2]
-    staffs.forEach((_, sIdx) => { for (let d = 0; d < lockedMap[sIdx].length; d++) lockedMap[sIdx][d] = false; });[cite: 2]
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
-    alert(`🔓 [${getMonthKey()}] 全表已解锁！`);[cite: 2]
+  function unlockAllCells() {
+    initLockedMap();
+    staffs.forEach((_, sIdx) => { for (let d = 0; d < lockedMap[sIdx].length; d++) lockedMap[sIdx][d] = false; });
+    renderAll();
+    saveDataToLocal();
+    alert(`🔓 [${getMonthKey()}] 全表已解锁！`);
   }
 
-  function lockPastDays() {[cite: 2]
-    initLockedMap();[cite: 2]
-    const year = parseInt(document.getElementById('yearSelect').value);[cite: 2]
-    const month = parseInt(document.getElementById('monthSelect').value);[cite: 2]
-    const totalDays = getDaysInMonth(year, month);[cite: 2]
-    const today = new Date(); today.setHours(0, 0, 0, 0);[cite: 2]
+  function lockPastDays() {
+    initLockedMap();
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
 
-    let count = 0;[cite: 2]
-    for (let day = 1; day <= totalDays; day++) {[cite: 2]
-      const targetDate = new Date(year, month - 1, day); targetDate.setHours(0, 0, 0, 0);[cite: 2]
-      if (targetDate < today) {[cite: 2]
-        staffs.forEach((_, sIdx) => { lockedMap[sIdx][day - 1] = true; });[cite: 2]
-        count++;[cite: 2]
+    let count = 0;
+    for (let day = 1; day <= totalDays; day++) {
+      const targetDate = new Date(year, month - 1, day); targetDate.setHours(0, 0, 0, 0);
+      if (targetDate < today) {
+        staffs.forEach((_, sIdx) => { lockedMap[sIdx][day - 1] = true; });
+        count++;
       }
     }
-    renderAll();[cite: 2]
-    saveDataToLocal();[cite: 2]
-    alert(`🗓️ 已锁定 [${getMonthKey()}] ${count} 天历史日期的班次！`);[cite: 2]
+    renderAll();
+    saveDataToLocal();
+    alert(`🗓️ 已锁定 [${getMonthKey()}] ${count} 天历史日期的班次！可以放心调整岗位并重新排班。`);
   }
 
-  function getShiftClass(shiftName) {[cite: 2]
-    if (!shiftName || shiftName === "休") return "";[cite: 2]
-    if (shiftName === supportShift.name) return "shift-support";[cite: 2]
-    let found = baseShifts.find(s => s.name === shiftName);[cite: 2]
-    if (!found) return "";[cite: 2]
-    if (found.level === "低") return "shift-low";[cite: 2]
-    if (found.level === "中") return "shift-mid";[cite: 2]
-    if (found.level === "高") return "shift-high";[cite: 2]
-    return "";[cite: 2]
+  function getShiftClass(shiftName) {
+    if (!shiftName || shiftName === "休") return "";
+    if (shiftName === supportShift.name) return "shift-support";
+    let found = baseShifts.find(s => s.name === shiftName);
+    if (!found) return "";
+    if (found.level === "低") return "shift-low";
+    if (found.level === "中") return "shift-mid";
+    if (found.level === "高") return "shift-high";
+    return "";
   }
 
-  function renderTable(scheduleData = null) {[cite: 2]
-    const year = parseInt(document.getElementById('yearSelect').value);[cite: 2]
-    const month = parseInt(document.getElementById('monthSelect').value);[cite: 2]
-    const totalDays = getDaysInMonth(year, month);[cite: 2]
-    document.getElementById('currentMonthTitle').innerText = `${year}年${month}月`;[cite: 2]
-    initLockedMap();[cite: 2]
+  function renderTable(scheduleData = null) {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    document.getElementById('currentMonthTitle').innerText = `${year}年${month}月`;
+    initLockedMap();
 
-    let html = `<thead><tr><th rowspan="2" class="header-month">${month}月</th>`;[cite: 2]
-    for(let i=1; i<=totalDays; i++) {[cite: 2]
-      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);[cite: 2]
-      html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${i} ${isColLocked ? '🔒' : ''}</th>`;[cite: 2]
+    const allOptions = [
+      { name: "", label: "-- 未安排 --" },
+      { name: "休", label: "休 (休假)" },
+      ...baseShifts.map(s => ({ name: s.name, label: s.name.replace(/\n/g, ' ') })),
+      { name: supportShift.name, label: supportShift.name.replace(/\n/g, ' ') }
+    ];
+
+    let html = `<thead><tr><th rowspan="2" class="header-month">${month}月</th>`;
+    for(let i=1; i<=totalDays; i++) {
+      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
+      html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${i} ${isColLocked ? '🔒' : ''}</th>`;
     }
-    html += `<th rowspan="2" class="stat-total" style="min-width: 80px;">計數總休假日</th>`;[cite: 2]
+    html += `<th rowspan="2" class="stat-total" style="min-width: 80px;">計數總休假日</th>`;
 
-    html += `</tr><tr class="header-day">`;[cite: 2]
-    for(let i=1; i<=totalDays; i++) {[cite: 2]
-      let dateObj = new Date(year, month - 1, i);[cite: 2]
-      let dayOfWeek = dateObj.getDay();[cite: 2]
-      let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);[cite: 2]
-      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);[cite: 2]
-      html += `<th class="header-day ${isWeekend ? 'weekend' : ''} ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${weekDays[dayOfWeek]}</th>`;[cite: 2]
+    html += `</tr><tr class="header-day">`;
+    for(let i=1; i<=totalDays; i++) {
+      let dateObj = new Date(year, month - 1, i);
+      let dayOfWeek = dateObj.getDay();
+      let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
+      html += `<th class="header-day ${isWeekend ? 'weekend' : ''} ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${weekDays[dayOfWeek]}</th>`;
     }
-    html += `</tr></thead><tbody>`;[cite: 2]
+    html += `</tr></thead><tbody>`;
 
-    let dailyWorkingTotals = Array(totalDays).fill(0);[cite: 2]
-    let dailyRestTotals = Array(totalDays).fill(0);[cite: 2]
+    let dailyWorkingTotals = Array(totalDays).fill(0);
+    let dailyRestTotals = Array(totalDays).fill(0);
 
-    staffs.forEach((staff, sIdx) => {[cite: 2]
-      let isRowLocked = lockedMap[sIdx] && lockedMap[sIdx].every(v => v);[cite: 2]
-      let staffRests = currentMonthRests[sIdx] || [];[cite: 2]
+    staffs.forEach((staff, sIdx) => {
+      let isRowLocked = lockedMap[sIdx] && lockedMap[sIdx].every(v => v);
+      let staffRests = currentMonthRests[sIdx] || [];
       
-      html += `<tr><td class="staff-name cell-clickable ${isRowLocked ? 'locked-header' : ''}" onclick="toggleRowLock(${sIdx})">${staff.name} ${isRowLocked ? '🔒' : ''}</td>`;[cite: 2]
-      for(let day=1; day<=totalDays; day++) {[cite: 2]
-        let cellContent = "";[cite: 2]
-        let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];[cite: 2]
+      html += `<tr><td class="staff-name cell-clickable ${isRowLocked ? 'locked-header' : ''}" onclick="toggleRowLock(${sIdx})">${staff.name} ${isRowLocked ? '🔒' : ''}</td>`;
+      for(let day=1; day<=totalDays; day++) {
+        let cellContent = "";
+        let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
 
-        if (scheduleData && scheduleData[sIdx]) cellContent = scheduleData[sIdx][day - 1] || "";[cite: 2]
-        else if (staffRests.includes(day)) cellContent = "休";[cite: 2]
-
-        if (cellContent === "休(预)" || cellContent === "休(預)") cellContent = "休";[cite: 2]
-
-        if (cellContent && cellContent !== "休") {[cite: 2]
-          dailyWorkingTotals[day - 1]++;[cite: 2]
-        } else if (cellContent === "休") {[cite: 2]
-          dailyRestTotals[day - 1]++;[cite: 2]
+        if (scheduleData && scheduleData[sIdx] && scheduleData[sIdx][day - 1] !== undefined && scheduleData[sIdx][day - 1] !== "") {
+          cellContent = scheduleData[sIdx][day - 1];
+        } else if (staffRests.includes(day)) {
+          cellContent = "休";
         }
 
-        let cellClass = getShiftClass(cellContent);[cite: 2]
-        if (isLocked) cellClass += " cell-locked";[cite: 2]
+        if (cellContent === "休(预)" || cellContent === "休(預)") cellContent = "休";
 
-        html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${cellContent}</td>`;[cite: 2]
+        if (cellContent && cellContent !== "休") {
+          dailyWorkingTotals[day - 1]++;
+        } else if (cellContent === "休") {
+          dailyRestTotals[day - 1]++;
+        }
+
+        let cellClass = getShiftClass(cellContent);
+        if (isLocked) cellClass += " cell-locked manual-edited";
+
+        let cellId = `cell_${sIdx}_${day - 1}`;
+
+        if (isManualEditMode) {
+          let selectOptionsHtml = allOptions.map(opt => {
+            let isSelected = (opt.name === cellContent) ? "selected" : "";
+            return `<option value="${opt.name.replace(/"/g, '&quot;')}" ${isSelected}>${opt.label}</option>`;
+          }).join('');
+
+          html += `
+            <td id="${cellId}" class="${cellClass}">
+              <select class="shift-select" onchange="handleManualSelectChange(${sIdx}, ${day - 1}, this)">
+                ${selectOptionsHtml}
+              </select>
+            </td>
+          `;
+        } else {
+          let displayTxt = cellContent.replace(/\n/g, '<br>');
+          html += `<td id="${cellId}" class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
+        }
       }
 
-      let restDaysCount = 0;[cite: 2]
-      for(let day=1; day<=totalDays; day++) {[cite: 2]
-        let content = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx][day - 1] : "";[cite: 2]
-        if (!content && staffRests.includes(day)) content = "休";[cite: 2]
-        if (content === "休(预)" || content === "休(預)") content = "休";[cite: 2]
+      let restDaysCount = 0;
+      for(let day=1; day<=totalDays; day++) {
+        let content = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx][day - 1] : "";
+        if (!content && staffRests.includes(day)) content = "休";
+        if (content === "休(预)" || content === "休(預)") content = "休";
         
-        if (content === "休") restDaysCount++;[cite: 2]
+        if (content === "休") restDaysCount++;
       }
-      html += `<td class="stat-total">${restDaysCount} 天</td>`;[cite: 2]
+      html += `<td class="stat-total">${restDaysCount} 天</td>`;
 
-      html += `</tr>`;[cite: 2]
+      html += `</tr>`;
     });
     
-    html += `<tr class="row-daily-total" style="background-color: #f1f5f9; color: #dc2626;"><td class="staff-name">当日休假人数</td>`;[cite: 2]
-    for(let day=1; day<=totalDays; day++) html += `<td>${dailyRestTotals[day - 1]}人</td>`;[cite: 2]
-    html += `<td>-</td></tr>`;[cite: 2]
+    html += `<tr class="row-daily-total" style="background-color: #f1f5f9; color: #dc2626;"><td class="staff-name">当日休假人数</td>`;
+    for(let day=1; day<=totalDays; day++) html += `<td>${dailyRestTotals[day - 1]}人</td>`;
+    html += `<td>-</td></tr>`;
 
-    html += `<tr class="row-daily-total"><td class="staff-name">当日上班人数</td>`;[cite: 2]
-    for(let day=1; day<=totalDays; day++) html += `<td>${dailyWorkingTotals[day - 1]}人</td>`;[cite: 2]
-    html += `<td>-</td></tr>`;[cite: 2]
+    html += `<tr class="row-daily-total"><td class="staff-name">当日上班人数</td>`;
+    for(let day=1; day<=totalDays; day++) html += `<td>${dailyWorkingTotals[day - 1]}人</td>`;
+    html += `<td>-</td></tr>`;
 
-    html += `</tbody>`;[cite: 2]
-    document.getElementById('scheduleTable').innerHTML = html;[cite: 2]
+    html += `</tbody>`;
+    document.getElementById('scheduleTable').innerHTML = html;
   }
 
-  function renderStatsTable(scheduleData = null) {[cite: 2]
-    let allShifts = [...baseShifts.map(s => s.name), supportShift.name];[cite: 2]
-    let html = `<thead><tr><th class="header-month">姓名</th>`;[cite: 2]
-    baseShifts.forEach(shift => {[cite: 2]
-      let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');[cite: 2]
-      let headerClass = shift.level === '高' ? 'shift-high' : (shift.level === '中' ? 'shift-mid' : 'shift-low');[cite: 2]
-      html += `<th class="${headerClass}">${badge}<br>${shift.name.replace(/\n/g, '<br>')}</th>`;[cite: 2]
-    });
-    html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th><th class="stat-total">上班总天数</th></tr></thead><tbody>`;[cite: 2]
+  function validateDuplicateShifts() {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    
+    const allCells = document.querySelectorAll('#scheduleTable td');
+    allCells.forEach(td => td.classList.remove('shift-duplicate-error'));
 
-    staffs.forEach((staff, sIdx) => {[cite: 2]
-      html += `<tr><td class="staff-name">${staff.name}</td>`;[cite: 2]
-      let workCountTotal = 0;[cite: 2]
-      allShifts.forEach(shiftName => {[cite: 2]
-        let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;[cite: 2]
-        workCountTotal += count;[cite: 2]
+    let duplicateCount = 0;
+    let duplicateLogs = [];
 
-        let countStyle = '';[cite: 2]
-        if (count === 0 && shiftName !== supportShift.name) {[cite: 2]
-          countStyle = 'color: #dc2626; background-color: #fee2e2; font-weight: bold;';[cite: 2]
-        } else if (count > 2 && shiftName !== supportShift.name) {[cite: 2]
-          countStyle = 'color: #15803d; background-color: #dcfce7; font-weight: bold;';[cite: 2]
-        } else if (shiftName === supportShift.name) {[cite: 2]
-          countStyle = 'color: #006064; font-weight: bold;';[cite: 2]
+    for (let day = 1; day <= totalDays; day++) {
+      let dayIdx = day - 1;
+      let shiftOccurrences = {}; 
+
+      staffs.forEach((staff, sIdx) => {
+        let shiftVal = "";
+        if (isManualEditMode) {
+          const selectElem = document.querySelector(`#cell_${sIdx}_${dayIdx} select`);
+          if (selectElem) shiftVal = selectElem.value;
+        } else {
+          if (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) {
+            shiftVal = lastGeneratedSchedule[sIdx][dayIdx];
+          }
+          if (!shiftVal && currentMonthRests[sIdx] && currentMonthRests[sIdx].includes(day)) {
+            shiftVal = "休";
+          }
         }
-        
-        html += `<td style="${countStyle}">${count}</td>`;[cite: 2]
+
+        if (shiftVal && shiftVal !== "休") {
+          if (!shiftOccurrences[shiftVal]) {
+            shiftOccurrences[shiftVal] = [];
+          }
+          shiftOccurrences[shiftVal].push(sIdx);
+        }
       });
-      html += `<td class="stat-total">${workCountTotal}</td></tr>`;[cite: 2]
-    });
-    html += `</tbody>`;[cite: 2]
-    document.getElementById('statsTable').innerHTML = html;[cite: 2]
-  }
 
-  function renderHighIntensityTable(scheduleData = null) {[cite: 2]
-    const highShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);[cite: 2]
-    let records = [];[cite: 2]
+      Object.keys(shiftOccurrences).forEach(shiftName => {
+        let staffIndices = shiftOccurrences[shiftName];
+        if (staffIndices.length > 1) {
+          duplicateCount++;
+          let cleanName = shiftName.replace(/\n/g, ' ');
+          let staffNamesStr = staffIndices.map(sIdx => staffs[sIdx].name).join('、');
+          duplicateLogs.push(`📅 第 <b>${day}</b> 天：岗位 [<b>${cleanName}</b>] 重复出现，涉及人员：<b>${staffNamesStr}</b>`);
 
-    if (scheduleData) {[cite: 2]
-      staffs.forEach((staff, sIdx) => {[cite: 2]
-        let shift1 = scheduleData[sIdx] ? scheduleData[sIdx][0] : "";[cite: 2]
-        let shift16 = scheduleData[sIdx] ? scheduleData[sIdx][15] : "";[cite: 2]
-
-        if (shift1 && highShiftNames.includes(shift1)) {[cite: 2]
-          records.push({ date: '1号', name: staff.name, shift: shift1 });[cite: 2]
-        }
-        if (shift16 && highShiftNames.includes(shift16)) {[cite: 2]
-          records.push({ date: '16号', name: staff.name, shift: shift16 });[cite: 2]
+          staffIndices.forEach(sIdx => {
+            const cellElem = document.getElementById(`cell_${sIdx}_${dayIdx}`);
+            if (cellElem) {
+              cellElem.classList.add('shift-duplicate-error');
+            }
+          });
         }
       });
     }
 
+    const warningBox = document.getElementById('warningLog');
+    if (duplicateCount > 0) {
+      warningBox.innerHTML = `<b>🚨 岗位重复校验提醒（共发现 ${duplicateCount } 处重复）：</b><br>` + duplicateLogs.join('<br>');
+      warningBox.style.display = 'block';
+      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${duplicateCount} 处岗位重复！`;
+      alert(`校验完成！发现有 ${duplicateCount} 天存在相同的岗位重复分配，相关格子已为您标红显示！`);
+    } else {
+      warningBox.style.display = 'none';
+      document.getElementById('status').innerText = `✅ 校验完毕：排班无岗位重复！`;
+      alert(`校验完成！当月排班结构良好，没有在同一天发现重复的岗位。`);
+    }
+  }
+
+  function renderStatsTable(scheduleData = null) {
+    let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
+    
+    let html = `<thead><tr><th class="header-month">姓名</th>`;
+    baseShifts.forEach(shift => {
+      let badge = shift.level === '高' ? '🔴' : (shift.level === '中' ? '🟡' : '🟢');
+      let headerClass = shift.level === '高' ? 'shift-high' : (shift.level === '中' ? 'shift-mid' : 'shift-low');
+      html += `<th class="${headerClass}">${badge}<br>${shift.name.replace(/\n/g, '<br>')}</th>`;
+    });
+    html += `<th class="shift-support">🔵<br>${supportShift.name.replace(/\n/g, '<br>')}</th>`;
+    html += `<th class="stat-total">上班总天数</th></tr></thead><tbody>`;
+
+    staffs.forEach((staff, sIdx) => {
+      let workCountTotal = 0;
+      let rowShiftCellsHtml = '';
+
+      allShifts.forEach(shiftName => {
+        let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
+        workCountTotal += count;
+
+        let countStyle = '';
+        if (count === 0 && shiftName !== supportShift.name) {
+          countStyle = 'color: #dc2626; background-color: #fee2e2; font-weight: bold;'; 
+        } else if (count > 2 && shiftName !== supportShift.name && baseShifts.find(s => s.name === shiftName)?.level === '高') {
+          countStyle = 'color: #15803d; background-color: #dcfce7; font-weight: bold;';
+        } else if (shiftName === supportShift.name) {
+          countStyle = 'color: #006064; font-weight: bold;';
+        }
+        
+        rowShiftCellsHtml += `<td style="${countStyle}">${count}</td>`;
+      });
+
+      html += `<tr>`;
+      html += `<td class="staff-name">${staff.name}</td>`;
+      html += rowShiftCellsHtml;
+      html += `<td class="stat-total">${workCountTotal}</td></tr>`;
+    });
+    
+    html += `</tbody>`;
+    document.getElementById('statsTable').innerHTML = html;
+  }
+
+  function renderIntensitySummaryTable(scheduleData = null) {
+    let container = document.getElementById('intensitySummaryTable');
+    if (!container) return;
+
+    let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
+    let totalHigh = 0, totalMid = 0, totalLow = 0;
+    let staffCount = staffs.length;
+
+    let html = `
+      <thead>
+        <tr style="background-color: #f8fafc; font-weight: bold;">
+          <th style="padding: 8px; width: 30%;">人员姓名</th>
+          <th style="padding: 8px; width: 70%;">当月岗位强度汇总记录 (目标：高6-8次、中8-10次、低4-6次)</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    staffs.forEach((staff, sIdx) => {
+      let highCount = 0, midCount = 0, lowCount = 0;
+
+      allShifts.forEach(shiftName => {
+        let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
+        let foundShift = baseShifts.find(s => s.name === shiftName);
+        if (foundShift) {
+          if (foundShift.level === '高') highCount += count;
+          else if (foundShift.level === '中') midCount += count;
+          else if (foundShift.level === '低') lowCount += count;
+        } else if (shiftName === supportShift.name) {
+          if (supportShift.level === '高') highCount += count;
+          else if (supportShift.level === '中') midCount += count;
+          else if (supportShift.level === '低') lowCount += count;
+        }
+      });
+
+      totalHigh += highCount;
+      totalMid += midCount;
+      totalLow += lowCount;
+
+      html += `
+        <tr>
+          <td class="staff-name" style="padding: 8px;">${staff.name}</td>
+          <td style="padding: 8px; text-align: center; font-size: 13px; font-weight: bold; white-space: nowrap;">
+            <span style="color: #c62828;">🔴高:${highCount}</span> &nbsp;&nbsp;&nbsp;&nbsp;
+            <span style="color: #8c6b00;">🟡中:${midCount}</span> &nbsp;&nbsp;&nbsp;&nbsp;
+            <span style="color: #1b5e20;">🟢低:${lowCount}</span>
+          </td>
+        </tr>
+      `;
+    });
+
+    let avgHigh = staffCount ? (totalHigh / staffCount).toFixed(1) : "0.0";
+    let avgMid = staffCount ? (totalMid / staffCount).toFixed(1) : "0.0";
+    let avgLow = staffCount ? (totalLow / staffCount).toFixed(1) : "0.0";
+
+    html += `
+      <tr style="background-color: #e2e8f0; font-weight: bold;">
+        <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均</td>
+        <td style="padding: 8px; text-align: center; font-size: 13px; white-space: nowrap;">
+          <span style="color: #c62828;">高每人平均 ${avgHigh} (目标6-8)</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #8c6b00;">中每人平均 ${avgMid} (目标8-10)</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #1b5e20;">低每人平均 ${avgLow} (目标4-6)</span>
+        </td>
+      </tr>
+    `;
+
+    html += `</tbody>`;
+    container.innerHTML = html;
+  }
+
+  function renderHighIntensityTable(scheduleData = null) {
+    let container = document.getElementById('highIntensityTable');
+    if (!container) return;
+
+    let targetDays = [1, 16];
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
           <th style="padding: 8px; width: 20%;">日期</th>
-          <th style="padding: 8px; width: 40%;">人员姓名</th>
-          <th style="padding: 8px; width: 40%;">高强度岗位名称</th>
+          <th style="padding: 8px; width: 80%;">高强度岗位分配及人员</th>
         </tr>
       </thead>
       <tbody>
-    `;[cite: 2]
+    `;
 
-    if (records.length === 0) {[cite: 2]
-      html += `
-        <tr>
-          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
-            当前无 1号 或 16号 安排高强度岗位的人员记录
-          </td>
-        </tr>
-      `;[cite: 2]
+    if (!scheduleData || scheduleData.length === 0) {
+      html += `<tr><td colspan="2" style="padding: 12px; text-align: center; color: #94a3b8;">暂无 1号 或 16号 分红日高强度岗位安排记录</td></tr>`;
     } else {
-      records.forEach(item => {[cite: 2]
+      let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+
+      targetDays.forEach(day => {
+        let dayIdx = day - 1;
+        let staffDetails = [];
+
+        staffs.forEach((staff, sIdx) => {
+          let shiftToday = scheduleData[sIdx] ? scheduleData[sIdx][dayIdx] : null;
+          if (shiftToday && highShifts.includes(shiftToday)) {
+            let cleanShift = shiftToday.replace(/\n/g, ' ');
+            staffDetails.push(`<span style="font-weight: bold; color: #c62828;">${staff.name}</span> (${cleanShift})`);
+          }
+        });
+
+        let detailStr = staffDetails.length > 0 ? staffDetails.join('、') : '无高强度岗位安排';
+
         html += `
           <tr>
-            <td style="font-weight: bold; color: #d9534f; padding: 8px;">${item.date}</td>
-            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
-            <td class="shift-high" style="padding: 8px;">${item.shift.replace(/\n/g, ' ')}</td>
+            <td style="padding: 8px; font-weight: bold; text-align: center; color: #d9534f;">${day}号 (分红日)</td>
+            <td style="padding: 8px; text-align: left; padding-left: 15px;">${detailStr}</td>
           </tr>
-        `;[cite: 2]
+        `;
       });
     }
 
-    html += `</tbody>`;[cite: 2]
-    document.getElementById('highIntensityTable').innerHTML = html;[cite: 2]
+    html += `</tbody>`;
+    container.innerHTML = html;
   }
 
-  function renderSupportStaffTable(scheduleData = null) {[cite: 2]
-    let records = [];[cite: 2]
+  async function getAllHistoryMonthsData() {
+    let currentKey = getMonthKey();
+    let allMonthsData = {};
 
-    if (scheduleData) {[cite: 2]
-      staffs.forEach((staff, sIdx) => {[cite: 2]
-        let supportDays = [];[cite: 2]
-        let totalDays = scheduleData[sIdx] ? scheduleData[sIdx].length : 0;[cite: 2]
-        
-        for (let d = 0; d < totalDays; d++) {[cite: 2]
-          if (scheduleData[sIdx][d] === supportShift.name) {[cite: 2]
-            supportDays.push(`${d + 1}号`);[cite: 2]
+    try {
+      const { data: cloudRes, error } = await supabaseClient.from('schedules').select('month_key, data');
+      if (!error && cloudRes) {
+        cloudRes.forEach(row => {
+          if (row.data && row.data.lastGeneratedSchedule) {
+            allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
+          }
+        });
+      }
+    } catch (err) {}
+
+    for (let i = 0; i < localStorage.length; i++) {
+      let k = localStorage.key(i);
+      if (k.startsWith('auto_schedule_month_')) {
+        let mKey = k.replace('auto_schedule_month_', '');
+        if (!allMonthsData[mKey]) {
+          try {
+            let parsed = JSON.parse(localStorage.getItem(k));
+            if (parsed && parsed.lastGeneratedSchedule) {
+              allMonthsData[mKey] = parsed.lastGeneratedSchedule;
+            }
+          } catch(e){}
+        }
+      }
+    }
+    return allMonthsData;
+  }
+
+  async function renderSupportStaffTable(scheduleData = null) {
+    let container = document.getElementById('supportStaffTable');
+    if (!container) return;
+
+    let currentKey = getMonthKey();
+    let allMonthsData = await getAllHistoryMonthsData();
+    if (scheduleData) allMonthsData[currentKey] = scheduleData;
+
+    let records = [];
+
+    staffs.forEach((staff, sIdx) => {
+      let currentMonthDays = [];
+      let totalCumulativeCount = 0;
+
+      Object.keys(allMonthsData).forEach(mKey => {
+        let mSched = allMonthsData[mKey];
+        if (mSched) {
+          const matchedIdx = staffs.findIndex(s => s.name === staff.name);
+          const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+
+          if (mSched[rowIdx]) {
+            mSched[rowIdx].forEach((shift, dIdx) => {
+              if (shift === supportShift.name) {
+                totalCumulativeCount++;
+                if (mKey === currentKey) {
+                  currentMonthDays.push(`${dIdx + 1}号`);
+                }
+              }
+            });
           }
         }
-
-        if (supportDays.length > 0) {[cite: 2]
-          records.push({[cite: 2]
-            name: staff.name,[cite: 2]
-            count: supportDays.length,[cite: 2]
-            days: supportDays.join('、')[cite: 2]
-          });[cite: 2]
-        }
       });
-    }
+
+      records.push({
+        name: staff.name,
+        currentCount: currentMonthDays.length,
+        days: currentMonthDays.length > 0 ? currentMonthDays.join('、') : '当月无',
+        totalCount: totalCumulativeCount
+      });
+    });
 
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
-          <th style="padding: 8px; width: 25%;">人员姓名</th>
-          <th style="padding: 8px; width: 20%;">支援总天数</th>
-          <th style="padding: 8px; width: 55%;">支援的具体日期</th>
+          <th style="padding: 8px; width: 20%;">人员姓名</th>
+          <th style="padding: 8px; width: 15%;">当月支援天数</th>
+          <th style="padding: 8px; width: 45%;">当月支援的具体日期</th>
+          <th style="padding: 8px; width: 20%; color: #0d6efd;">拿过支援的总次数 (跨月累计)</th>
         </tr>
       </thead>
       <tbody>
-    `;[cite: 2]
+    `;
 
-    if (records.length === 0) {[cite: 2]
+    records.forEach(item => {
+      let daysStyle = item.currentCount > 0 ? 'class="shift-support"' : 'style="color: #94a3b8;"';
+      let countStyle = item.currentCount > 0 ? 'color: #006064; font-weight: bold;' : 'color: #94a3b8;';
+      let totalBadge = item.totalCount === 0 ? 'color: #dc2626; font-weight: bold;' : 'color: #0d6efd; font-weight: bold;';
+
       html += `
         <tr>
-          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
-            当前月份无安排支援岗位的记录
-          </td>
+          <td style="font-weight: bold; padding: 8px;">${item.name}</td>
+          <td style="${countStyle} padding: 8px;">${item.currentCount} 天</td>
+          <td ${daysStyle} style="padding: 8px;">${item.days}</td>
+          <td style="${totalBadge} padding: 8px;">累计 ${item.totalCount} 次</td>
         </tr>
-      `;[cite: 2]
-    } else {
-      records.forEach(item => {[cite: 2]
-        html += `
-          <tr>
-            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
-            <td style="font-weight: bold; color: #006064; padding: 8px;">${item.count} 天</td>
-            <td class="shift-support" style="padding: 8px;">${item.days}</td>
-          </tr>
-        `;[cite: 2]
-      });
-    }
-
-    html += `</tbody>`;[cite: 2]
-    document.getElementById('supportStaffTable').innerHTML = html;[cite: 2]
-  }
-
-  function renderAll() {[cite: 2]
-    renderTable(lastGeneratedSchedule);[cite: 2]
-    renderStatsTable(lastGeneratedSchedule);[cite: 2]
-    renderHighIntensityTable(lastGeneratedSchedule);[cite: 2]
-    renderSupportStaffTable(lastGeneratedSchedule);[cite: 2]
-  }
-
-  async function copyTableWithStyles(tableId) {[cite: 2]
-    const table = document.getElementById(tableId);[cite: 2]
-    if (!table) return alert("表格不存在！");[cite: 2]
-
-    const cloneTable = table.cloneNode(true);[cite: 2]
-    const origCells = table.querySelectorAll('th, td');[cite: 2]
-    const cloneCells = cloneTable.querySelectorAll('th, td');[cite: 2]
-
-    origCells.forEach((origCell, index) => {[cite: 2]
-      const computed = window.getComputedStyle(origCell);[cite: 2]
-      const cloneCell = cloneCells[index];[cite: 2]
-      cloneCell.style.backgroundColor = computed.backgroundColor;[cite: 2]
-      cloneCell.style.color = computed.color;[cite: 2]
-      cloneCell.style.fontWeight = computed.fontWeight;[cite: 2]
-      cloneCell.style.border = "1px solid #ccc";[cite: 2]
-      cloneCell.style.padding = "6px";[cite: 2]
-      cloneCell.style.textAlign = "center";[cite: 2]
-      cloneCell.style.fontSize = "12px";[cite: 2]
-      
-      let cellText = (origCell.innerText || origCell.textContent).replace(/🔒/g, '').trim();[cite: 2]
-      cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');[cite: 2]
+      `;
     });
 
-    const htmlWrapper = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="utf-8"><style>td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; } br { mso-data-placement: same-cell; }</style></head>
-      <body>${cloneTable.outerHTML}</body></html>`;[cite: 2]
-
-    try {[cite: 2]
-      if (navigator.clipboard && window.ClipboardItem) {[cite: 2]
-        const blobHtml = new Blob([htmlWrapper], { type: "text/html" });[cite: 2]
-        const blobText = new Blob([cloneTable.innerText], { type: "text/plain" });[cite: 2]
-        await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);[cite: 2]
-        alert("✅ 已复制表格！直接在 Excel 中按 Ctrl+V 粘贴即可！");[cite: 2]
-      }
-    } catch (err) { alert("复制失败，请重试。"); }[cite: 2]
+    html += `</tbody>`;
+    container.innerHTML = html;
   }
 
-  function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {[cite: 2]
-    let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;[cite: 2]
-    let dayM1 = dayIdx - 1 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 1]) : false;[cite: 2]
-    let dayP1 = dayIdx + 1 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 1]) : false;[cite: 2]
-    let dayP2 = dayIdx + 2 < schedule[sIdx].length ? highNames.includes(schedule[sIdx][dayIdx + 2]) : false;[cite: 2]
-
-    if (dayM2 && dayM1) return true;[cite: 2]
-    if (dayM1 && dayP1) return true;[cite: 2]
-    if (dayP1 && dayP2) return true;[cite: 2]
-
-    return false;[cite: 2]
+  function renderAll() {
+    renderTable(lastGeneratedSchedule);
+    renderStatsTable(lastGeneratedSchedule);
+    renderIntensitySummaryTable(lastGeneratedSchedule);
+    renderHighIntensityTable(lastGeneratedSchedule);
+    renderSupportStaffTable(lastGeneratedSchedule);
   }
 
-  function generateSchedule() {[cite: 2]
-    try {[cite: 2]
-      const year = parseInt(document.getElementById('yearSelect').value);[cite: 2]
-      const month = parseInt(document.getElementById('monthSelect').value);[cite: 2]
-      const totalDays = getDaysInMonth(year, month);[cite: 2]
+  // -------------------------------------------------------------
+  // 📋 核心：在内存中转置表格矩阵并写入 HTML 剪贴板，一键直式贴入 Google 试算表
+  // -------------------------------------------------------------
+  async function copyTableTransposed(tableId, tableName) {
+    const table = document.getElementById(tableId);
+    if (!table) return alert("表格不存在！");
 
-      initLockedMap();[cite: 2]
-
-      const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);[cite: 2]
-      const normalShifts = baseShifts.filter(s => s.level !== '高').map(s => s.name);[cite: 2]
-      const supName = supportShift.name;[cite: 2]
-
-      let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));[cite: 2]
-      let shiftCounts = Array.from({ length: staffs.length }, () => ({}));[cite: 2]
-      
-      let bonusHighHistory = Array.from({ length: staffs.length }, () => ({}));[cite: 2]
-
-      for (let day = 1; day <= totalDays; day++) {[cite: 2]
-        const dayIdx = day - 1;[cite: 2]
-        staffs.forEach((_, sIdx) => {[cite: 2]
-          const staffRests = (currentMonthRests && currentMonthRests[sIdx]) ? currentMonthRests[sIdx] : [];[cite: 2]
-          const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];[cite: 2]
-          let existingShift = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";[cite: 2]
-          if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";[cite: 2]
-
-          if (isLocked && existingShift) {[cite: 2]
-            newSchedule[sIdx][dayIdx] = existingShift;[cite: 2]
-            if (existingShift !== "休") {[cite: 2]
-              shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;[cite: 2]
-            }
-          } else if (staffRests.includes(day)) {[cite: 2]
-            newSchedule[sIdx][dayIdx] = "休";[cite: 2]
+    // 1. 读取原 HTML 表格的所有格内容到二维数组中
+    let matrix = [];
+    const trs = table.querySelectorAll('tr');
+    trs.forEach(tr => {
+      let rowCells = [];
+      const cells = tr.querySelectorAll('th, td');
+      cells.forEach(cell => {
+        let text = "";
+        if (tableId === 'scheduleTable' && isManualEditMode) {
+          const select = cell.querySelector('select.shift-select');
+          if (select) {
+            text = select.options[select.selectedIndex].text;
+            if (text.includes('-- 未安排 --')) text = '';
+          } else {
+            text = cell.innerText || cell.textContent;
           }
-        });
-      }
-
-      function getShiftMinCount(sName) {[cite: 2]
-        let counts = staffs.map((_, sIdx) => shiftCounts[sIdx][sName] || 0);[cite: 2]
-        return Math.min(...counts);[cite: 2]
-      }
-
-      function canAssignShift(sIdx, sName, isHigh) {[cite: 2]
-        let currentCount = shiftCounts[sIdx][sName] || 0;[cite: 2]
-        let minCount = getShiftMinCount(sName);[cite: 2]
-
-        if (currentCount >= 2 && minCount < 2) {[cite: 2]
-          return false;[cite: 2]
+        } else {
+          text = cell.innerText || cell.textContent;
         }
-        if (currentCount >= 3) {[cite: 2]
-          return false;[cite: 2]
-        }
+        text = text.replace(/🔒/g, '').trim();
+        text = text.replace(/\n/g, ' '); // 单元格内换行转为空格以防错行
+        rowCells.push(text);
+      });
+      matrix.push(rowCells);
+    });
 
-        return true;[cite: 2]
+    if (matrix.length === 0) return alert("表格没有内容！");
+
+    // 2. 对矩阵进行行列转置 (Matrix Transposition) 解决 Google Sheets 粘贴方向翻转问题
+    let maxCols = Math.max(...matrix.map(row => row.length));
+    let transposed = [];
+    for (let c = 0; c < maxCols; c++) {
+      let newRow = [];
+      for (let r = 0; r < matrix.length; r++) {
+        newRow.push(matrix[r][c] !== undefined ? matrix[r][c] : "");
       }
+      transposed.push(newRow);
+    }
 
-      for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {[cite: 2]
-        const currentDay = dayIdx + 1;[cite: 2]
-        const isBonusDay = (currentDay === 1 || currentDay === 16);[cite: 2]
+    // 3. 组合成完美的 HTML 表格结构丢进剪贴板
+    let htmlString = '<meta charset="utf-8"><table>';
+    transposed.forEach(row => {
+      htmlString += '<tr>';
+      row.forEach(cellVal => {
+        htmlString += `<td>${cellVal}</td>`;
+      });
+      htmlString += '</tr>';
+    });
+    htmlString += '</table>';
 
-        highShifts.forEach(hShift => {[cite: 2]
-          let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);[cite: 2]
-          if (isAlreadyAssigned) return;[cite: 2]
+    // 4. 写入剪贴板
+    try {
+      const blob = new Blob([htmlString], { type: 'text/html' });
+      const textFallback = transposed.map(r => r.join('\t')).join('\n');
+      const textBlob = new Blob([textFallback], { type: 'text/plain' });
 
-          let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {[cite: 2]
-            return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";[cite: 2]
-          });
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': blob,
+          'text/plain': textBlob
+        })
+      ]);
 
-          if (availableStaff.length === 0) return;[cite: 2]
-
-          let validCandidates = availableStaff.filter(sIdx => {[cite: 2]
-            if (checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts)) return false;[cite: 2]
-            
-            if (isBonusDay && bonusHighHistory[sIdx][hShift]) {[cite: 2]
-              let allRotatedBonus = staffs.every((_, idx) => bonusHighHistory[idx][hShift]);[cite: 2]
-              if (!allRotatedBonus) return false;[cite: 2]
-            }
-
-            return canAssignShift(sIdx, hShift, true);[cite: 2]
-          });
-
-          if (validCandidates.length === 0) {[cite: 2]
-            validCandidates = availableStaff.filter(sIdx => canAssignShift(sIdx, hShift, true));[cite: 2]
-          }
-          if (validCandidates.length === 0) {[cite: 2]
-            validCandidates = availableStaff;[cite: 2]
-          }
-
-          validCandidates.sort((a, b) => {[cite: 2]
-            let countA = shiftCounts[a][hShift] || 0;[cite: 2]
-            let countB = shiftCounts[b][hShift] || 0;[cite: 2]
-            return countA - countB || (Math.random() - 0.5);[cite: 2]
-          });
-
-          let chosenIdx = validCandidates[0];[cite: 2]
-          newSchedule[chosenIdx][dayIdx] = hShift;[cite: 2]
-          shiftCounts[chosenIdx][hShift] = (shiftCounts[chosenIdx][hShift] || 0) + 1;[cite: 2]
-          
-          if (isBonusDay) {[cite: 2]
-            bonusHighHistory[chosenIdx][hShift] = true;[cite: 2]
-          }
-        });
-
-        let unassignedShifts = normalShifts.filter(sName => {[cite: 2]
-          return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);[cite: 2]
-        });
-        unassignedShifts.sort(() => Math.random() - 0.5);[cite: 2]
-
-        unassignedShifts.forEach(shiftName => {[cite: 2]
-          let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {[cite: 2]
-            return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";[cite: 2]
-          });
-
-          if (availableStaff.length === 0) return;[cite: 2]
-
-          let validCandidates = availableStaff.filter(sIdx => canAssignShift(sIdx, shiftName, false));[cite: 2]
-
-          if (validCandidates.length === 0) {[cite: 2]
-            validCandidates = availableStaff;[cite: 2]
-          }
-
-          validCandidates.sort((a, b) => {[cite: 2]
-            let countA = shiftCounts[a][shiftName] || 0;[cite: 2]
-            let countB = shiftCounts[b][shiftName] || 0;[cite: 2]
-            return countA - countB || (Math.random() - 0.5);[cite: 2]
-          });
-
-          let chosenIdx = validCandidates[0];[cite: 2]
-          newSchedule[chosenIdx][dayIdx] = shiftName;[cite: 2]
-          shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;[cite: 2]
-        });
-
-        let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {[cite: 2]
-          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";[cite: 2]
-        });
-
-        if (unassignedStaff.length > 0) {[cite: 2]
-          unassignedStaff.forEach(sIdx => {[cite: 2]
-            let supCount = shiftCounts[sIdx][supName] || 0;[cite: 2]
-            let minSupCount = getShiftMinCount(supName);[cite: 2]
-
-            newSchedule[sIdx][dayIdx] = supName;[cite: 2]
-            shiftCounts[sIdx][supName] = supCount + 1;[cite: 2]
-          });
-        }
+      alert(`✅ 已成功复制 [${tableName}]！\n\n请直接前往 Google 试算表按下 Ctrl+V 粘贴，方向已经是完美的直式，绝对不会倒置！`);
+    } catch (err) {
+      console.error(err);
+      // 降级兼容方案
+      const textArea = document.createElement("textarea");
+      textArea.value = transposed.map(r => r.join('\t')).join('\n');
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        alert(`✅ 已通过兼容模式复制 [${tableName}]！请直接在 Google 试算表按 Ctrl+V 粘贴。`);
+      } catch (e) {
+        alert("复制失败，请检查浏览器剪贴板权限。");
       }
-
-      lastGeneratedSchedule = sanitizeSchedule(newSchedule);[cite: 2]
-      renderAll();[cite: 2]
-      saveDataToLocal();[cite: 2]
-
-      const monthKey = getMonthKey();[cite: 2]
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;[cite: 2]
-      alert(`[${monthKey}] 智能排班成功！已严格按照您的全套规则完成分配。`);[cite: 2]
-
-    } catch (err) {[cite: 2]
-      console.error(err);[cite: 2]
-      alert("排班执行发生错误：" + err.message);[cite: 2]
+      document.body.removeChild(textArea);
     }
   }
 
-  window.onload = async function() {[cite: 2]
-    initDateSelectors();[cite: 2]
-    updateSelect();[cite: 2]
-    renderShifts();[cite: 2]
-    await loadDataFromLocal();[cite: 2]
-    renderAll();[cite: 2]
+  function getShiftCategory(shiftName) {
+    if (!shiftName || shiftName === "休" || shiftName === supportShift.name) return "";
+    let lines = shiftName.split('\n');
+    return lines[0].trim().toUpperCase();
+  }
+
+  function isAssignmentValid(sIdx, dayIdx, shiftName, currentSchedule) {
+    if (!shiftName || shiftName === "休") return true;
+
+    let totalDays = currentSchedule[sIdx].length;
+    let shiftObj = baseShifts.find(s => s.name === shiftName);
+    let isHigh = shiftObj && shiftObj.level === '高';
+    let category = getShiftCategory(shiftName);
+
+    for (let otherSIdx = 0; otherSIdx < currentSchedule.length; otherSIdx++) {
+      if (otherSIdx !== sIdx && currentSchedule[otherSIdx][dayIdx] === shiftName) {
+        return false;
+      }
+    }
+
+    if (isHigh) {
+      let consecutive = 1;
+      for (let d = dayIdx - 1; d >= 0; d--) {
+        let prevS = currentSchedule[sIdx][d];
+        let prevObj = baseShifts.find(s => s.name === prevS);
+        if (prevObj && prevObj.level === '高') consecutive++;
+        else break;
+      }
+      for (let d = dayIdx + 1; d < totalDays; d++) {
+        let nextS = currentSchedule[sIdx][d];
+        let nextObj = baseShifts.find(s => s.name === nextS);
+        if (nextObj && nextObj.level === '高') consecutive++;
+        else break;
+      }
+      if (consecutive >= 3) return false;
+    }
+
+    if (category) {
+      if (dayIdx > 0) {
+        let prevCat = getShiftCategory(currentSchedule[sIdx][dayIdx - 1]);
+        if (prevCat && prevCat === category) return false;
+      }
+      if (dayIdx < totalDays - 1) {
+        let nextCat = getShiftCategory(currentSchedule[sIdx][dayIdx + 1]);
+        if (nextCat && nextCat === category) return false;
+      }
+    }
+
+    return true;
+  }
+
+  async function generateSchedule() {
+    const warningBox = document.getElementById('warningLog');
+    warningBox.style.display = 'none';
+    warningBox.innerHTML = '';
+    let warningLogs = [];
+
+    try {
+      const year = parseInt(document.getElementById('yearSelect').value);
+      const month = parseInt(document.getElementById('monthSelect').value);
+      const totalDays = getDaysInMonth(year, month);
+
+      initLockedMap();
+
+      const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+      const midShifts = baseShifts.filter(s => s.level === '中').map(s => s.name);
+      const lowShifts = baseShifts.filter(s => s.level === '低').map(s => s.name);
+      const supName = supportShift.name;
+
+      let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+      let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
+      let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
+      let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
+
+      let allHistoryData = await getAllHistoryMonthsData();
+      let currentKey = getMonthKey();
+
+      let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
+      let dividendHighHistory = {}; 
+
+      Object.keys(allHistoryData).forEach(mKey => {
+        let mSched = allHistoryData[mKey];
+        if (mSched) {
+          staffs.forEach((staff, sIdx) => {
+            const matchedIdx = staffs.findIndex(s => s.name === staff.name);
+            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+
+            if (mSched[rowIdx]) {
+              if (mKey !== currentKey) {
+                mSched[rowIdx].forEach(shift => {
+                  if (shift === supName) pastSupportCounts[sIdx]++;
+                });
+              }
+              [1, 16].forEach(day => {
+                let shiftOnDiv = mSched[rowIdx][day - 1];
+                if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
+                  dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
+                }
+              });
+            }
+          });
+        }
+      });
+
+      for (let day = 1; day <= totalDays; day++) {
+        const dayIdx = day - 1;
+        staffs.forEach((_, sIdx) => {
+          const staffRests = (currentMonthRests && currentMonthRests[sIdx]) ? currentMonthRests[sIdx] : [];
+          const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
+          let existingShift = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";
+          if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
+
+          if (isLocked && existingShift) {
+            newSchedule[sIdx][dayIdx] = existingShift;
+            if (existingShift !== "休") {
+              if (existingShift === supName) {
+                supportCountsThisMonth[sIdx]++;
+              } else {
+                shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
+                let foundS = baseShifts.find(s => s.name === existingShift);
+                if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
+                  intensityCounts[sIdx][foundS.level]++;
+                }
+              }
+            }
+          } else if (staffRests.includes(day)) {
+            newSchedule[sIdx][dayIdx] = "休";
+          }
+        });
+      }
+
+      for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+        let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
+        let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
+
+        let assignedSupportStaffIdx = null;
+        if (workingStaffs.length >= 13) {
+          let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
+          if (existingSup !== undefined) {
+            assignedSupportStaffIdx = existingSup;
+          } else {
+            let availableForSup = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && supportCountsThisMonth[sIdx] === 0);
+            if (availableForSup.length > 0) {
+              availableForSup.sort((a, b) => {
+                let totalA = pastSupportCounts[a];
+                let totalB = pastSupportCounts[b];
+                if (totalA !== totalB) return totalA - totalB;
+                return Math.random() - 0.5;
+              });
+              assignedSupportStaffIdx = availableForSup[0];
+              newSchedule[assignedSupportStaffIdx][dayIdx] = supName;
+              supportCountsThisMonth[assignedSupportStaffIdx]++;
+            }
+          }
+        }
+
+        let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
+        let highPriorityShifts = shuffledBaseShifts.filter(s => s.level === '高').map(s => s.name);
+        let otherPriorityShifts = shuffledBaseShifts.filter(s => s.level !== '高').map(s => s.name);
+        let orderedBaseShifts = [...highPriorityShifts, ...otherPriorityShifts];
+
+        orderedBaseShifts.forEach(shiftName => {
+          let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
+          if (alreadyAssigned) return;
+
+          let foundS = baseShifts.find(s => s.name === shiftName);
+          let level = foundS ? foundS.level : '中';
+
+          let candidates = workingStaffs.filter(sIdx => {
+            if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+            if (level === '高' && (shiftCounts[sIdx][shiftName] || 0) >= 2) return false;
+            if (level === '高' && intensityCounts[sIdx]['高'] >= 8) return false;
+            if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
+            if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
+            return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
+          });
+
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => {
+              let countA = shiftCounts[a][shiftName] || 0;
+              let countB = shiftCounts[b][shiftName] || 0;
+              if (countA !== countB) return countA - countB;
+
+              if (isDividendDay && level === '高') {
+                let divA = dividendHighHistory[a] || 0;
+                let divB = dividendHighHistory[b] || 0;
+                if (divA !== divB) return divA - divB;
+              }
+
+              let lvlA = intensityCounts[a][level];
+              let lvlB = intensityCounts[b][level];
+              if (lvlA !== lvlB) return lvlA - lvlB;
+              return Math.random() - 0.5;
+            });
+
+            let chosen = candidates[0];
+            newSchedule[chosen][dayIdx] = shiftName;
+            shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
+            if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
+
+            if (isDividendDay && level === '高') {
+              dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
+            }
+          }
+        });
+
+        workingStaffs.forEach(sIdx => {
+          if (newSchedule[sIdx][dayIdx] === "") {
+            let assignedToday = newSchedule.map(row => row[dayIdx]);
+            let availableUnusedShifts = baseShifts.map(s => s.name).filter(sName => !assignedToday.includes(sName));
+
+            let chosenFallback = availableUnusedShifts.find(sName => isAssignmentValid(sIdx, dayIdx, sName, newSchedule)) 
+                                 || availableUnusedShifts[0] 
+                                 || baseShifts[0].name;
+
+            newSchedule[sIdx][dayIdx] = chosenFallback;
+            shiftCounts[sIdx][chosenFallback] = (shiftCounts[sIdx][chosenFallback] || 0) + 1;
+            let foundS = baseShifts.find(s => s.name === chosenFallback);
+            if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) intensityCounts[sIdx][foundS.level]++;
+          }
+        });
+      }
+
+      baseShifts.forEach(shiftObj => {
+        let shiftName = shiftObj.name;
+        let isHigh = shiftObj.level === '高';
+
+        staffs.forEach((staff, targetStaffIdx) => {
+          let curCount = (shiftCounts[targetStaffIdx][shiftName] || 0);
+
+          if (curCount === 0) {
+            let successFix = false;
+
+            for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+              if (successFix) break;
+
+              let targetDayShift = newSchedule[targetStaffIdx][dayIdx];
+              if (!targetDayShift || targetDayShift === "休" || targetDayShift === supName || lockedMap[targetStaffIdx][dayIdx]) continue;
+
+              let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
+
+              if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
+                let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
+                
+                if (holderCurCount >= 2) {
+                  let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
+                  let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
+
+                  if (isHigh && (shiftCounts[targetStaffIdx][shiftName] || 0) >= 2) validForTarget = false;
+
+                  if (validForTarget && validForHolder) {
+                    newSchedule[targetStaffIdx][dayIdx] = shiftName;
+                    newSchedule[holderStaffIdx][dayIdx] = targetDayShift;
+
+                    shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
+                    shiftCounts[targetStaffIdx][targetDayShift]--;
+                    shiftCounts[holderStaffIdx][shiftName]--;
+                    shiftCounts[holderStaffIdx][targetDayShift] = (shiftCounts[holderStaffIdx][targetDayShift] || 0) + 1;
+
+                    successFix = true;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (!successFix) {
+              let cleanSName = shiftName.replace(/\n/g, ' ');
+              warningLogs.push(`员工 <b>${staff.name}</b> 的岗位 <b>${cleanSName}</b> 无法自动调配，请人工微调`);
+            }
+          }
+        });
+      });
+
+      lastGeneratedSchedule = sanitizeSchedule(newSchedule);
+      renderAll();
+      saveDataToLocal();
+
+      if (warningLogs.length > 0) {
+        warningBox.innerHTML = `<b>📌 零次数后处理修正提示：</b><br>` + warningLogs.join('<br>');
+        warningBox.style.display = 'block';
+      }
+
+      const monthKey = getMonthKey();
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（同日无重复版）！`;
+      alert(`[${monthKey}] 智能排班完成！`);
+
+    } catch (err) {
+      console.error(err);
+      alert("排班执行发生错误：" + err.message);
+    }
+  }
+
+  window.onload = async function() {
+    initDateSelectors();
+    updateSelect();
+    await loadDataFromLocal();
+    renderAll();
   };
 </script>
 </body>
 </html>
-```[cite: 2]
