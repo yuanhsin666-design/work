@@ -1211,8 +1211,58 @@
     renderAll();
   };
   // 补丁：兼容旧函数名调用，防止报 renderHighIntensityTable is not defined 错误
+  // 恢复：每月 1 号与 16 号分红日高强度人员/岗位记录表 渲染函数
   function renderHighIntensityTable(scheduleData = null) {
-    renderIntensitySummaryTable(scheduleData);
+    let targetDays = [1, 16]; // 分红日：每月 1 号和 16 号
+    let html = `
+      <thead>
+        <tr style="background-color: #f8fafc; font-weight: bold;">
+          <th style="padding: 8px; width: 15%;">日期</th>
+          <th style="padding: 8px; width: 35%;">值班人员</th>
+          <th style="padding: 8px; width: 50%;">高强度岗位分配</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    if (!scheduleData || scheduleData.length === 0) {
+      html += `<tr><td colspan="3" style="padding: 12px; text-align: center; color: #94a3b8;">暂无排班数据</td></tr>`;
+    } else {
+      // 筛选高强度岗位
+      let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+
+      targetDays.forEach(day => {
+        let dayIdx = day - 1; // 日期索引从 0 开始
+        let staffDetails = [];
+
+        staffs.forEach((staff, sIdx) => {
+          let shiftToday = scheduleData[sIdx] ? scheduleData[sIdx][dayIdx] : null;
+          if (shiftToday && highShifts.includes(shiftToday)) {
+            staffDetails.push(`<span style="font-weight: bold; color: #c62828;">${staff.name}</span> (${shiftToday})`);
+          }
+        });
+
+        let detailStr = staffDetails.length > 0 ? staffDetails.join('、') : '无高强度岗位安排';
+
+        html += `
+          <tr>
+            <td style="padding: 8px; font-weight: bold;">${day}号 (分红日)</td>
+            <td colspan="2" style="padding: 8px; text-align: left; padding-left: 15px;">
+              ${detailStr}
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    html += `</tbody>`;
+
+    // 渲染至分红日表格容器（如 ID 不同，请将 highIntensityTable 改为您原代码中分红日 table 的 ID）
+    let container = document.getElementById('highIntensityTable') || document.getElementById('bonusDayTable');
+    if (container) {
+      container.innerHTML = html;
+    }
+  }
   }
 </script>
 </body>
