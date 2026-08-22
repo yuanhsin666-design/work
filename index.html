@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (一键直式复制版)</title>
+  <title>智能动态排班工作表 (绝对直式 TSV 复制版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支援一键直式复制版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 绝对直式 TSV 复制版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -1123,13 +1123,13 @@
   }
 
   // -------------------------------------------------------------
-  // 📋 核心：在内存中转置表格矩阵并写入 HTML 剪贴板，一键直式贴入 Google 试算表
+  // 📋 绝对直式 TSV 复制核心：直接对调矩阵再输出纯文本制表符
   // -------------------------------------------------------------
   async function copyTableTransposed(tableId, tableName) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
 
-    // 1. 读取原 HTML 表格的所有格内容到二维数组中
+    // 1. 读取原表格的二维矩阵
     let matrix = [];
     const trs = table.querySelectorAll('tr');
     trs.forEach(tr => {
@@ -1149,7 +1149,7 @@
           text = cell.innerText || cell.textContent;
         }
         text = text.replace(/🔒/g, '').trim();
-        text = text.replace(/\n/g, ' '); // 单元格内换行转为空格以防错行
+        text = text.replace(/\n/g, ' '); // 单元格内换行转化为空格
         rowCells.push(text);
       });
       matrix.push(rowCells);
@@ -1157,7 +1157,7 @@
 
     if (matrix.length === 0) return alert("表格没有内容！");
 
-    // 2. 对矩阵进行行列转置 (Matrix Transposition) 解决 Google Sheets 粘贴方向翻转问题
+    // 2. 彻底对调行与列 (转置矩阵 Transpose)
     let maxCols = Math.max(...matrix.map(row => row.length));
     let transposed = [];
     for (let c = 0; c < maxCols; c++) {
@@ -1168,36 +1168,18 @@
       transposed.push(newRow);
     }
 
-    // 3. 组合成完美的 HTML 表格结构丢进剪贴板
-    let htmlString = '<meta charset="utf-8"><table>';
-    transposed.forEach(row => {
-      htmlString += '<tr>';
-      row.forEach(cellVal => {
-        htmlString += `<td>${cellVal}</td>`;
-      });
-      htmlString += '</tr>';
-    });
-    htmlString += '</table>';
+    // 3. 转为 TSV (Tab-Separated Values) 纯文本格式。这是让 Google 试算表完美辨识直式的关键！
+    let tsvString = transposed.map(row => row.join('\t')).join('\n');
 
     // 4. 写入剪贴板
     try {
-      const blob = new Blob([htmlString], { type: 'text/html' });
-      const textFallback = transposed.map(r => r.join('\t')).join('\n');
-      const textBlob = new Blob([textFallback], { type: 'text/plain' });
-
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'text/html': blob,
-          'text/plain': textBlob
-        })
-      ]);
-
-      alert(`✅ 已成功复制 [${tableName}]！\n\n请直接前往 Google 试算表按下 Ctrl+V 粘贴，方向已经是完美的直式，绝对不会倒置！`);
+      await navigator.clipboard.writeText(tsvString);
+      alert(`✅ 已成功复制 [${tableName}]！\n\n请直接前往 Google 试算表点选储存格按 Ctrl+V，方向绝对是直式的！`);
     } catch (err) {
       console.error(err);
       // 降级兼容方案
       const textArea = document.createElement("textarea");
-      textArea.value = transposed.map(r => r.join('\t')).join('\n');
+      textArea.value = tsvString;
       document.body.appendChild(textArea);
       textArea.select();
       try {
