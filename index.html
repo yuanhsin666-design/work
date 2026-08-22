@@ -742,9 +742,12 @@
     document.getElementById('statsTable').innerHTML = html;
   }
 
+  // 1. 在【当月人员岗位强度次数汇总表】底部添加平均值展示
   function renderIntensitySummaryTable(scheduleData = null) {
     let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
-    
+    let totalHigh = 0, totalMid = 0, totalLow = 0;
+    let staffCount = staffs.length;
+
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
@@ -756,9 +759,7 @@
     `;
 
     staffs.forEach((staff, sIdx) => {
-      let highCount = 0;
-      let midCount = 0;
-      let lowCount = 0;
+      let highCount = 0, midCount = 0, lowCount = 0;
 
       allShifts.forEach(shiftName => {
         let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
@@ -770,7 +771,10 @@
         }
       });
 
-      // 强制单排无折行 (white-space: nowrap)
+      totalHigh += highCount;
+      totalMid += midCount;
+      totalLow += lowCount;
+
       html += `
         <tr>
           <td class="staff-name" style="padding: 8px;">${staff.name}</td>
@@ -783,60 +787,24 @@
       `;
     });
 
-    html += `</tbody>`;
-    document.getElementById('intensitySummaryTable').innerHTML = html;
-  }
-  function renderHighIntensityTable(scheduleData = null) {
-    const highShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
-    let records = [];
+    // 计算并渲染平均值行
+    let avgHigh = staffCount ? (totalHigh / staffCount).toFixed(1) : 0;
+    let avgMid = staffCount ? (totalMid / staffCount).toFixed(1) : 0;
+    let avgLow = staffCount ? (totalLow / staffCount).toFixed(1) : 0;
 
-    if (scheduleData) {
-      staffs.forEach((staff, sIdx) => {
-        let shift1 = scheduleData[sIdx] ? scheduleData[sIdx][0] : "";
-        let shift16 = scheduleData[sIdx] ? scheduleData[sIdx][15] : "";
-
-        if (shift1 && highShiftNames.includes(shift1)) {
-          records.push({ date: '1号', name: staff.name, shift: shift1 });
-        }
-        if (shift16 && highShiftNames.includes(shift16)) {
-          records.push({ date: '16号', name: staff.name, shift: shift16 });
-        }
-      });
-    }
-
-    let html = `
-      <thead>
-        <tr style="background-color: #f8fafc; font-weight: bold;">
-          <th style="padding: 8px; width: 20%;">日期</th>
-          <th style="padding: 8px; width: 40%;">人员姓名</th>
-          <th style="padding: 8px; width: 40%;">高强度岗位名称</th>
-        </tr>
-      </thead>
-      <tbody>
+    html += `
+      <tr style="background-color: #e2e8f0; font-weight: bold;">
+        <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均</td>
+        <td style="padding: 8px; text-align: center; font-size: 13px; white-space: nowrap;">
+          <span style="color: #c62828;">高每人平均：${avgHigh}</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #8c6b00;">中每人平均：${avgMid}</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #1b5e20;">低每人平均：${avgLow}</span>
+        </td>
+      </tr>
     `;
 
-    if (records.length === 0) {
-      html += `
-        <tr>
-          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
-            当前无 1号 或 16号 安排高强度岗位的人员记录
-          </td>
-        </tr>
-      `;
-    } else {
-      records.forEach(item => {
-        html += `
-          <tr>
-            <td style="font-weight: bold; color: #d9534f; padding: 8px;">${item.date}</td>
-            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
-            <td class="shift-high" style="padding: 8px;">${item.shift.replace(/\n/g, ' ')}</td>
-          </tr>
-        `;
-      });
-    }
-
     html += `</tbody>`;
-    document.getElementById('highIntensityTable').innerHTML = html;
+    document.getElementById('intensitySummaryTable').innerHTML = html;
   }
 
   function renderSupportStaffTable(scheduleData = null) {
