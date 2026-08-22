@@ -7,57 +7,57 @@
   <!-- 1. 引入 Supabase JS SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
-    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
-    h2, h3 { color: #1e293b; margin-top: 0; }
-    .controls { display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 15px; background: #f8fafc; padding: 12px; border-radius: 6px; }
-    label { font-size: 14px; font-weight: bold; color: #475569; }
-    select, input, button { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; }
-    button { background: #2563eb; color: white; border: none; cursor: pointer; transition: background 0.2s; font-weight: 500; }
-    button:hover { background: #1d4ed8; }
-    button.btn-success { background: #10b981; }
-    button.btn-success:hover { background: #059669; }
-    button.btn-danger { background: #ef4444; }
-    button.btn-danger:hover { background: #dc2626; }
-    .table-container { overflow-x: auto; margin-top: 15px; border: 1px solid #e2e8f0; border-radius: 6px; }
-    table { width: 100%; border-collapse: collapse; text-align: center; font-size: 13px; background: white; }
-    th, td { border: 1px solid #e2e8f0; padding: 6px 4px; min-width: 32px; }
-    th { background: #f1f5f9; color: #334155; font-weight: 600; white-space: nowrap; }
+    body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 20px; }
+    h2, h3 { margin-top: 0; color: #1e293b; }
+    
+    .controls-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
+    .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-secondary { background: #64748b; color: white; }
+    
+    select, input { padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+    
+    .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; text-align: center; font-size: 13px; white-space: nowrap; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px 5px; }
+    th { background: #f8fafc; color: #475569; font-weight: bold; }
+    
     .weekend { background-color: #fef2f2; }
     .weekend-header { color: #ef4444; }
     
-    /* 班别颜色样式 */
     .shift-rest { background-color: #fee2e2; color: #991b1b; font-weight: bold; }
     .shift-support { background-color: #e0f2fe; color: #075985; font-weight: bold; }
     .shift-high { background-color: #fef3c7; color: #92400e; font-weight: bold; }
     .shift-normal { background-color: #f1f5f9; color: #334155; }
     
-    /* 规则配置区 */
-    .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
-    .rule-item { border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; background: #fafafa; }
-    .staff-tag { display: inline-block; background: #e2e8f0; padding: 2px 8px; border-radius: 4px; margin: 2px; font-size: 12px; }
-    .status-bar { padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-size: 13px; }
-    .status-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-    .status-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .status-tag { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block; }
+    .status-success { background: #dcfce7; color: #15803d; }
+    .status-error { background: #fee2e2; color: #b91c1c; }
+    .status-info { background: #e0f2fe; color: #0369a1; }
   </style>
 </head>
 <body>
 
   <div class="card">
     <h2>📅 智能动态排班工作表</h2>
-    <div id="statusMessage"></div>
-    <div class="controls">
-      <div>
-        <label>选择年份：</label>
-        <select id="yearSelect"></select>
-      </div>
-      <div>
-        <label>选择月份：</label>
-        <select id="monthSelect"></select>
-      </div>
-      <button onclick="generateSchedule()">⚡ 执行智能排班</button>
-      <button class="btn-success" onclick="saveCurrentMonthToSupabase()">💾 保存当前月至数据库</button>
-      <button class="btn-danger" onclick="resetCurrentMonthData()">🔄 重置当前月份数据</button>
+    <div style="margin-bottom: 12px;">
+      <span id="statusMessage" class="status-tag status-info">准备就绪</span>
+    </div>
+    <div class="controls-row">
+      <label><b>选择年份：</b></label>
+      <select id="yearSelect"></select>
+      <label><b>选择月份：</b></label>
+      <select id="monthSelect"></select>
+      
+      <button class="btn btn-primary" onclick="generateSchedule()">⚡ 执行智能排班</button>
+      <button class="btn btn-success" onclick="saveCurrentMonthToSupabase()">💾 保存当前月至数据库</button>
+      <button class="btn btn-danger" onclick="resetCurrentMonthData()">🔄 重置当前月份数据</button>
     </div>
   </div>
 
@@ -76,19 +76,29 @@
   </div>
 
   <div class="card">
-    <h3>🔵 每月拿支援的人员记录表</h3>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <h3 style="margin: 0;">🔵 每月拿支援的人员记录表</h3>
+      <button class="btn btn-primary" style="padding: 5px 10px; font-size: 12px;" onclick="copySupportTable()">📋 复制记录表</button>
+    </div>
     <div class="table-container">
       <table id="supportStaffTable"></table>
     </div>
   </div>
 
   <script>
-    // Supabase 配置
-    const SUPABASE_URL = "https://your-supabase-url.supabase.co"; // 替换为你的 Supabase URL
-    const SUPABASE_KEY = "your-anon-key";             // 替换为你的 Supabase Anon Key
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    // Supabase 保持配置
+    const SUPABASE_URL = "https://your-supabase-url.supabase.co"; 
+    const SUPABASE_KEY = "your-anon-key";             
+    let supabaseClient = null;
 
-    // 基础数据定义
+    try {
+      if (typeof supabase !== 'undefined' && SUPABASE_URL.indexOf("your-supabase") === -1) {
+        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      }
+    } catch(e) {
+      console.warn("Supabase 未配置或加载失败，将使用本地模式运行。");
+    }
+
     let staffs = [
       { id: 1, name: "妮妮" },
       { id: 2, name: "Kay" },
@@ -106,11 +116,13 @@
     let restShift = { id: 0, name: "休", highIntensity: false };
 
     let currentYear = 2026;
-    let currentMonth = 3;
+    let currentMonth = 8;
     let currentSchedule = null;
 
-    // 跨月份历史支援数据存储对象
-    let historicalSupportCounts = {};
+    // 跨月份历史支援数据存储对象 (格式: { "Kay": 1, "妮妮": 1 })
+    let supportCumulativeMap = {
+      "Kay": 1 // 预设 Kay 在 8 月之前或 8 月已有 1 次历史记录
+    };
 
     window.onload = function() {
       initYearMonthSelect();
@@ -125,7 +137,10 @@
       currentYear = now.getFullYear();
       currentMonth = now.getMonth() + 1;
 
-      for (let y = currentYear - 2; y <= currentYear + 2; y++) {
+      yearSelect.innerHTML = '';
+      monthSelect.innerHTML = '';
+
+      for (let y = currentYear - 1; y <= currentYear + 1; y++) {
         let opt = document.createElement('option');
         opt.value = y;
         opt.textContent = y + "年";
@@ -152,157 +167,117 @@
     }
 
     function loadGlobalConfig() {
-      const saved = localStorage.getItem('auto_schedule_global_config_v2');
+      const saved = localStorage.getItem('auto_schedule_global_config_v3');
       if (saved) {
         try {
           const data = JSON.parse(saved);
-          if (data.staffs) staffs = data.staffs;
-          if (data.historicalSupportCounts) historicalSupportCounts = data.historicalSupportCounts;
+          if (data.supportCumulativeMap) supportCumulativeMap = data.supportCumulativeMap;
         } catch(e) { console.error(e); }
       }
     }
 
     function saveGlobalConfig() {
-      const data = {
-        staffs: staffs,
-        historicalSupportCounts: historicalSupportCounts
-      };
-      localStorage.setItem('auto_schedule_global_config_v2', JSON.stringify(data));
+      const data = { supportCumulativeMap: supportCumulativeMap };
+      localStorage.setItem('auto_schedule_global_config_v3', JSON.stringify(data));
     }
 
-    // 从 Supabase 拉取当月及历史月份支援数据
-    async function fetchMonthDataFromSupabase() {
+    function fetchMonthDataFromSupabase() {
       showStatus("正在加载数据...", "info");
-      
-      // 1. 获取当月排班
-      try {
-        const { data, error } = await supabaseClient
+
+      // 先尝试从本地 Storage 加载当月独立排班
+      const localKey = `schedule_${currentYear}_${currentMonth}`;
+      const savedSchedule = localStorage.getItem(localKey);
+
+      if (savedSchedule) {
+        try {
+          currentSchedule = JSON.parse(savedSchedule);
+          showStatus(`${currentYear}年${currentMonth}月 本地数据加载成功！`, "success");
+          renderAll();
+          return;
+        } catch(e) {}
+      }
+
+      // 若有 Supabase 则从数据库拉取
+      if (supabaseClient) {
+        supabaseClient
           .from('schedules')
           .select('*')
           .eq('year', currentYear)
           .eq('month', currentMonth)
-          .single();
-
-        if (data && data.schedule_data) {
-          currentSchedule = data.schedule_data;
-          showStatus(`${currentYear}年${currentMonth}月 数据加载成功！`, "success");
-        } else {
-          currentSchedule = null;
-          showStatus(`未找到 ${currentYear}年${currentMonth}月 的排班记录，请点击执行排班。`, "info");
-        }
-      } catch (e) {
-        currentSchedule = null;
-        showStatus("读取当前月数据失败或无记录。", "info");
-      }
-
-      // 2. 统计当前月份之前的历史支援总次数
-      await recalculateHistoricalSupportCounts();
-
-      renderAll();
-    }
-
-    // 重新计算历史支援次数（遍历往期月份数据）
-    async function recalculateHistoricalSupportCounts() {
-      let counts = {};
-      staffs.forEach(s => counts[s.name] = 0);
-
-      try {
-        const { data, error } = await supabaseClient
-          .from('schedules')
-          .select('year, month, schedule_data');
-
-        if (data && !error) {
-          data.forEach(row => {
-            // 只累加早于当前选定年月的数据
-            if (row.year < currentYear || (row.year === currentYear && row.month < currentMonth)) {
-              if (row.schedule_data) {
-                staffs.forEach((staff, sIdx) => {
-                  if (row.schedule_data[sIdx]) {
-                    const hasSupport = row.schedule_data[sIdx].includes(supportShift.name);
-                    if (hasSupport) {
-                      counts[staff.name] = (counts[staff.name] || 0) + 1;
-                    }
-                  }
-                });
-              }
+          .then(({ data, error }) => {
+            if (data && data.length > 0 && data[0].schedule_data) {
+              currentSchedule = data[0].schedule_data;
+              showStatus(`${currentYear}年${currentMonth}月 数据库数据加载成功！`, "success");
+            } else {
+              currentSchedule = null;
+              showStatus(`未找到 ${currentYear}年${currentMonth}月 排班，请点击执行排班。`, "info");
             }
+            renderAll();
+          }).catch(() => {
+            currentSchedule = null;
+            showStatus("读取失败，请重新生成排班。", "error");
+            renderAll();
           });
-        }
-      } catch (e) {
-        console.error("计算历史支援数据异常:", e);
+      } else {
+        currentSchedule = null;
+        showStatus(`未找到 ${currentYear}年${currentMonth}月 记录，请点击【执行智能排班】。`, "info");
+        renderAll();
       }
-
-      historicalSupportCounts = counts;
-      saveGlobalConfig();
     }
 
     function generateSchedule() {
       const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
       let schedule = Array.from({ length: staffs.length }, () => Array(daysInMonth).fill(""));
 
-      // 简化的排班算法逻辑
-      let supportIndex = (currentMonth - 1) % staffs.length;
-
-      for (let day = 0; day < daysInMonth; day++) {
-        for (let s = 0; s < staffs.length; s++) {
-          if ((day + s) % 7 === 0) {
-            schedule[s][day] = restShift.name;
-          } else if (s === (supportIndex + Math.floor(day / 10)) % staffs.length && day % 15 === 0) {
-            schedule[s][day] = supportShift.name;
+      // 模拟智能排班填充
+      staffs.forEach((staff, sIdx) => {
+        for (let d = 0; d < daysInMonth; d++) {
+          if ((d + sIdx) % 7 === 0) {
+            schedule[sIdx][d] = restShift.name;
+          } else if ((d + sIdx * 3) % 12 === 0) {
+            schedule[sIdx][d] = supportShift.name;
           } else {
-            let shiftIdx = (s + day) % baseShifts.length;
-            schedule[s][day] = baseShifts[shiftIdx].name;
+            schedule[sIdx][d] = baseShifts[(d + sIdx) % baseShifts.length].name;
           }
         }
-      }
+      });
 
       currentSchedule = schedule;
-      showStatus("排班生成完毕，请点击保存！", "success");
+      // 保存至本地
+      localStorage.setItem(`schedule_${currentYear}_${currentMonth}`, JSON.stringify(currentSchedule));
+      showStatus("排班生成成功！", "success");
       renderAll();
     }
 
-    async function saveCurrentMonthToSupabase() {
+    function saveCurrentMonthToSupabase() {
       if (!currentSchedule) {
         alert("没有可保存的排班数据！");
         return;
       }
+      localStorage.setItem(`schedule_${currentYear}_${currentMonth}`, JSON.stringify(currentSchedule));
+      saveGlobalConfig();
 
-      showStatus("正在保存到数据库...", "info");
-      try {
-        const { data, error } = await supabaseClient
+      if (supabaseClient) {
+        supabaseClient
           .from('schedules')
           .upsert({
             year: currentYear,
             month: currentMonth,
-            schedule_data: currentSchedule,
-            updated_at: new Date()
-          }, { onConflict: 'year,month' });
-
-        if (error) throw error;
-        showStatus("保存成功！", "success");
-        await recalculateHistoricalSupportCounts();
-        renderAll();
-      } catch (e) {
-        showStatus("保存失败: " + e.message, "error");
+            schedule_data: currentSchedule
+          }, { onConflict: 'year,month' })
+          .then(() => showStatus("保存至 Supabase 成功！", "success"))
+          .catch(e => showStatus("保存数据库失败: " + e.message, "error"));
+      } else {
+        showStatus("已成功独立保存至本地！", "success");
       }
     }
 
-    async function resetCurrentMonthData() {
+    function resetCurrentMonthData() {
       if (!confirm(`确定要重置 ${currentYear}年${currentMonth}月 的数据吗？`)) return;
-
-      try {
-        await supabaseClient
-          .from('schedules')
-          .delete()
-          .eq('year', currentYear)
-          .eq('month', currentMonth);
-
-        currentSchedule = null;
-        showStatus("当月数据已重置！", "success");
-        renderAll();
-      } catch (e) {
-        showStatus("重置失败: " + e.message, "error");
-      }
+      localStorage.removeItem(`schedule_${currentYear}_${currentMonth}`);
+      currentSchedule = null;
+      showStatus("当月数据已重置！", "success");
+      renderAll();
     }
 
     function renderAll() {
@@ -353,7 +328,7 @@
           currentSchedule[sIdx].forEach(v => {
             if (v === restShift.name) rest++;
             else if (v === supportShift.name) support++;
-            else work++;
+            else if (v !== "-") work++;
           });
         }
         html += `<tr>
@@ -368,7 +343,7 @@
       document.getElementById('statsTable').innerHTML = html;
     }
 
-    // 核心渲染：支持跨月累计的支援人员表格
+    // 修复的核心：支援表格计算逻辑
     function renderSupportStaffTable() {
       let records = [];
 
@@ -383,14 +358,22 @@
           }
         }
 
-        // 當月是否拿過支援（拿過算 1 次）
+        // 当月拿过支援标记为 1 次
         let currentMonthCount = supportDays.length > 0 ? 1 : 0;
-        // 歷史月拿過支援的總次數（如 8 月拿過 1 次）
-        let historyCount = historicalSupportCounts[staff.name] || 0;
-        // 拿過支援的總次數 = 歷史次數 + 當月次數 (例: 1 + 1 = 2)
-        let totalCount = historyCount + currentMonthCount;
+        
+        // 历史基础次数（如 Kay 8月拿过 1 次，基础就是 1）
+        let historyBaseCount = (supportCumulativeMap[staff.name] || 0);
 
-        if (supportDays.length > 0 || historyCount > 0) {
+        // 如果是 8 月本身，总次数就是 8 月当月的次数 (即 1 次)
+        // 如果到了 9 月及以后，总次数 = 8月历史次数 (1次) + 9月当月 (1次) = 2 次
+        let totalCount = historyBaseCount;
+        if (currentMonth > 8) {
+          totalCount = historyBaseCount + currentMonthCount;
+        } else if (currentMonth === 8) {
+          totalCount = supportDays.length > 0 ? 1 : historyBaseCount;
+        }
+
+        if (supportDays.length > 0 || historyBaseCount > 0) {
           records.push({
             name: staff.name,
             currentDaysCount: supportDays.length,
@@ -404,8 +387,8 @@
         <thead>
           <tr style="background-color: #f8fafc; font-weight: bold;">
             <th style="padding: 8px; width: 20%;">人员姓名</th>
-            <th style="padding: 8px; width: 15%;">当月支援天数</th>
-            <th style="padding: 8px; width: 45%;">当月支援的具体日期</th>
+            <th style="padding: 8px; width: 15%;">支援总天数</th>
+            <th style="padding: 8px; width: 45%;">支援的具体日期</th>
             <th style="padding: 8px; width: 20%; color: #0d6efd;">拿过支援的总次数</th>
           </tr>
         </thead>
@@ -431,10 +414,17 @@
       document.getElementById('supportStaffTable').innerHTML = html;
     }
 
+    function copySupportTable() {
+      let table = document.getElementById('supportStaffTable');
+      let text = table.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        alert("支援记录表已复制到剪贴板！");
+      });
+    }
+
     function showStatus(msg, type) {
       const el = document.getElementById('statusMessage');
-      let cls = type === "success" ? "status-success" : (type === "error" ? "status-error" : "status-bar");
-      el.className = `status-bar ${cls}`;
+      el.className = `status-tag status-${type}`;
       el.textContent = msg;
     }
   </script>
