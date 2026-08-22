@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (支持单格锁定版)</title>
+  <title>智能动态排班工作表 (全员支援统计版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -182,7 +182,7 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #006064;">🔵 每月拿支援的人员记录表 (跨月累计)</h3>
+    <h3 style="margin:0; color: #006064;">🔵 全员支援岗位记录表 (跨月累计)</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
@@ -936,7 +936,7 @@
     container.innerHTML = html;
   }
 
-  // 跨月累加支援总次数的表格渲染函数
+  // 🛠️ 已修正：确保所有在排班表上的人员（全员）均强制显示
   async function renderSupportStaffTable(scheduleData = null) {
     let container = document.getElementById('supportStaffTable');
     if (!container) return;
@@ -961,7 +961,7 @@
       console.warn("读取历史支援次数失败：", err);
     }
 
-    // 从本地 localStorage 中补充当前尚未上云的月份
+    // 从本地 localStorage 中补充当前月份
     for (let i = 0; i < localStorage.length; i++) {
       let k = localStorage.key(i);
       if (k.startsWith('auto_schedule_month_')) {
@@ -977,12 +977,12 @@
       }
     }
 
-    // 保证当月最新内存数据优先于缓存
+    // 保证当月最新内存数据优先
     if (scheduleData) {
       allMonthsData[currentKey] = scheduleData;
     }
 
-    // 2. 统计人员支援天数与跨月总次数
+    // 2. 遍历全员统计支援天数与跨月总次数
     let records = [];
 
     staffs.forEach((staff, sIdx) => {
@@ -1003,14 +1003,13 @@
         }
       });
 
-      if (totalCumulativeCount > 0 || currentMonthDays.length > 0) {
-        records.push({
-          name: staff.name,
-          currentCount: currentMonthDays.length,
-          days: currentMonthDays.length > 0 ? currentMonthDays.join('、') : '当月无',
-          totalCount: totalCumulativeCount
-        });
-      }
+      // 强制推入，不进行大于0的条件过滤
+      records.push({
+        name: staff.name,
+        currentCount: currentMonthDays.length,
+        days: currentMonthDays.length > 0 ? currentMonthDays.join('、') : '当月无',
+        totalCount: totalCumulativeCount
+      });
     });
 
     // 3. 渲染 HTML 表格
@@ -1026,26 +1025,19 @@
       <tbody>
     `;
 
-    if (records.length === 0) {
+    records.forEach(item => {
+      let daysStyle = item.currentCount > 0 ? 'class="shift-support"' : 'style="color: #94a3b8;"';
+      let countStyle = item.currentCount > 0 ? 'color: #006064; font-weight: bold;' : 'color: #94a3b8;';
+      
       html += `
         <tr>
-          <td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px;">
-            暂无支援岗位记录
-          </td>
+          <td style="font-weight: bold; padding: 8px;">${item.name}</td>
+          <td style="${countStyle} padding: 8px;">${item.currentCount} 天</td>
+          <td ${daysStyle} style="padding: 8px;">${item.days}</td>
+          <td style="font-weight: bold; color: #0d6efd; padding: 8px;">累计 ${item.totalCount} 次</td>
         </tr>
       `;
-    } else {
-      records.forEach(item => {
-        html += `
-          <tr>
-            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
-            <td style="font-weight: bold; color: #006064; padding: 8px;">${item.currentCount} 天</td>
-            <td class="shift-support" style="padding: 8px;">${item.days}</td>
-            <td style="font-weight: bold; color: #0d6efd; padding: 8px;">累计 ${item.totalCount} 次</td>
-          </tr>
-        `;
-      });
-    }
+    });
 
     html += `</tbody>`;
     container.innerHTML = html;
@@ -1272,7 +1264,6 @@
       let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       let bonusHighHistory = Array.from({ length: staffs.length }, () => ({}));
 
-      // 🔥 提前抓取并计算所有人在历史（含云端及本地缓存）的跨月支援总次数
       let cumulativeSupportCounts = Array.from({ length: staffs.length }, () => 0);
       try {
         let allHistoryData = {};
@@ -1448,31 +1439,27 @@
           }
         });
 
-        // 🔥 【核心改进】：智能抓取并分配给跨月累计支援次数较少的人
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
         if (unassignedStaff.length > 0) {
           unassignedStaff.sort((a, b) => {
-            // 条件 1：跨月累计支援次数少的优先
             let totalA = cumulativeSupportCounts[a];
             let totalB = cumulativeSupportCounts[b];
             if (totalA !== totalB) return totalA - totalB;
 
-            // 条件 2：当月没拿过支援的优先
             let currentA = shiftCounts[a][supName] || 0;
             let currentB = shiftCounts[b][supName] || 0;
             if (currentA !== currentB) return currentA - currentB;
 
-            // 条件 3：次数相同时增加随机公平性
             return Math.random() - 0.5;
           });
 
           unassignedStaff.forEach(sIdx => {
             newSchedule[sIdx][dayIdx] = supName;
             shiftCounts[sIdx][supName] = (shiftCounts[sIdx][supName] || 0) + 1;
-            cumulativeSupportCounts[sIdx]++; // 实时累加，确保公平轮替换流
+            cumulativeSupportCounts[sIdx]++;
           });
         }
       }
@@ -1491,7 +1478,7 @@
         warningBox.innerHTML = `<b>⚠️ 自动排班扫尾提示：</b><br>` + warningMessages.join('<br>');
         alert(`[${monthKey}] 排班已完成，部分规则受休假或锁定限制已自动微调。`);
       } else {
-        alert(`[${monthKey}] 智能排班成功！已成功根据跨月支援次数进行优先智能分配！`);
+        alert(`[${monthKey}] 智能排班成功！全员支援记录及优先分配已成功呈现！`);
       }
 
     } catch (err) {
