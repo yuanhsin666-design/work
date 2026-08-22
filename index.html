@@ -744,9 +744,7 @@
 
   function renderIntensitySummaryTable(scheduleData = null) {
     let allShifts = [...baseShifts.map(s => s.name), supportShift.name];
-    let totalHigh = 0, totalMid = 0, totalLow = 0;
-    let staffCount = staffs.length;
-
+    
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
@@ -772,11 +770,7 @@
         }
       });
 
-      totalHigh += highCount;
-      totalMid += midCount;
-      totalLow += lowCount;
-
-      // 强制在同一行显示 (white-space: nowrap)
+      // 强制单排无折行 (white-space: nowrap)
       html += `
         <tr>
           <td class="staff-name" style="padding: 8px;">${staff.name}</td>
@@ -789,25 +783,60 @@
       `;
     });
 
-    // 计算平均值
-    let avgHigh = staffCount ? (totalHigh / staffCount).toFixed(1) : "0.0";
-    let avgMid = staffCount ? (totalMid / staffCount).toFixed(1) : "0.0";
-    let avgLow = staffCount ? (totalLow / staffCount).toFixed(1) : "0.0";
-
-    // 底部追加每人平均行
-    html += `
-      <tr style="background-color: #e2e8f0; font-weight: bold;">
-        <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均</td>
-        <td style="padding: 8px; text-align: center; font-size: 13px; white-space: nowrap;">
-          <span style="color: #c62828;">高每人平均 ${avgHigh}</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #8c6b00;">中每人平均 ${avgMid}</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #1b5e20;">低每人平均 ${avgLow}</span>
-        </td>
-      </tr>
-    `;
-
     html += `</tbody>`;
     document.getElementById('intensitySummaryTable').innerHTML = html;
+  }
+  function renderHighIntensityTable(scheduleData = null) {
+    const highShiftNames = baseShifts.filter(s => s.level === '高').map(s => s.name);
+    let records = [];
+
+    if (scheduleData) {
+      staffs.forEach((staff, sIdx) => {
+        let shift1 = scheduleData[sIdx] ? scheduleData[sIdx][0] : "";
+        let shift16 = scheduleData[sIdx] ? scheduleData[sIdx][15] : "";
+
+        if (shift1 && highShiftNames.includes(shift1)) {
+          records.push({ date: '1号', name: staff.name, shift: shift1 });
+        }
+        if (shift16 && highShiftNames.includes(shift16)) {
+          records.push({ date: '16号', name: staff.name, shift: shift16 });
+        }
+      });
+    }
+
+    let html = `
+      <thead>
+        <tr style="background-color: #f8fafc; font-weight: bold;">
+          <th style="padding: 8px; width: 20%;">日期</th>
+          <th style="padding: 8px; width: 40%;">人员姓名</th>
+          <th style="padding: 8px; width: 40%;">高强度岗位名称</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    if (records.length === 0) {
+      html += `
+        <tr>
+          <td colspan="3" style="text-align: center; color: #94a3b8; padding: 12px;">
+            当前无 1号 或 16号 安排高强度岗位的人员记录
+          </td>
+        </tr>
+      `;
+    } else {
+      records.forEach(item => {
+        html += `
+          <tr>
+            <td style="font-weight: bold; color: #d9534f; padding: 8px;">${item.date}</td>
+            <td style="font-weight: bold; padding: 8px;">${item.name}</td>
+            <td class="shift-high" style="padding: 8px;">${item.shift.replace(/\n/g, ' ')}</td>
+          </tr>
+        `;
+      });
+    }
+
+    html += `</tbody>`;
+    document.getElementById('highIntensityTable').innerHTML = html;
   }
 
   function renderSupportStaffTable(scheduleData = null) {
@@ -1210,60 +1239,6 @@
     await loadDataFromLocal();
     renderAll();
   };
-  // 补丁：兼容旧函数名调用，防止报 renderHighIntensityTable is not defined 错误
-  // 恢复：每月 1 号与 16 号分红日高强度人员/岗位记录表 渲染函数
-  function renderHighIntensityTable(scheduleData = null) {
-    let targetDays = [1, 16]; // 分红日：每月 1 号和 16 号
-    let html = `
-      <thead>
-        <tr style="background-color: #f8fafc; font-weight: bold;">
-          <th style="padding: 8px; width: 15%;">日期</th>
-          <th style="padding: 8px; width: 35%;">值班人员</th>
-          <th style="padding: 8px; width: 50%;">高强度岗位分配</th>
-        </tr>
-      </thead>
-      <tbody>
-    `;
-
-    if (!scheduleData || scheduleData.length === 0) {
-      html += `<tr><td colspan="3" style="padding: 12px; text-align: center; color: #94a3b8;">暂无排班数据</td></tr>`;
-    } else {
-      // 筛选高强度岗位
-      let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
-
-      targetDays.forEach(day => {
-        let dayIdx = day - 1; // 日期索引从 0 开始
-        let staffDetails = [];
-
-        staffs.forEach((staff, sIdx) => {
-          let shiftToday = scheduleData[sIdx] ? scheduleData[sIdx][dayIdx] : null;
-          if (shiftToday && highShifts.includes(shiftToday)) {
-            staffDetails.push(`<span style="font-weight: bold; color: #c62828;">${staff.name}</span> (${shiftToday})`);
-          }
-        });
-
-        let detailStr = staffDetails.length > 0 ? staffDetails.join('、') : '无高强度岗位安排';
-
-        html += `
-          <tr>
-            <td style="padding: 8px; font-weight: bold;">${day}号 (分红日)</td>
-            <td colspan="2" style="padding: 8px; text-align: left; padding-left: 15px;">
-              ${detailStr}
-            </td>
-          </tr>
-        `;
-      });
-    }
-
-    html += `</tbody>`;
-
-    // 渲染至分红日表格容器（如 ID 不同，请将 highIntensityTable 改为您原代码中分红日 table 的 ID）
-    let container = document.getElementById('highIntensityTable') || document.getElementById('bonusDayTable');
-    if (container) {
-      container.innerHTML = html;
-    }
-  }
-  }
 </script>
 </body>
 </html>
