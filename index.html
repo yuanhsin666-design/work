@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (全员满编无空白与严格保底防呆版)</title>
+  <title>智能动态排班工作表 (支持重复与缺失双向校验防呆版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -49,7 +49,7 @@
     .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; } 
     .shift-support { background-color: #e0f7fa; color: #006064; } 
     
-    /* 防呆：重复岗位反红提醒样式 */
+    /* 重复反红样式 */
     .shift-duplicate-error { background-color: #f8d7da !important; color: #842029 !important; border: 2px solid #dc2626 !important; font-weight: bold; }
 
     .shift-select { width: 100%; border: none; background: transparent; text-align: center; text-align-last: center; font-size: 11px; font-weight: inherit; color: inherit; cursor: pointer; padding: 4px 0; outline: none; }
@@ -73,13 +73,13 @@
     .stat-total { background-color: #d97706; color: white; font-weight: bold; }
     .lock-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #f1f5f9; padding: 10px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
     
-    .log-box { background: #fffbe6; border: 1px solid #ffe58f; padding: 10px; border-radius: 6px; font-size: 13px; color: #d46b08; margin-top: 10px; display: none; line-height: 1.6; }
+    .log-box { background: #fffbe6; border: 1px solid #ffe58f; padding: 12px; border-radius: 6px; font-size: 13px; color: #856404; margin-top: 10px; display: none; line-height: 1.6; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 无空白格、杜绝0次、防呆加固版)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 双向防呆：查重复 + 查缺失)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -128,7 +128,7 @@
 
   <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
-    <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
+    <button class="warning-btn" onclick="validateScheduleCompleteness()">🔍 校验排班重复与缺失岗位</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -147,7 +147,6 @@
     <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月</button>
     <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期</button>
     <button id="toggleEditBtn" class="edit-btn" onclick="toggleManualEditMode()">✏️ 开启手动修改模式</button>
-    <span style="font-size: 12px; color: #666;">💡 提示：非修改模式下，点击表格任意單格可直接切换「單格鎖定」狀態。</span>
   </div>
 
   <div class="table-container">
@@ -785,22 +784,26 @@
   }
 
   // -------------------------------------------------------------
-  // 🔍 防呆核心：校验排班重复岗位
+  // 🔍 双向防呆校验：检查岗位【重复】与【缺失】
   // -------------------------------------------------------------
-  function validateDuplicateShifts() {
+  function validateScheduleCompleteness() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
     
+    // 清除旧的错误红框
     const allCells = document.querySelectorAll('#scheduleTable td');
     allCells.forEach(td => td.classList.remove('shift-duplicate-error'));
 
-    let duplicateCount = 0;
-    let duplicateLogs = [];
+    let totalIssuesCount = 0;
+    let logMessages = [];
+
+    // 获取所有标准岗位名称列表
+    const requiredShifts = baseShifts.map(s => s.name);
 
     for (let day = 1; day <= totalDays; day++) {
       let dayIdx = day - 1;
-      let shiftOccurrences = {};
+      let dayAssignedShifts = {}; // 记录每个岗位在这一天被谁分配了
 
       staffs.forEach((staff, sIdx) => {
         let shiftVal = "";
@@ -817,41 +820,49 @@
         }
 
         if (shiftVal && shiftVal !== "休") {
-          if (!shiftOccurrences[shiftVal]) {
-            shiftOccurrences[shiftVal] = [];
+          if (!dayAssignedShifts[shiftVal]) {
+            dayAssignedShifts[shiftVal] = [];
           }
-          shiftOccurrences[shiftVal].push(sIdx);
+          dayAssignedShifts[shiftVal].push(sIdx);
         }
       });
 
-      Object.keys(shiftOccurrences).forEach(shiftName => {
-        let staffIndices = shiftOccurrences[shiftName];
+      // 1. 检查重复岗位
+      Object.keys(dayAssignedShifts).forEach(shiftName => {
+        let staffIndices = dayAssignedShifts[shiftName];
         if (staffIndices.length > 1) {
-          duplicateCount++;
+          totalIssuesCount++;
           let cleanName = shiftName.replace(/\n/g, ' ');
           let staffNamesStr = staffIndices.map(sIdx => staffs[sIdx].name).join('、');
-          duplicateLogs.push(`📅 第 <b>${day}</b> 天：岗位 [<b>${cleanName}</b>] 重复出现，涉及人员：<b>${staffNamesStr}</b>`);
+          logMessages.push(`🔴 <b>【岗位重复】</b>第 <b>${day}</b> 天：[<b>${cleanName}</b>] 被多人同时占用，涉及：<b>${staffNamesStr}</b>`);
 
+          // 标红对应的格子
           staffIndices.forEach(sIdx => {
             const cellElem = document.getElementById(`cell_${sIdx}_${dayIdx}`);
-            if (cellElem) {
-              cellElem.classList.add('shift-duplicate-error');
-            }
+            if (cellElem) cellElem.classList.add('shift-duplicate-error');
           });
         }
       });
+
+      // 2. 检查缺失岗位（开天窗）
+      let missingShifts = requiredShifts.filter(reqShift => !dayAssignedShifts[reqShift]);
+      if (missingShifts.length > 0) {
+        totalIssuesCount++;
+        let missingNamesStr = missingShifts.map(s => `[${s.replace(/\n/g, ' ')}]`).join('、');
+        logMessages.push(`⚠️ <b>【岗位缺失】</b>第 <b>${day}</b> 天：缺少以下必选岗位无人值守 👉 ${missingNamesStr}`);
+      }
     }
 
     const warningBox = document.getElementById('warningLog');
-    if (duplicateCount > 0) {
-      warningBox.innerHTML = `<b>🚨 岗位重复校验提醒（共发现 ${duplicateCount } 处重复）：</b><br>` + duplicateLogs.join('<br>');
+    if (totalIssuesCount > 0) {
+      warningBox.innerHTML = `<b>🚨 校验发现以下异常（共 ${totalIssuesCount} 处问题，请注意排查）：</b><br><br>` + logMessages.join('<br>');
       warningBox.style.display = 'block';
-      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${duplicateCount} 处岗位重复！`;
-      alert(`校验完成！发现有 ${duplicateCount} 天存在相同的岗位重复分配，相关格子已为您标红显示，请人工重新排班调整！`);
+      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${totalIssuesCount} 处排班冲突或缺失！`;
+      alert(`校验完成！发现有 ${totalIssuesCount} 处异常（包含重复占用或岗位缺失），详情请查看表格上方的警告框！`);
     } else {
       warningBox.style.display = 'none';
-      document.getElementById('status').innerText = `✅ 校验完毕：排班无岗位重复！`;
-      alert(`校验完成！当月排班结构良好，没有在同一天发现重复的岗位。`);
+      document.getElementById('status').innerText = `✅ 校验完毕：全月排班岗位完整且无重复！`;
+      alert(`🎉 太棒了！全月排班完美：没有发现岗位重复，也没有发现任何岗位缺失（无开天窗）！`);
     }
   }
 
