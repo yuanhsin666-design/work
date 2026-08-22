@@ -67,7 +67,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 8大规则+全月搜寻调换版)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 云端双模式抓取版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -91,11 +91,12 @@
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🌐 导入当前月份的云端假表：</label>
-      <div style="display: flex; gap: 5px; margin-bottom: 8px;">
-        <input type="text" id="cloudUrlInput" placeholder="粘贴【当前选择月份】的 Google 试算表链接" style="flex: 1;">
-        <button class="success" onclick="fetchCloudRests()">🌐 抓取当月休假日</button>
-        <button class="danger" onclick="clearCurrentMonthRests()">🗑️ 清空当月休假</button>
+      <label>🌐 导入当前月份的 Google 试算表：</label>
+      <div style="display: flex; gap: 5px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="cloudUrlInput" placeholder="粘贴 Google 试算表链接 (需开启【知道链接者皆可查看】)" style="flex: 1; min-width: 300px;">
+        <button class="success" onclick="fetchCloudData('rests')">🌐 抓取当月休假日(1为休)</button>
+        <button class="copy-btn" onclick="fetchCloudData('full_schedule')">📥 抓取云端完整旧班表</button>
+        <button class="danger" onclick="clearCurrentMonthRests()">🗑️ 清空当月数据</button>
       </div>
     </div>
 
@@ -334,9 +335,10 @@
     });
   }
 
-  async function fetchCloudRests() {
+  // 云端数据抓取 (支持 Cors 跨域备用通道)
+  async function fetchCloudData(mode) {
     let rawUrl = document.getElementById('cloudUrlInput').value.trim();
-    if (!rawUrl) return alert("请先输入当前月份的云端链接！");
+    if (!rawUrl) return alert("请先粘贴 Google 试算表链接！");
 
     let targetUrl = rawUrl;
     if (rawUrl.includes("docs.google.com/spreadsheets")) {
@@ -350,20 +352,27 @@
     }
 
     const monthKey = getMonthKey();
-    document.getElementById('status').innerText = `⏳ 正在读取 [${monthKey}] 的云端假表...`;
+    document.getElementById('status').innerText = `⏳ 正在抓取 [${monthKey}] 的数据...`;
 
     try {
-      const response = await fetch(targetUrl);
-      if (!response.ok) throw new Error("无法读取，请确认链接权限。");
-      
-      const csvText = await response.text();
-      const rows = parseCSV(csvText);
+      let csvText = "";
+      try {
+        const response = await fetch(targetUrl);
+        if (!response.ok) throw new Error();
+        csvText = await response.text();
+      } catch(e) {
+        // 如果直接抓取触发跨域 CORS，自动使用跨域代理服务
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        const resProxy = await fetch(proxyUrl);
+        if (!resProxy.ok) throw new Error("链接读取失败！请确认 Google 试算表权限已设为【知道链接者皆可查看】。");
+        csvText = await resProxy.text();
+      }
 
+      const rows = parseCSV(csvText);
       const year = parseInt(document.getElementById('yearSelect').value);
       const month = parseInt(document.getElementById('monthSelect').value);
       const totalDays = getDaysInMonth(year, month);
 
-      currentMonthRests = {};
       let dayColumnMap = {};
       let headerRowIndex = -1;
 
@@ -379,43 +388,85 @@
         if (headerRowIndex !== -1) break;
       }
 
-      let updatedCount = 0;
-      for (let r = 0; r < rows.length; r++) {
-        let row = rows[r];
-        if (row.length === 0) continue;
+      let allShiftsMap = [...baseShifts, supportShift];
+
+      function findMatchingShift(text) {
+        if (!text) return "";
+        let clean = text.replace(/\s+/g, '').toUpperCase();
+        if (clean === "休" || clean === "休(预)" || clean === "OFF") return "休";
         
-        let rawName = row[0] ? row[0].replace(/"/g, '').trim() : '';
-        let cleanNameInRow = rawName.replace(/\s+/g, '');
-        if (!cleanNameInRow) continue;
-
-        const sIdx = staffs.findIndex(s => {
-          let cleanStaffName = s.name.replace(/\s+/g, '');
-          return cleanStaffName === cleanNameInRow ||
-                 (cleanStaffName === "孫孫" && cleanNameInRow === "孙孙") ||
-                 (cleanStaffName === "孙孙" && cleanNameInRow === "孫孫") ||
-                 (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||
-                 (cleanStaffName === "翔" && cleanNameInRow === "阿翔");
+        let found = allShiftsMap.find(s => {
+          let sNameClean = s.name.replace(/\s+/g, '').toUpperCase();
+          let firstKeyword = s.name.split('\n')[0].replace(/\s+/g, '').toUpperCase();
+          return clean === sNameClean || clean.includes(firstKeyword);
         });
-
-        if (sIdx !== -1) {
-          updatedCount++;
-          let rests = [];
-          for (let c = 1; c < row.length; c++) {
-            if (row[c] && row[c].trim() === '1') {
-              let day = dayColumnMap[c] || c;
-              if (day >= 1 && day <= totalDays) rests.push(day);
-            }
-          }
-          currentMonthRests[sIdx] = Array.from(new Set(rests));
-        }
+        return found ? found.name : text; 
       }
 
-      renderAll();
-      await saveDataToLocal();
-      document.getElementById('status').innerText = `✅ [${monthKey}] 假表抓取成功！匹配 ${updatedCount} 人。`;
-      alert(`[${monthKey}] 假表读取成功！已为 ${updatedCount} 位员工导入当月休假。`);
+      if (mode === 'rests') {
+        currentMonthRests = {};
+        let updatedCount = 0;
+        for (let r = 0; r < rows.length; r++) {
+          let row = rows[r];
+          if (row.length === 0) continue;
+          let rawName = row[0] ? row[0].replace(/"/g, '').trim() : '';
+          let cleanNameInRow = rawName.replace(/\s+/g, '');
+          if (!cleanNameInRow) continue;
+
+          const sIdx = staffs.findIndex(s => s.name.replace(/\s+/g, '') === cleanNameInRow);
+          if (sIdx !== -1) {
+            updatedCount++;
+            let rests = [];
+            for (let c = 1; c < row.length; c++) {
+              if (row[c] && row[c].trim() === '1') {
+                let day = dayColumnMap[c] || c;
+                if (day >= 1 && day <= totalDays) rests.push(day);
+              }
+            }
+            currentMonthRests[sIdx] = Array.from(new Set(rests));
+          }
+        }
+        renderAll();
+        await saveDataToLocal();
+        document.getElementById('status').innerText = `✅ [${monthKey}] 假表导入成功！`;
+        alert(`[${monthKey}] 假表读取成功！已匹配 ${updatedCount} 人。`);
+
+      } else if (mode === 'full_schedule') {
+        let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+        let updatedCount = 0;
+
+        for (let r = 0; r < rows.length; r++) {
+          let row = rows[r];
+          if (row.length === 0) continue;
+          let rawName = row[0] ? row[0].replace(/"/g, '').trim() : '';
+          let cleanNameInRow = rawName.replace(/\s+/g, '');
+          if (!cleanNameInRow) continue;
+
+          const sIdx = staffs.findIndex(s => s.name.replace(/\s+/g, '') === cleanNameInRow);
+          if (sIdx !== -1) {
+            updatedCount++;
+            for (let c = 1; c < row.length; c++) {
+              let day = dayColumnMap[c] || c;
+              if (day >= 1 && day <= totalDays) {
+                let shiftText = row[c] ? row[c].trim() : '';
+                newSchedule[sIdx][day - 1] = findMatchingShift(shiftText);
+              }
+            }
+          }
+        }
+
+        lastGeneratedSchedule = sanitizeSchedule(newSchedule);
+        initLockedMap();
+        staffs.forEach((_, sIdx) => { for (let d = 0; d < totalDays; d++) lockedMap[sIdx][d] = true; }); // 导入旧班表默认锁定
+
+        renderAll();
+        await saveDataToLocal();
+        document.getElementById('status').innerText = `✅ [${monthKey}] 旧班表导入成功并已锁定！`;
+        alert(`[${monthKey}] 旧完整班表导入成功！匹配 ${updatedCount} 人，已自动全表锁定。`);
+      }
+
     } catch (err) {
-      alert("抓取失败：" + err.message);
+      alert("抓取失败：\n1. 请确保 Google 试算表已点击右上角【分享】设置为【知道链接者皆可查看】。\n2. 确认网络正常。");
       document.getElementById('status').innerText = "❌ 读取失败";
     }
   }
@@ -525,9 +576,11 @@
 
   function clearCurrentMonthRests() {
     currentMonthRests = {};
+    lastGeneratedSchedule = null;
+    initLockedMap(true);
     renderAll();
     saveDataToLocal();
-    alert(`已清空当前 [${getMonthKey()}] 月份的休假。`);
+    alert(`已清空当前 [${getMonthKey()}] 月份的所有数据。`);
   }
 
   async function onDateChange() {
@@ -878,7 +931,6 @@
     } catch (err) { alert("复制失败，请重试。"); }
   }
 
-  // 检测高强度岗位连续三天
   function checkHighConsecutiveThree(schedule, sIdx, dayIdx, highNames) {
     let dayM2 = dayIdx - 2 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 2]) : false;
     let dayM1 = dayIdx - 1 >= 0 ? highNames.includes(schedule[sIdx][dayIdx - 1]) : false;
@@ -892,14 +944,12 @@
     return false;
   }
 
-  // 获取岗位关键字（用于规则8判断）
   function getShiftKeyword(shiftName) {
     if (!shiftName || shiftName === "休") return "";
     let clean = shiftName.split('\n')[0].trim().toUpperCase();
     return clean;
   }
 
-  // 规则 8：检测同名/同关键字岗位是否连续 2 天
   function checkConsecutiveSameShift(schedule, sIdx, dayIdx, targetShiftName) {
     if (!targetShiftName || targetShiftName === "休") return false;
 
@@ -926,9 +976,6 @@
     return false;
   }
 
-  // -------------------------------------------------------------
-  // 智能排班主逻辑（带全月搜寻调整算法）
-  // -------------------------------------------------------------
   function generateSchedule() {
     try {
       const year = parseInt(document.getElementById('yearSelect').value);
@@ -953,7 +1000,6 @@
         return Math.min(...counts);
       }
 
-      // 规则 1：导入休假后不可变动休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -977,23 +1023,18 @@
         let currentCount = shiftCounts[sIdx][sName] || 0;
         let minCount = getShiftMinCount(sName);
 
-        // 规则 8
         if (checkConsecutiveSameShift(newSchedule, sIdx, dayIdx, sName)) return false;
-        // 规则 3
         if (isHigh && currentCount >= 2) return false;
-        // 规则 4
         if (currentCount >= 2 && minCount < 2) return false;
         if (currentCount >= 3) return false;
 
         return true;
       }
 
-      // 初步全局动态排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         const currentDay = dayIdx + 1;
         const isBonusDay = (currentDay === 1 || currentDay === 16);
 
-        // 高强度优先
         highShifts.forEach(hShift => {
           if (staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift)) return;
 
@@ -1030,7 +1071,6 @@
           }
         });
 
-        // 一般岗位
         let unassignedShifts = normalShifts.filter(sName => !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName));
         unassignedShifts.sort(() => Math.random() - 0.5);
 
@@ -1048,7 +1088,6 @@
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
         });
 
-        // 支援安排
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "");
         if (unassignedStaff.length > 0) {
           unassignedStaff.forEach(sIdx => {
@@ -1062,9 +1101,6 @@
         }
       }
 
-      // -------------------------------------------------------------
-      // 核心升级：全月深度二次搜寻调换算法（消灭 0 次）
-      // -------------------------------------------------------------
       let unresolvableAlerts = [];
       let swapSuccessCount = 0;
 
@@ -1074,35 +1110,28 @@
         allOfficialShifts.forEach(targetShiftName => {
           let count = shiftCounts[sIdx][targetShiftName] || 0;
 
-          // 发现有人对正式岗位为 0 次，在全月重新搜寻
           if (count === 0) {
             let isResolved = false;
 
-            // 遍历全月每一天作为候选交换日
             for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
               if (isResolved) break;
 
               let currentShiftA = newSchedule[sIdx][dayIdx];
 
-              // 忽略休假、支援及锁定的班次
               if (currentShiftA === "休" || currentShiftA === supName || (lockedMap[sIdx] && lockedMap[sIdx][dayIdx])) continue;
 
-              // 查找全月中当天安排了目标岗位 targetShiftName 的同事 B
               let partnerIdx = staffs.findIndex((_, pIdx) => newSchedule[pIdx][dayIdx] === targetShiftName);
 
               if (partnerIdx !== -1 && partnerIdx !== sIdx && !(lockedMap[partnerIdx] && lockedMap[partnerIdx][dayIdx])) {
                 let partnerShift = targetShiftName;
 
-                // 判断交换资质：员工 A 当前班次已 >= 2 次，同事 B 在目标岗位上也已 >= 2 次
                 let countAHas = shiftCounts[sIdx][currentShiftA] || 0;
                 let countBHas = shiftCounts[partnerIdx][partnerShift] || 0;
 
                 if (countAHas >= 2 && countBHas >= 2) {
-                  // 尝试互换
                   newSchedule[sIdx][dayIdx] = partnerShift;
                   newSchedule[partnerIdx][dayIdx] = currentShiftA;
 
-                  // 校验：高强度连三限制 & 同名/关键字不连排
                   let isHighValidA = !checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts);
                   let isHighValidB = !checkHighConsecutiveThree(newSchedule, partnerIdx, dayIdx, highShifts);
 
@@ -1110,7 +1139,6 @@
                   let isSameValidB = !checkConsecutiveSameShift(newSchedule, partnerIdx, dayIdx, currentShiftA);
 
                   if (isHighValidA && isHighValidB && isSameValidA && isSameValidB) {
-                    // 成功调换并更新统计
                     shiftCounts[sIdx][currentShiftA]--;
                     shiftCounts[sIdx][partnerShift] = (shiftCounts[sIdx][partnerShift] || 0) + 1;
 
@@ -1120,7 +1148,6 @@
                     isResolved = true;
                     swapSuccessCount++;
                   } else {
-                    // 不符合限制条件，撤销互换，继续搜寻全月其他日期候选
                     newSchedule[sIdx][dayIdx] = currentShiftA;
                     newSchedule[partnerIdx][dayIdx] = partnerShift;
                   }
@@ -1128,9 +1155,8 @@
               }
             }
 
-            // 搜寻全月后仍无法安全换开的，列出提示手动处理
             if (!isResolved) {
-              unresolvableAlerts.push(`员工【${staffName}】岗位【${targetShiftName.replace(/\n/g, ' ')}】当月为 0 次（全月搜寻均受限于休假/高强度连三/连排限制，需手动微调）`);
+              unresolvableAlerts.push(`员工【${staffName}】岗位【${targetShiftName.replace(/\n/g, ' ')}】当月为 0 次（需手动微调）`);
             }
           }
         });
@@ -1146,13 +1172,9 @@
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
 
-      let msg = `[${monthKey}] 智能排班及全月搜寻调整完成！\n`;
-      if (swapSuccessCount > 0) {
-        msg += `🎉 已在全月中成功完成 ${swapSuccessCount} 次班次互换调换，补齐 0 次岗位！\n`;
-      }
-      if (unresolvableAlerts.length > 0) {
-        msg += `\n⚠️ 提示（未凑数破坏规则）：\n` + unresolvableAlerts.join("\n");
-      }
+      let msg = `[${monthKey}] 智能排班完成！\n`;
+      if (swapSuccessCount > 0) msg += `🎉 已成功完成 ${swapSuccessCount} 次班次调换，补齐 0 次岗位！\n`;
+      if (unresolvableAlerts.length > 0) msg += `\n⚠️ 提示（未凑数破坏规则）：\n` + unresolvableAlerts.join("\n");
       alert(msg);
 
     } catch (err) {
