@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (全规则严格轮换版)</title>
+  <title>智能动态排班工作表 (跨月独立岗位+月中变动重排版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -69,7 +69,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(✅ 严防同类型/同名称岗位连排版)</span></h2>
+  <h2>⚙️ 动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支持跨月独立岗位+月中重新排班)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -102,7 +102,7 @@
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 岗位与强度设置：</label>
+      <label>🏷️ 岗位与强度设置 <span style="color: #666; font-weight: normal;">(所作修改仅对当前选择月份生效)</span>：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
         <input type="text" id="newShiftName" placeholder="岗位名称 (换行用 \n)" style="flex:2; min-width: 150px;">
         <select id="newShiftLevel" style="flex:1; min-width: 100px;">
@@ -110,7 +110,7 @@
           <option value="中" selected>🟡 中强度</option>
           <option value="高">🔴 高强度</option>
         </select>
-        <button onclick="addShift()">添加基础岗位</button>
+        <button onclick="addShift()">添加岗位</button>
       </div>
       <div class="tag-container" id="shiftsContainer"></div>
     </div>
@@ -134,7 +134,7 @@
     <label><b>🔐 当月锁定控制台：</b></label>
     <button class="lock-btn" onclick="lockAllCells()">🔒 一键锁定当月全表</button>
     <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月</button>
-    <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期</button>
+    <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期 (用于月中变动重新排班)</button>
   </div>
 
   <div class="table-container">
@@ -257,7 +257,9 @@
       currentMonthRests: currentMonthRests,
       lastGeneratedSchedule: sanitizeSchedule(lastGeneratedSchedule),
       lockedMap: lockedMap,
-      cloudUrl: document.getElementById('cloudUrlInput').value
+      cloudUrl: document.getElementById('cloudUrlInput').value,
+      baseShifts: baseShifts,
+      supportShift: supportShift
     };
     
     localStorage.setItem(`auto_schedule_month_${monthKey}`, JSON.stringify(monthData));
@@ -270,7 +272,6 @@
   }
 
   async function loadDataFromLocal() {
-    loadGlobalConfig();
     const monthKey = getMonthKey();
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -296,10 +297,12 @@
     }
 
     if (!data) {
+      loadGlobalConfig();
       currentMonthRests = {};
       lastGeneratedSchedule = null;
       lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
       document.getElementById('cloudUrlInput').value = "";
+      renderShifts();
       return false;
     }
 
@@ -307,6 +310,11 @@
     lastGeneratedSchedule = sanitizeSchedule(data.lastGeneratedSchedule);
     lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
     document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
+
+    if (data.baseShifts) baseShifts = data.baseShifts;
+    if (data.supportShift) supportShift = data.supportShift;
+
+    renderShifts();
     return true;
   }
 
@@ -608,7 +616,7 @@
     }
     renderAll();
     saveDataToLocal();
-    alert(`🗓️ 已锁定 [${getMonthKey()}] ${count} 天历史日期的班次！`);
+    alert(`🗓️ 已锁定 [${getMonthKey()}] ${count} 天历史日期的班次！可以放心调整岗位并重新排班。`);
   }
 
   function getShiftClass(shiftName) {
@@ -742,7 +750,6 @@
     document.getElementById('statsTable').innerHTML = html;
   }
 
-  // 1. 当月人员岗位强度次数汇总表 (单排+每人平均值计算)
   function renderIntensitySummaryTable(scheduleData = null) {
     let container = document.getElementById('intensitySummaryTable');
     if (!container) return;
@@ -813,7 +820,6 @@
     container.innerHTML = html;
   }
 
-  // 2. 每月 1 号与 16 号分红日高强度人员/岗位记录表
   function renderHighIntensityTable(scheduleData = null) {
     let container = document.getElementById('highIntensityTable');
     if (!container) return;
@@ -1089,7 +1095,7 @@
     return warnings;
   }
 
- function generateSchedule() {
+  function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1107,7 +1113,6 @@
       const normalShifts = baseShifts.filter(s => s.level !== '高').map(s => s.name);
       const supName = supportShift.name;
 
-      // 1. 预计算当月各强度的目标平均次数
       let totalHighNeeded = highShifts.length * totalDays;
       let totalMidNeeded = midShifts.length * totalDays;
       let totalLowNeeded = lowShifts.length * totalDays;
@@ -1121,7 +1126,6 @@
       let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       let bonusHighHistory = Array.from({ length: staffs.length }, () => ({}));
 
-      // 2. 统计已锁定班次
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1150,11 +1154,9 @@
         return Math.min(...counts);
       }
 
-      // 3. 校验强度正负1限制
       function isIntensityWithinLimit(sIdx, level) {
         let current = intensityCounts[sIdx][level] || 0;
         let targetAvg = level === '高' ? targetHighAvg : (level === '中' ? targetMidAvg : targetLowAvg);
-        // 允许的最大上限：平均值 + 1
         if (current + 1 > targetAvg + 1.2) return false;
         return true;
       }
@@ -1167,21 +1169,16 @@
         if (currentCount >= 2 && isHigh) return false;
         if (currentCount >= 3) return false;
 
-        // 同名/同类型连排校验
         if (checkSameNameConsecutiveTwo(newSchedule, sIdx, dayIdx, sName)) return false;
-
-        // 强度正负1限制校验
         if (!isIntensityWithinLimit(sIdx, level)) return false;
 
         return true;
       }
 
-      // 4. 逐日排班
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         const currentDay = dayIdx + 1;
         const isBonusDay = (currentDay === 1 || currentDay === 16);
 
-        // A. 高强度岗位排班
         highShifts.forEach(hShift => {
           let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
           if (isAlreadyAssigned) return;
@@ -1203,13 +1200,11 @@
             return canAssignShift(sIdx, hShift, dayIdx, true, '高');
           });
 
-          // 如果严格控制下无可用人员，按保底逻辑平滑放宽
           if (validCandidates.length === 0) {
             validCandidates = availableStaff.filter(sIdx => canAssignShift(sIdx, hShift, dayIdx, true, '高'));
           }
           if (validCandidates.length === 0) validCandidates = availableStaff;
 
-          // 优先选择该岗位次数少且“高强度总次数”最少的人
           validCandidates.sort((a, b) => {
             let hCountA = intensityCounts[a]['高'];
             let hCountB = intensityCounts[b]['高'];
@@ -1228,7 +1223,6 @@
           if (isBonusDay) bonusHighHistory[chosenIdx][hShift] = true;
         });
 
-        // B. 普通岗位（中/低强度）排班
         let unassignedShifts = normalShifts.filter(sName => {
           return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
         });
@@ -1265,7 +1259,6 @@
           }
         });
 
-        // C. 支援岗分配
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
@@ -1293,9 +1286,9 @@
       if (warningMessages.length > 0) {
         warningBox.style.display = 'block';
         warningBox.innerHTML = `<b>⚠️ 自动排班扫尾提示：</b><br>` + warningMessages.join('<br>');
-        alert(`[${monthKey}] 排班已完成，部分规则受休假影响已自动优化。`);
+        alert(`[${monthKey}] 排班已完成，部分规则受休假或锁定限制已自动微调。`);
       } else {
-        alert(`[${monthKey}] 智能排班成功！已严格确保全员每种强度的分配次数在平均值 ±1 范围内！`);
+        alert(`[${monthKey}] 智能排班成功！已成功应用当月独立岗位！`);
       }
 
     } catch (err) {
@@ -1307,7 +1300,6 @@
   window.onload = async function() {
     initDateSelectors();
     updateSelect();
-    renderShifts();
     await loadDataFromLocal();
     renderAll();
   };
