@@ -35,7 +35,7 @@
 
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 6px 4px; min-width: 50px; white-space: pre-line; vertical-align: middle; position: relative; }
+    th, td { border: 1px solid #ccc; padding: 4px; min-width: 60px; white-space: pre-line; vertical-align: middle; position: relative; }
     .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
     .header-day { background: #f0f0f0; cursor: pointer; }
     .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
@@ -46,6 +46,10 @@
     .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; } 
     .shift-support { background-color: #e0f7fa; color: #006064; } 
     
+    /* 单元格下拉框样式及手动更改样式 */
+    .shift-select { width: 100%; border: none; background: transparent; text-align: center; text-align-last: center; font-size: 11px; font-weight: inherit; color: inherit; cursor: pointer; padding: 4px 0; outline: none; }
+    .manual-edited { box-shadow: inset 0 0 0 2px #d97706; border-radius: 3px; font-weight: bold; }
+
     .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; position: sticky; bottom: 0; z-index: 4; }
     .row-daily-total .staff-name { background-color: #cbd5e1; color: #0f172a; position: sticky; left: 0; z-index: 6; }
 
@@ -57,6 +61,7 @@
       right: 1px;
       font-size: 9px;
       opacity: 0.8;
+      pointer-events: none;
     }
     
     .locked-header { background-color: #cbd5e1 !important; color: #334155; }
@@ -556,9 +561,27 @@
     renderAll();
   }
 
-  function toggleCellLock(sIdx, dayIdx) {
-    if (!lockedMap[sIdx]) return;
-    lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];
+  // 手动通过下拉框修改人员排班
+  function handleManualSelectChange(sIdx, dayIdx, selectElem) {
+    const newShift = selectElem.value;
+    const totalDays = getDaysInMonth(
+      parseInt(document.getElementById('yearSelect').value),
+      parseInt(document.getElementById('monthSelect').value)
+    );
+
+    // 如果还没有生成过排班，初始化空数组
+    if (!lastGeneratedSchedule || lastGeneratedSchedule.length !== staffs.length) {
+      lastGeneratedSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+    }
+
+    // 1. 更新内存数据
+    lastGeneratedSchedule[sIdx][dayIdx] = newShift;
+
+    // 2. 自动将其锁定，避免自动重新排班时被覆盖
+    initLockedMap();
+    lockedMap[sIdx][dayIdx] = true;
+
+    // 3. 重新渲染并持久化保存
     renderAll();
     saveDataToLocal();
   }
@@ -630,12 +653,21 @@
     return "";
   }
 
+  // 核心修改：将原本的静态单元格渲染替换为包含下拉框 `<select>` 的手动选择单元格
   function renderTable(scheduleData = null) {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
     document.getElementById('currentMonthTitle').innerText = `${year}年${month}月`;
     initLockedMap();
+
+    // 收集当前当月所有可用岗位选项
+    const allOptions = [
+      { name: "", label: "-- 未安排 --" },
+      { name: "休", label: "休 (休假)" },
+      ...baseShifts.map(s => ({ name: s.name, label: s.name.replace(/\n/g, ' ') })),
+      { name: supportShift.name, label: supportShift.name.replace(/\n/g, ' ') }
+    ];
 
     let html = `<thead><tr><th rowspan="2" class="header-month">${month}月</th>`;
     for(let i=1; i<=totalDays; i++) {
@@ -678,9 +710,21 @@
         }
 
         let cellClass = getShiftClass(cellContent);
-        if (isLocked) cellClass += " cell-locked";
+        if (isLocked) cellClass += " cell-locked manual-edited";
 
-        html += `<td class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${cellContent}</td>`;
+        // 构建单元格中的手动下拉选择框 <select>
+        let selectOptionsHtml = allOptions.map(opt => {
+          let isSelected = (opt.name === cellContent) ? "selected" : "";
+          return `<option value="${opt.name.replace(/"/g, '&quot;')}" ${isSelected}>${opt.label}</option>`;
+        }).join('');
+
+        html += `
+          <td class="${cellClass}">
+            <select class="shift-select" onchange="handleManualSelectChange(${sIdx}, ${day - 1}, this)">
+              ${selectOptionsHtml}
+            </select>
+          </td>
+        `;
       }
 
       let restDaysCount = 0;
@@ -939,12 +983,37 @@
     if (!table) return alert("表格不存在！");
 
     const cloneTable = table.cloneNode(true);
+    
+    // 如果是复制排班主表，把下拉框中的选中文本提出来放回单元格
+    if (tableId === 'scheduleTable') {
+      const selects = table.querySelectorAll('select.shift-select');
+      const cloneCells = cloneTable.querySelectorAll('tbody td');
+      
+      let cellIndex = 0;
+      const totalDays = getDaysInMonth(
+        parseInt(document.getElementById('yearSelect').value),
+        parseInt(document.getElementById('monthSelect').value)
+      );
+
+      staffs.forEach((_, sIdx) => {
+        for (let d = 0; d < totalDays; d++) {
+          const select = selects[sIdx * totalDays + d];
+          if (select) {
+            const val = select.options[select.selectedIndex].text;
+            const targetTd = cloneTable.querySelectorAll('tbody tr')[sIdx].querySelectorAll('td')[d + 1];
+            if (targetTd) targetTd.innerText = (val.includes('-- 未安排 --')) ? '' : val;
+          }
+        }
+      });
+    }
+
     const origCells = table.querySelectorAll('th, td');
     const cloneCells = cloneTable.querySelectorAll('th, td');
 
     origCells.forEach((origCell, index) => {
       const computed = window.getComputedStyle(origCell);
       const cloneCell = cloneCells[index];
+      if (!cloneCell) return;
       cloneCell.style.backgroundColor = computed.backgroundColor;
       cloneCell.style.color = computed.color;
       cloneCell.style.fontWeight = computed.fontWeight;
@@ -953,7 +1022,7 @@
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
       
-      let cellText = (origCell.innerText || origCell.textContent).replace(/🔒/g, '').trim();
+      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
       cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
     });
 
