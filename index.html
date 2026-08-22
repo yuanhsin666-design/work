@@ -936,7 +936,7 @@
     container.innerHTML = html;
   }
 
-  // 🔥【关键修正】：支持跨月累加支援总次数的表格渲染函数
+  // 跨月累加支援总次数的表格渲染函数
   async function renderSupportStaffTable(scheduleData = null) {
     let container = document.getElementById('supportStaffTable');
     if (!container) return;
@@ -1241,7 +1241,7 @@
     return warnings;
   }
 
-  function generateSchedule() {
+  async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1272,6 +1272,48 @@
       let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       let bonusHighHistory = Array.from({ length: staffs.length }, () => ({}));
 
+      // 🔥 提前抓取并计算所有人在历史（含云端及本地缓存）的跨月支援总次数
+      let cumulativeSupportCounts = Array.from({ length: staffs.length }, () => 0);
+      try {
+        let allHistoryData = {};
+        const { data: cloudRes } = await supabaseClient.from('schedules').select('month_key, data');
+        if (cloudRes) {
+          cloudRes.forEach(row => {
+            if (row.data && row.data.lastGeneratedSchedule) {
+              allHistoryData[row.month_key] = row.data.lastGeneratedSchedule;
+            }
+          });
+        }
+        for (let i = 0; i < localStorage.length; i++) {
+          let k = localStorage.key(i);
+          if (k.startsWith('auto_schedule_month_')) {
+            let mKey = k.replace('auto_schedule_month_', '');
+            if (!allHistoryData[mKey]) {
+              try {
+                let parsed = JSON.parse(localStorage.getItem(k));
+                if (parsed && parsed.lastGeneratedSchedule) {
+                  allHistoryData[mKey] = parsed.lastGeneratedSchedule;
+                }
+              } catch(e){}
+            }
+          }
+        }
+        Object.keys(allHistoryData).forEach(mKey => {
+          let mSched = allHistoryData[mKey];
+          if (mSched) {
+            staffs.forEach((_, sIdx) => {
+              if (mSched[sIdx]) {
+                mSched[sIdx].forEach(shift => {
+                  if (shift === supName) cumulativeSupportCounts[sIdx]++;
+                });
+              }
+            });
+          }
+        });
+      } catch (e) {
+        console.warn("历史支援数据抓取失败，改按当月计算", e);
+      }
+
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1288,6 +1330,7 @@
               if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
                 intensityCounts[sIdx][foundS.level]++;
               }
+              if (existingShift === supName) cumulativeSupportCounts[sIdx]++;
             }
           } else if (staffRests.includes(day)) {
             newSchedule[sIdx][dayIdx] = "休";
@@ -1405,17 +1448,31 @@
           }
         });
 
+        // 🔥 【核心改进】：智能抓取并分配给跨月累计支援次数较少的人
         let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
         if (unassignedStaff.length > 0) {
+          unassignedStaff.sort((a, b) => {
+            // 条件 1：跨月累计支援次数少的优先
+            let totalA = cumulativeSupportCounts[a];
+            let totalB = cumulativeSupportCounts[b];
+            if (totalA !== totalB) return totalA - totalB;
+
+            // 条件 2：当月没拿过支援的优先
+            let currentA = shiftCounts[a][supName] || 0;
+            let currentB = shiftCounts[b][supName] || 0;
+            if (currentA !== currentB) return currentA - currentB;
+
+            // 条件 3：次数相同时增加随机公平性
+            return Math.random() - 0.5;
+          });
+
           unassignedStaff.forEach(sIdx => {
-            let supCount = shiftCounts[sIdx][supName] || 0;
-            if (supCount < 1) {
-              newSchedule[sIdx][dayIdx] = supName;
-              shiftCounts[sIdx][supName] = supCount + 1;
-            }
+            newSchedule[sIdx][dayIdx] = supName;
+            shiftCounts[sIdx][supName] = (shiftCounts[sIdx][supName] || 0) + 1;
+            cumulativeSupportCounts[sIdx]++; // 实时累加，确保公平轮替换流
           });
         }
       }
@@ -1434,7 +1491,7 @@
         warningBox.innerHTML = `<b>⚠️ 自动排班扫尾提示：</b><br>` + warningMessages.join('<br>');
         alert(`[${monthKey}] 排班已完成，部分规则受休假或锁定限制已自动微调。`);
       } else {
-        alert(`[${monthKey}] 智能排班成功！已成功应用当月独立岗位！`);
+        alert(`[${monthKey}] 智能排班成功！已成功根据跨月支援次数进行优先智能分配！`);
       }
 
     } catch (err) {
