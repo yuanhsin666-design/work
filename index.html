@@ -904,6 +904,9 @@
  // -------------------------------------------------------------
   // 核心智能排班算法（严格满足所有平摊与限制条件）
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // 核心智能排班算法（含全套规则 + 后置自动互换修复机制）
+  // -------------------------------------------------------------
   function generateSchedule() {
     try {
       const year = parseInt(document.getElementById('yearSelect').value);
@@ -914,15 +917,23 @@
 
       const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
       const normalShifts = baseShifts.filter(s => s.level !== '高').map(s => s.name);
+      const allOfficialShifts = [...highShifts, ...normalShifts]; // 所有正式岗位（不含支援）
       const supName = supportShift.name;
 
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
       
-      // 记录每个人在分红日（1号、16号）排过哪些高强度岗位: { sIdx: { shiftName: true } }
-      let bonusHighHistory = Array.from({ length: staffs.length }, () => ({}));
+      // 读取/初始化跨月分红与支援记忆
+      let globalBonusHistory = JSON.parse(localStorage.getItem('globalBonusHistory')) || {};
+      let globalSupportHistory = JSON.parse(localStorage.getItem('globalSupportHistory')) || {};
 
-      // 1. 【条件：导入休假后 排班不可变动休假】
+      // 重新计算某岗位在当前的全局次数统计
+      function getShiftMinCount(sName) {
+        let counts = staffs.map((_, sIdx) => shiftCounts[sIdx][sName] || 0);
+        return Math.min(...counts);
+      }
+
+      // 1. 【条件 1：导入休假后不可变动】
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -942,142 +953,179 @@
         });
       }
 
-      // 检查某岗位全局最小次数：确保“必须人都轮过2次，才可排第3次”
-      function getShiftMinCount(sName) {
-        let counts = staffs.map((_, sIdx) => shiftCounts[sIdx][sName] || 0);
-        return Math.min(...counts);
-      }
-
-      // 校验某人是否符合排该岗位的条件
-      function canAssignShift(sIdx, sName, isHigh) {
+      // 判定某人是否能接某岗位（条件 2, 3, 4）
+      function canAssign(sIdx, sName, isHigh) {
         let currentCount = shiftCounts[sIdx][sName] || 0;
         let minCount = getShiftMinCount(sName);
 
-        // 【条件：岗位当月平均排 / 必须都轮过2次才可排第3次 / 不能为0】
-        // 如果全员最小值还不到 2 次（甚至有人是 0），已经 2 次的人绝对封锁！
-        if (currentCount >= 2 && minCount < 2) {
-          return false;
-        }
-        // 【条件：高强度岗位上限 2 次 / 一般岗位最多 2 次】
-        if (currentCount >= 3) {
-          return false;
-        }
+        // 高强度上限 2 次
+        if (isHigh && currentCount >= 2) return false;
+
+        // 次数压制：未全员满 2 次前，达到 2 次者禁止再排第 3 次
+        if (currentCount >= 2 && minCount < 2) return false;
+        if (currentCount >= 3) return false;
 
         return true;
       }
 
-      // 2. 逐日排班
+      // 2. 主排班循环
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         const currentDay = dayIdx + 1;
         const isBonusDay = (currentDay === 1 || currentDay === 16);
 
-        // A. 先排高强度岗位
+        // A. 高强度岗位安排
         highShifts.forEach(hShift => {
-          let isAlreadyAssigned = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift);
-          if (isAlreadyAssigned) return;
+          if (staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === hShift)) return;
 
-          let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
-            return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
-          });
-
+          let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "");
           if (availableStaff.length === 0) return;
 
-          // 筛选符合条件的候选人
           let validCandidates = availableStaff.filter(sIdx => {
-            // 【条件：高强度不能连三天】
+            // 【条件 3：高强度不能连三天】
             if (checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts)) return false;
-            
-            // 【条件：1号与16号分红日高强度岗位需每人都轮过，才可再次排同样岗位】
-            if (isBonusDay && bonusHighHistory[sIdx][hShift]) {
-              // 检查是否全员都在分红日轮过该高强度岗位了
-              let allRotatedBonus = staffs.every((_, idx) => bonusHighHistory[idx][hShift]);
-              if (!allRotatedBonus) return false; 
+
+            // 【条件 7：1号与16号分红日跨月轮流】
+            if (isBonusDay) {
+              let key = `${sIdx}_${hShift}`;
+              let userBonusCount = globalBonusHistory[key] || 0;
+              let minBonusCount = Math.min(...staffs.map((_, idx) => globalBonusHistory[`${idx}_${hShift}`] || 0));
+              if (userBonusCount > minBonusCount) return false; // 避开已拿过的
             }
 
-            // 次数压制校验
-            return canAssignShift(sIdx, hShift, true);
+            return canAssign(sIdx, hShift, true);
           });
 
-          // 保底策略：若因连续3天限制导致无人可用，优先放宽连续三天，但坚守次数压制
           if (validCandidates.length === 0) {
-            validCandidates = availableStaff.filter(sIdx => canAssignShift(sIdx, hShift, true));
+            validCandidates = availableStaff.filter(sIdx => canAssign(sIdx, hShift, true));
           }
-          if (validCandidates.length === 0) {
-            validCandidates = availableStaff;
-          }
+          if (validCandidates.length === 0) validCandidates = availableStaff;
 
-          // 排序：优先给“该岗位累计次数最少”的人
-          validCandidates.sort((a, b) => {
-            let countA = shiftCounts[a][hShift] || 0;
-            let countB = shiftCounts[b][hShift] || 0;
-            return countA - countB || (Math.random() - 0.5);
-          });
+          validCandidates.sort((a, b) => (shiftCounts[a][hShift] || 0) - (shiftCounts[b][hShift] || 0) || (Math.random() - 0.5));
 
           let chosenIdx = validCandidates[0];
           newSchedule[chosenIdx][dayIdx] = hShift;
           shiftCounts[chosenIdx][hShift] = (shiftCounts[chosenIdx][hShift] || 0) + 1;
-          
+
           if (isBonusDay) {
-            bonusHighHistory[chosenIdx][hShift] = true;
+            let key = `${chosenIdx}_${hShift}`;
+            globalBonusHistory[key] = (globalBonusHistory[key] || 0) + 1;
           }
         });
 
-        // B. 【条件：需先把一般岗位排完 才会轮到支援】
-        let unassignedShifts = normalShifts.filter(sName => {
-          return !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName);
-        });
-        // 随机打乱一般岗位顺序，避免固定前几个岗位抢人
+        // B. 【条件 5：一般岗位排完】
+        let unassignedShifts = normalShifts.filter(sName => !staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === sName));
         unassignedShifts.sort(() => Math.random() - 0.5);
 
         unassignedShifts.forEach(shiftName => {
-          let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => {
-            return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
-          });
-
+          let availableStaff = staffs.map((_, idx) => idx).filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "");
           if (availableStaff.length === 0) return;
 
-          let validCandidates = availableStaff.filter(sIdx => canAssignShift(sIdx, shiftName, false));
+          let validCandidates = availableStaff.filter(sIdx => canAssign(sIdx, shiftName, false));
+          if (validCandidates.length === 0) validCandidates = availableStaff;
 
-          if (validCandidates.length === 0) {
-            validCandidates = availableStaff;
-          }
-
-          validCandidates.sort((a, b) => {
-            let countA = shiftCounts[a][shiftName] || 0;
-            let countB = shiftCounts[b][shiftName] || 0;
-            return countA - countB || (Math.random() - 0.5);
-          });
+          validCandidates.sort((a, b) => (shiftCounts[a][shiftName] || 0) - (shiftCounts[b][shiftName] || 0) || (Math.random() - 0.5));
 
           let chosenIdx = validCandidates[0];
           newSchedule[chosenIdx][dayIdx] = shiftName;
           shiftCounts[chosenIdx][shiftName] = (shiftCounts[chosenIdx][shiftName] || 0) + 1;
         });
 
-        // C. 【条件：支援排在最后，且只能1次或0次，需每个人都轮过才可再次支援】
-        let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => {
-          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
-        });
-
+        // C. 【条件 5：排支援，支援只能1或0，全员轮过才可再次支援】
+        let unassignedStaff = staffs.map((_, idx) => idx).filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "");
         if (unassignedStaff.length > 0) {
-          // 支援岗位的轮流限制逻辑
-          unassignedStaff.forEach(sIdx => {
-            let supCount = shiftCounts[sIdx][supName] || 0;
-            let minSupCount = getShiftMinCount(supName);
+          unassignedStaff.sort((a, b) => {
+            let supA = globalSupportHistory[a] || 0;
+            let supB = globalSupportHistory[b] || 0;
+            return supA - supB || (Math.random() - 0.5);
+          });
 
-            // 必须等大家都拿过 N 次支援后，才允许拿第 N+1 次
+          unassignedStaff.forEach(sIdx => {
             newSchedule[sIdx][dayIdx] = supName;
-            shiftCounts[sIdx][supName] = supCount + 1;
+            shiftCounts[sIdx][supName] = (shiftCounts[sIdx][supName] || 0) + 1;
+            globalSupportHistory[sIdx] = (globalSupportHistory[sIdx] || 0) + 1;
           });
         }
       }
+
+      // -------------------------------------------------------------
+      // 3. 后置补漏机制（对所有 0 次岗位执行互换，并保持高强度连三限制）
+      // -------------------------------------------------------------
+      let unresolvableAlerts = [];
+
+      staffs.forEach((staff, sIdx) => {
+        allOfficialShifts.forEach(shiftName => {
+          let count = shiftCounts[sIdx][shiftName] || 0;
+
+          // 发现有正式岗位为 0 次！尝试全月互换
+          if (count === 0) {
+            let swappedSuccess = false;
+
+            for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+              if (swappedSuccess) break;
+
+              let currentShiftForS = newSchedule[sIdx][dayIdx];
+              // 排除休假、锁定、支援以及本来就只有1次的岗位（避免把别的岗位拉成0）
+              if (currentShiftForS === "休" || currentShiftForS === supName || lockedMap[sIdx][dayIdx]) continue;
+              if ((shiftCounts[sIdx][currentShiftForS] || 0) <= 1) continue;
+
+              // 寻找当天刚好排了 target shift (shiftName) 的同事
+              let targetPartnerIdx = staffs.findIndex((_, pIdx) => newSchedule[pIdx][dayIdx] === shiftName);
+
+              if (targetPartnerIdx !== -1 && !lockedMap[targetPartnerIdx][dayIdx]) {
+                let partnerCurrentCount = shiftCounts[targetPartnerIdx][shiftName] || 0;
+
+                // 对方必须够 2 次以上，才允许被换走
+                if (partnerCurrentCount >= 2) {
+                  // 虚拟互换尝试
+                  newSchedule[sIdx][dayIdx] = shiftName;
+                  newSchedule[targetPartnerIdx][dayIdx] = currentShiftForS;
+
+                  // 安全校验：检查互换后是否破坏“高强度连三天”
+                  let isAValid = !checkHighConsecutiveThree(newSchedule, sIdx, dayIdx, highShifts);
+                  let isBValid = !checkHighConsecutiveThree(newSchedule, targetPartnerIdx, dayIdx, highShifts);
+
+                  if (isAValid && isBValid) {
+                    // 互换生效，更新计数器
+                    shiftCounts[sIdx][currentShiftForS]--;
+                    shiftCounts[sIdx][shiftName] = (shiftCounts[sIdx][shiftName] || 0) + 1;
+
+                    shiftCounts[targetPartnerIdx][shiftName]--;
+                    shiftCounts[targetPartnerIdx][currentShiftForS] = (shiftCounts[targetPartnerIdx][currentShiftForS] || 0) + 1;
+
+                    swappedSuccess = true;
+                  } else {
+                    // 撤销互换
+                    newSchedule[sIdx][dayIdx] = currentShiftForS;
+                    newSchedule[targetPartnerIdx][dayIdx] = shiftName;
+                  }
+                }
+              }
+            }
+
+            // 实在找不到符合安全互换条件的，记录提示
+            if (!swappedSuccess) {
+              unresolvableAlerts.push(`员工【${staff.name || staff}】岗位【${shiftName}】当月为 0 次（受限于休假或高强度连三规则，需人工微调）`);
+            }
+          }
+        });
+      });
+
+      // 保存分红与支援的跨月记忆
+      localStorage.setItem('globalBonusHistory', JSON.stringify(globalBonusHistory));
+      localStorage.setItem('globalSupportHistory', JSON.stringify(globalSupportHistory));
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班成功！`;
-      alert(`[${monthKey}] 智能排班成功！已严格按照您的全套规则完成分配。`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
+
+      if (unresolvableAlerts.length > 0) {
+        alert(`[${monthKey}] 排班已完成！提示：以下情况受限于休假/高强度连三限制无法自动凑满，请手动调整：\n\n` + unresolvableAlerts.join("\n"));
+      } else {
+        alert(`[${monthKey}] 智能排班成功！已实现全员岗位非 0 且高度平均。`);
+      }
 
     } catch (err) {
       console.error(err);
