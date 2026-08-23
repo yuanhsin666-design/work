@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>排班系统 - 独立校验按钮版</title>
+  <title>排班系统 - 修正月休8-10天测试版</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -20,12 +20,12 @@
 <body>
 
 <div class="card">
-  <h2>排班系统验证面板</h2>
+  <h2>排班系统验证面板（已修正月休 8-10 天）</h2>
   <div style="margin-bottom: 10px;">
     <button class="btn" onclick="runStrictTest()">🚀 1. 运行排班与分配</button>
     <button class="btn btn-check" onclick="checkDailyDuplicates()">🔍 2. 运行每日岗位重复校验</button>
   </div>
-  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;">请先点击“运行排班与分配”生成排班表。</p>
+  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;">请点击“运行排班与分配”生成排班表（每人月休将严格锁定在 8-10 天）。</p>
 </div>
 
 <div class="card">
@@ -52,7 +52,7 @@
     { name: "TD\n5001\n以上", type: "TD" }
   ];
 
-  let globalSchedule = null; // 用于存储当前的排班数据以便校验
+  let globalSchedule = null; 
   let globalDays = 30;
   let globalSupportCounts = null;
 
@@ -61,10 +61,15 @@
     return shiftName.split('\n')[0].trim().toUpperCase();
   }
 
+  // 严格控制每个人月休 8-10 天的测试母体生成器
   function generateExactRests(days, staffCount) {
     let schedule = Array.from({ length: staffCount }, () => Array(days).fill(""));
     let restCounts = Array(staffCount).fill(0);
 
+    // 1. 先为每个人随机指派一个目标休假天数（8, 9 或 10 天）
+    let targetRestPerStaff = staffs.map(() => Math.floor(Math.random() * 3) + 8); // 8, 9, 10
+
+    // 2. 随机选出正好 5 天休 4 人，其余 25 天休 5 人
     let days4Rest = [];
     while(days4Rest.length < 5) {
       let d = Math.floor(Math.random() * days);
@@ -75,11 +80,17 @@
       let targetRestCount = days4Rest.includes(day) ? 4 : 5;
       let restedToday = 0;
       
-      let candidates = staffs.map((_, idx) => idx).sort((a, b) => restCounts[a] - restCounts[b]);
+      // 优先让还没达到目标休假天数的人休假
+      let candidates = staffs.map((_, idx) => idx).sort((a, b) => {
+        let diffA = targetRestPerStaff[a] - restCounts[a];
+        let diffB = targetRestPerStaff[b] - restCounts[b];
+        return diffB - diffA; // 差额越大的优先
+      });
+
       let shuffledCandidates = candidates.sort(() => Math.random() - 0.5);
 
       for (let sIdx of shuffledCandidates) {
-        if (restedToday < targetRestCount && restCounts[sIdx] < 10) {
+        if (restedToday < targetRestCount && restCounts[sIdx] < targetRestPerStaff[sIdx]) {
           schedule[sIdx][day] = "休";
           restCounts[sIdx]++;
           restedToday++;
@@ -146,10 +157,9 @@
     globalSupportCounts = supportCounts;
 
     renderTable(schedule, days, supportCounts);
-    document.getElementById('log').innerText = "✅ 排班生成完毕！现在你可以点击绿色按钮【执行每日岗位重复校验】来检查结果。";
+    document.getElementById('log').innerText = "✅ 排班生成完毕！请检查【总休】列，确保所有人的休假天数均严格在 8 到 10 天之间。";
   }
 
-  // 独立的校验按钮触发函数
   function checkDailyDuplicates() {
     if (!globalSchedule) {
       alert("请先点击“运行排班与分配”生成表格！");
@@ -160,7 +170,7 @@
     let errorDetails = [];
 
     for (let day = 0; day < globalDays; day++) {
-      let dailyShiftsSeen = new Map(); // 记录岗位名称 -> 员工姓名
+      let dailyShiftsSeen = new Map();
       
       staffs.forEach((staff, sIdx) => {
         let val = globalSchedule[sIdx][day];
@@ -192,7 +202,7 @@
     staffs.forEach((staff, sIdx) => {
       let restTotal = schedule[sIdx].filter(v => v === "休").length;
       let supTotal = supportCounts[sIdx];
-      html += `<tr><td class="staff-name">${staff.name}</td><td style="background:#fffbeb;">${restTotal}</td><td style="background:#e0f2fe; font-weight:bold;">${supTotal}</td>`;
+      html += `<tr><td class="staff-name">${staff.name}</td><td style="background:#fffbeb; font-weight:bold;">${restTotal}</td><td style="background:#e0f2fe; font-weight:bold;">${supTotal}</td>`;
       
       for(let d=0; d<days; d++) {
         let val = schedule[sIdx][d] || "";
