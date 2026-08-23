@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日详细记录版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 平均值上下浮动 ±1 计算版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -225,7 +225,6 @@
   let lockedMap = [];
   let isManualEditMode = false;
 
-  // 辅助函数：格式化岗位名称，若包含支援则只显示“支援”
   function getDisplayShiftName(name) {
     if (!name) return "";
     if (name.includes("支援")) return "支援";
@@ -760,7 +759,6 @@
             </td>
           `;
         } else {
-          // 在这里调用过滤，只显示“支援”或正常的岗位
           let cleanContent = getDisplayShiftName(cellContent);
           let displayTxt = cleanContent.replace(/\n/g, '<br>');
           html += `<td id="${cellId}" class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
@@ -883,8 +881,6 @@
         let countStyle = '';
         if (count === 0 && shiftName !== supportShift.name) {
           countStyle = 'color: #dc2626; background-color: #fee2e2; font-weight: bold;'; 
-        } else if (count > 2 && shiftName !== supportShift.name && baseShifts.find(s => s.name === shiftName)?.level === '高') {
-          countStyle = 'color: #15803d; background-color: #dcfce7; font-weight: bold;';
         } else if (shiftName === supportShift.name) {
           countStyle = 'color: #006064; font-weight: bold;';
         }
@@ -910,11 +906,40 @@
     let totalHigh = 0, totalMid = 0, totalLow = 0;
     let staffCount = staffs.length;
 
+    // 1. 先统计全员总次数，计算各自的平均值
+    staffs.forEach((staff, sIdx) => {
+      allShifts.forEach(shiftName => {
+        let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
+        let foundShift = baseShifts.find(s => s.name === shiftName);
+        if (foundShift) {
+          if (foundShift.level === '高') totalHigh += count;
+          else if (foundShift.level === '中') totalMid += count;
+          else if (foundShift.level === '低') totalLow += count;
+        } else if (shiftName === supportShift.name) {
+          if (supportShift.level === '高') totalHigh += count;
+          else if (supportShift.level === '中') totalMid += count;
+          else if (supportShift.level === '低') totalLow += count;
+        }
+      });
+    });
+
+    let avgHigh = staffCount > 0 ? (totalHigh / staffCount) : 0;
+    let avgMid = staffCount > 0 ? (totalMid / staffCount) : 0;
+    let avgLow = staffCount > 0 ? (totalLow / staffCount) : 0;
+
+    // 范围：平均值 - 1 ~ 平均值 + 1
+    let rangeHighMin = Math.max(0, (avgHigh - 1)).toFixed(1);
+    let rangeHighMax = (avgHigh + 1).toFixed(1);
+    let rangeMidMin = Math.max(0, (avgMid - 1)).toFixed(1);
+    let rangeMidMax = (avgMid + 1).toFixed(1);
+    let rangeLowMin = Math.max(0, (avgLow - 1)).toFixed(1);
+    let rangeLowMax = (avgLow + 1).toFixed(1);
+
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
           <th style="padding: 8px; width: 30%;">人员姓名</th>
-          <th style="padding: 8px; width: 70%;">当月岗位强度汇总记录 (目标：高6-8次、中8-10次、低4-6次)</th>
+          <th style="padding: 8px; width: 70%;">当月岗位强度汇总记录 (高目标: ${rangeHighMin}~${rangeHighMax}次、中目标: ${rangeMidMin}~${rangeMidMax}次、低目标: ${rangeLowMin}~${rangeLowMax}次)</th>
         </tr>
       </thead>
       <tbody>
@@ -937,10 +962,6 @@
         }
       });
 
-      totalHigh += highCount;
-      totalMid += midCount;
-      totalLow += lowCount;
-
       html += `
         <tr>
           <td class="staff-name" style="padding: 8px;">${staff.name}</td>
@@ -953,17 +974,13 @@
       `;
     });
 
-    let avgHigh = staffCount ? (totalHigh / staffCount).toFixed(1) : "0.0";
-    let avgMid = staffCount ? (totalMid / staffCount).toFixed(1) : "0.0";
-    let avgLow = staffCount ? (totalLow / staffCount).toFixed(1) : "0.0";
-
     html += `
       <tr style="background-color: #e2e8f0; font-weight: bold;">
-        <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均</td>
+        <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均与动态目标 (±1)</td>
         <td style="padding: 8px; text-align: center; font-size: 13px; white-space: nowrap;">
-          <span style="color: #c62828;">高每人平均 ${avgHigh} (目标6-8)</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #8c6b00;">中每人平均 ${avgMid} (目标8-10)</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #1b5e20;">低每人平均 ${avgLow} (目标4-6)</span>
+          <span style="color: #c62828;">高平均 ${avgHigh.toFixed(1)} (目标 ${rangeHighMin}~${rangeHighMax})</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #8c6b00;">中平均 ${avgMid.toFixed(1)} (目标 ${rangeMidMin}~${rangeMidMax})</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #1b5e20;">低平均 ${avgLow.toFixed(1)} (目标 ${rangeLowMin}~${rangeLowMax})</span>
         </td>
       </tr>
     `;
@@ -1008,7 +1025,6 @@
           const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
 
           if (mSched[rowIdx]) {
-            // 1号 (索引 0)
             let shift1 = mSched[rowIdx][0];
             if (shift1 && highShifts.includes(shift1)) {
               count1++;
@@ -1016,7 +1032,6 @@
               if (mKey === currentKey) shifts1Details.push(`[${mKey}] ${clean}`);
               allHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
             }
-            // 16号 (索引 15)
             let shift16 = mSched[rowIdx][15];
             if (shift16 && highShifts.includes(shift16)) {
               count16++;
@@ -1272,7 +1287,6 @@
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
-    let warningLogs = [];
 
     try {
       const year = parseInt(document.getElementById('yearSelect').value);
@@ -1499,8 +1513,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（分红日详细记录版）！`;
-      alert(`[${monthKey}] 智能排班完成！1号与16号分红日详细岗位记录已更新！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
+      alert(`[${monthKey}] 智能排班完成！`);
 
     } catch (err) {
       console.error(err);
