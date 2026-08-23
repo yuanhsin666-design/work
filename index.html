@@ -1246,7 +1246,6 @@
       }
     }
 
-    // 🔴 规则 1：严禁连续 3 天安排高强度岗位（连续上限 2 天）
     if (isHigh) {
       let consecutiveHigh = 1;
       for (let d = dayIdx - 1; d >= 0; d--) {
@@ -1264,7 +1263,6 @@
       if (consecutiveHigh >= 3) return false;
     }
 
-    // 🔴 规则 2：名称重叠避连排（连续两天排相同大类或名称如 TD、ND 等不得连续 2 天）
     if (category) {
       if (dayIdx > 0) {
         let prevCat = getShiftCategory(currentSchedule[sIdx][dayIdx - 1]);
@@ -1480,7 +1478,6 @@
         });
       }
 
-      // 🔴 关键增强：10轮严苛消零循环（保证每个人每个基础岗位绝对不为 0 次）
       for (let iteration = 0; iteration < 10; iteration++) {
         baseShifts.forEach(shiftObj => {
           let shiftName = shiftObj.name;
@@ -1503,7 +1500,6 @@
                 if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
                   let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
                   
-                  // 只要持有人次数大于1，或者为了消零哪怕持有人次数为1也可放宽尝试对调
                   if (holderCurCount > 1 || iteration >= 5) {
                     let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
                     let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
