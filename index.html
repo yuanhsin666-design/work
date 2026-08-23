@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>排班系统 - 真实体量第一部分验证</title>
+  <title>排班系统 - 第一部分升级（含支援岗兜底）</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -11,30 +11,28 @@
     th, td { border: 1px solid #ccc; padding: 4px; min-width: 55px; white-space: pre-line; }
     th { background: #1a4f8b; color: white; position: sticky; top: 0; }
     .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 2; }
-    .weekend { background: #fff0f0; color: #d9534f; }
-    .duplicate-error { background-color: #f8d7da !important; color: #842029 !important; border: 2px solid #dc2626 !important; font-weight: bold; }
+    .support-shift { background: #e0f2fe; color: #0369a1; font-weight: bold; }
+    .rest-shift { background: #f3f4f6; color: #9ca3af; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>真实体量验证：第一部分（全员17人、整月31天、基础防重复与连排约束）</h2>
-  <button onclick="runRealPart1Test()" style="background:#0066cc; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold;">🚀 运行全量第一部分测试</button>
-  <button onclick="validateTable()" style="background:#d97706; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold; margin-left: 10px;">🔍 校验同天重复岗位</button>
+  <h2>第一部分升级验证：17人全量 + 支援岗兜底（无“待调配”）</h2>
+  <button onclick="runSupportTest()" style="background:#0066cc; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold;">🚀 运行包含支援岗的测试</button>
   <p id="log" style="color: #666; font-size: 13px; margin-top: 10px;"></p>
 </div>
 
 <div class="card">
   <div class="table-container">
-    <table id="realTestTable"></table>
+    <table id="supportTestTable"></table>
   </div>
 </div>
 
 <script>
-  // 真实员工名单
   let staffs = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"].map(name => ({ name }));
   
-  // 真实所有基础岗位
+  // 12个正式岗位
   let baseShifts = [
     { name: "OL\nFB\nLY\nJY", type: "OL" },
     { name: "MT\nXO\nSH\nYS", type: "MT" },
@@ -51,45 +49,24 @@
   ];
 
   function getCategory(shiftName) {
-    if (!shiftName || shiftName === "休") return "";
+    if (!shiftName || shiftName === "休" || shiftName === "支援") return "";
     return shiftName.split('\n')[0].trim().toUpperCase();
   }
 
-  // 第一部分核心校验函数：休假、同天防重复、相同大类不连排
-  function isValidPart1(sIdx, dayIdx, shiftName, schedule, rests) {
-    if (shiftName === "休") return true;
-
-    // 1. 休假锁定检查
-    if (rests.includes(dayIdx + 1)) return false;
-
-    // 2. 同一天防重复检查（同一天不能有两个人拿同个岗位）
-    for (let i = 0; i < schedule.length; i++) {
-      if (i !== sIdx && schedule[i][dayIdx] === shiftName) return false;
-    }
-
-    // 3. 相同大类避连排（例如连续两天排 TD 类或 ND 类）
-    let currentCat = getCategory(shiftName);
-    if (currentCat && dayIdx > 0) {
-      let prevShift = schedule[sIdx][dayIdx - 1];
-      if (getCategory(prevShift) === currentCat) return false;
-    }
-
-    return true;
-  }
-
-  function runRealPart1Test() {
+  function runSupportTest() {
     let days = 31;
     let schedule = Array.from({ length: staffs.length }, () => Array(days).fill(""));
     
+    // 模拟随机休假
     let mockRests = {};
     staffs.forEach((_, sIdx) => {
       mockRests[sIdx] = [Math.floor(Math.random() * 5) + 1, Math.floor(Math.random() * 5) + 20];
     });
 
     for (let day = 0; day < days; day++) {
-      let assignedToday = new Set(); // 记录当天已经被拿走的岗位
+      let assignedToday = new Set();
       
-      // 先处理休假的人
+      // 1. 先标记休假
       staffs.forEach((staff, sIdx) => {
         let rests = mockRests[sIdx] || [];
         if (rests.includes(day + 1)) {
@@ -97,17 +74,13 @@
         }
       });
 
-      // 逐个给上班的人分配岗位，严格检查 assignedToday
+      // 2. 优先分配 12 个正式岗位
       staffs.forEach((staff, sIdx) => {
         if (schedule[sIdx][day] === "休") return;
+        if (assignedToday.size >= baseShifts.length) return; // 正式岗位分完了，留给后面走支援
 
-        let rests = mockRests[sIdx] || [];
-
-        // 筛选：1. 没被其他人拿过(不在assignedToday) 2. 符合大类不连排 3. 符合休假
         let availableShifts = baseShifts.filter(s => {
-          if (assignedToday.has(s.name)) return false; // 同天已有人拿，绝对排除！
-          
-          // 检查同大类避连排
+          if (assignedToday.has(s.name)) return false;
           let currentCat = getCategory(s.name);
           if (currentCat && day > 0) {
             let prevShift = schedule[sIdx][day - 1];
@@ -119,57 +92,23 @@
         if (availableShifts.length > 0) {
           let chosen = availableShifts[Math.floor(Math.random() * availableShifts.length)];
           schedule[sIdx][day] = chosen.name;
-          assignedToday.add(chosen.name); // 标记今天这个岗位已被占用
-        } else {
-          // 如果实在没得选了，给个标记避免崩掉，但绝不盲目重复
-          schedule[sIdx][day] = "待调配";
+          assignedToday.add(chosen.name);
+        }
+      });
+
+      // 3. 剩下的上班人员统一安排为“支援”
+      staffs.forEach((staff, sIdx) => {
+        if (schedule[sIdx][day] === "") {
+          schedule[sIdx][day] = "支援";
         }
       });
     }
 
     renderTable(schedule, days);
-    document.getElementById('log').innerText = "✅ 修正后的第一部分测试完成！快点【校验同天重复岗位】看看还有没有红框。";
-  }
-  function validateTable() {
-    let days = 31;
-    let duplicateFound = 0;
-    
-    // 清除旧高亮
-    document.querySelectorAll('td').forEach(td => td.classList.remove('duplicate-error'));
-
-    for (let day = 0; day < days; day++) {
-      let seenShifts = {};
-      staffs.forEach((_, sIdx) => {
-        let cell = document.getElementById(`cell_${sIdx}_${day}`);
-        if (!cell) return;
-        let val = cell.innerText.trim();
-        if (val && val !== "休") {
-          if (!seenShifts[val]) {
-            seenShifts[val] = [];
-          }
-          seenShifts[val].push(sIdx);
-        }
-      });
-
-      Object.keys(seenShifts).forEach(sh => {
-        if (seenShifts[sh].length > 1) {
-          duplicateFound++;
-          seenShifts[sh].forEach(sIdx => {
-            document.getElementById(`cell_${sIdx}_${day}`).classList.add('duplicate-error');
-          });
-        }
-      });
-    }
-
-    if (duplicateFound > 0) {
-      document.getElementById('log').innerHTML = `❌ 校验发现有 <b style="color:red;">${duplicateFound}</b> 处在同一天出现相同的岗位！已在表格中红框标出。`;
-    } else {
-      document.getElementById('log').innerHTML = `✅ 校验通过！整张表 31 天内**没有**任何同一天出现重复岗位的情况。`;
-    }
+    document.getElementById('log').innerText = "✅ 升级测试完成！所有原本的“待调配”现在都已自动转化为蓝色的【支援】岗位。";
   }
 
   function renderTable(schedule, days) {
-    let weekDays = ["日", "一", "二", "三", "四", "五", "六"];
     let html = `<thead><tr><th>姓名</th>`;
     for(let d=1; d<=days; d++) html += `<th>${d}</th>`;
     html += `</tr></thead><tbody>`;
@@ -178,12 +117,16 @@
       html += `<tr><td class="staff-name">${staff.name}</td>`;
       for(let d=0; d<days; d++) {
         let val = schedule[sIdx][d] || "";
-        html += `<td id="cell_${sIdx}_${d}">${val.replace(/\n/g, '<br>')}</td>`;
+        let cssClass = "";
+        if (val === "休") cssClass = "rest-shift";
+        else if (val === "支援") cssClass = "support-shift";
+        
+        html += `<td class="${cssClass}">${val.replace(/\n/g, '<br>')}</td>`;
       }
       html += `</tr>`;
     });
     html += `</tbody>`;
-    document.getElementById('realTestTable').innerHTML = html;
+    document.getElementById('supportTestTable').innerHTML = html;
   }
 </script>
 
