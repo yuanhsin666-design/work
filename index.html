@@ -78,46 +78,58 @@
   }
 
   function runRealPart1Test() {
-    let days = 31; // 满月 31 天
+    let days = 31;
     let schedule = Array.from({ length: staffs.length }, () => Array(days).fill(""));
     
-    // 模拟一些随机休假
     let mockRests = {};
     staffs.forEach((_, sIdx) => {
-      mockRests[sIdx] = [Math.floor(Math.random() * 10) + 1, Math.floor(Math.random() * 10) + 20];
+      mockRests[sIdx] = [Math.floor(Math.random() * 5) + 1, Math.floor(Math.random() * 5) + 20];
     });
 
     for (let day = 0; day < days; day++) {
-      let assignedToday = new Set();
+      let assignedToday = new Set(); // 记录当天已经被拿走的岗位
       
+      // 先处理休假的人
       staffs.forEach((staff, sIdx) => {
         let rests = mockRests[sIdx] || [];
         if (rests.includes(day + 1)) {
           schedule[sIdx][day] = "休";
-          return;
         }
+      });
 
-        // 寻找符合第一部分规则的可用岗位
-        let availableShifts = baseShifts.filter(s => 
-          !assignedToday.has(s.name) && 
-          isValidPart1(sIdx, day, s.name, schedule, rests)
-        );
+      // 逐个给上班的人分配岗位，严格检查 assignedToday
+      staffs.forEach((staff, sIdx) => {
+        if (schedule[sIdx][day] === "休") return;
+
+        let rests = mockRests[sIdx] || [];
+
+        // 筛选：1. 没被其他人拿过(不在assignedToday) 2. 符合大类不连排 3. 符合休假
+        let availableShifts = baseShifts.filter(s => {
+          if (assignedToday.has(s.name)) return false; // 同天已有人拿，绝对排除！
+          
+          // 检查同大类避连排
+          let currentCat = getCategory(s.name);
+          if (currentCat && day > 0) {
+            let prevShift = schedule[sIdx][day - 1];
+            if (getCategory(prevShift) === currentCat) return false;
+          }
+          return true;
+        });
 
         if (availableShifts.length > 0) {
           let chosen = availableShifts[Math.floor(Math.random() * availableShifts.length)];
           schedule[sIdx][day] = chosen.name;
-          assignedToday.add(chosen.name);
+          assignedToday.add(chosen.name); // 标记今天这个岗位已被占用
         } else {
-          // 如果实在找不到不冲突的，先临时分配一个
-          schedule[sIdx][day] = baseShifts[0].name;
+          // 如果实在没得选了，给个标记避免崩掉，但绝不盲目重复
+          schedule[sIdx][day] = "待调配";
         }
       });
     }
 
     renderTable(schedule, days);
-    document.getElementById('log').innerText = "✅ 全量（17人 31天）第一部分测试完成！请点击上方【校验同天重复岗位】按钮进行严格体检。";
+    document.getElementById('log').innerText = "✅ 修正后的第一部分测试完成！快点【校验同天重复岗位】看看还有没有红框。";
   }
-
   function validateTable() {
     let days = 31;
     let duplicateFound = 0;
