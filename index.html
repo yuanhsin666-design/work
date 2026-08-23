@@ -1122,12 +1122,16 @@
     renderSupportStaffTable(lastGeneratedSchedule);
   }
 
+  // -------------------------------------------------------------
+  // 📋 【已完美优化】复制整表到 Google 试算表（维持直式对齐）
+  // -------------------------------------------------------------
   async function copyTableWithStyles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
 
     const cloneTable = table.cloneNode(true);
     
+    // 如果处于手动修改模式，將下拉选单转为纯文本再复制
     if (tableId === 'scheduleTable' && isManualEditMode) {
       const selects = table.querySelectorAll('select.shift-select');
       const totalDays = getDaysInMonth(
@@ -1166,19 +1170,44 @@
       cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
     });
 
+    // 优化 HTML 包裹结构，強制指定表格方向，防止 Google Sheets 自动横转直
     const htmlWrapper = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="utf-8"><style>td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; } br { mso-data-placement: same-cell; }</style></head>
-      <body>${cloneTable.outerHTML}</body></html>`;
+      <head>
+        <meta charset="utf-8">
+        <style>
+          table { border-collapse: collapse; direction: ltr; }
+          td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; border: 0.5pt solid #ccc; }
+          br { mso-data-placement: same-cell; }
+        </style>
+      </head>
+      <body>
+        <table dir="ltr">${cloneTable.innerHTML}</table>
+      </body>
+      </html>`;
+
+    // 同时生成带 Tab (制表符) 的纯文字版本作为双重备份，确保 Google 试算表直式解析
+    let plainTextRows = [];
+    const rows = cloneTable.querySelectorAll('tr');
+    rows.forEach(row => {
+      let rowCells = [];
+      row.querySelectorAll('th, td').forEach(cell => {
+        rowCells.push(cell.innerText.replace(/🔒/g, '').replace(/\n/g, ' ').trim());
+      });
+      plainTextRows.push(rowCells.join('\t'));
+    });
+    const plainTextContent = plainTextRows.join('\n');
 
     try {
       if (navigator.clipboard && window.ClipboardItem) {
         const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
-        const blobText = new Blob([cloneTable.innerText], { type: "text/plain" });
+        const blobText = new Blob([plainTextContent], { type: "text/plain" });
         await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
-        alert("✅ 已复制表格！直接在 Excel 中按 Ctrl+V 粘贴即可！");
+        alert("✅ 已成功复制整表！请直接在 Google 试算表的 A1 储存格按 Ctrl+V 贴上，即可完美维持直式对齐与颜色！");
       }
-    } catch (err) { alert("复制失败，请重试。"); }
+    } catch (err) { 
+      alert("复制失败，请重试。"); 
+    }
   }
 
   function getShiftCategory(shiftName) {
@@ -1195,14 +1224,12 @@
     let isHigh = shiftObj && shiftObj.level === '高';
     let category = getShiftCategory(shiftName);
 
-    // 1. 核心铁律：检查当天是否已经有人被指派了相同的正式岗位
     for (let otherSIdx = 0; otherSIdx < currentSchedule.length; otherSIdx++) {
       if (otherSIdx !== sIdx && currentSchedule[otherSIdx][dayIdx] === shiftName) {
         return false;
       }
     }
 
-    // 2. 高强度连三限制 (连续上限 2 天)
     if (isHigh) {
       let consecutive = 1;
       for (let d = dayIdx - 1; d >= 0; d--) {
@@ -1220,7 +1247,6 @@
       if (consecutive >= 3) return false;
     }
 
-    // 3. 名称重叠/同大类避连排 (TD 类或 ND 类等连续两日不重复)
     if (category) {
       if (dayIdx > 0) {
         let prevCat = getShiftCategory(currentSchedule[sIdx][dayIdx - 1]);
@@ -1235,9 +1261,6 @@
     return true;
   }
 
-  // -------------------------------------------------------------
-  // 🎲 核心排班算法 (已全面修复：确保同一天绝不出现重复岗位)
-  // -------------------------------------------------------------
   async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
@@ -1291,7 +1314,6 @@
         }
       });
 
-      // 1. 载入锁定格子与休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1319,12 +1341,10 @@
         });
       }
 
-      // 2. 每日排班迴圈 (严格控制：同日岗位绝不重复)
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
-        // 2.1 支援岗位判定
         let assignedSupportStaffIdx = null;
         if (workingStaffs.length >= 13) {
           let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
@@ -1346,7 +1366,6 @@
           }
         }
 
-        // 2.2 依序填满所有正式岗位（打乱顺序防止每次都给同一个人）
         let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
         let highPriorityShifts = shuffledBaseShifts.filter(s => s.level === '高').map(s => s.name);
         let otherPriorityShifts = shuffledBaseShifts.filter(s => s.level !== '高').map(s => s.name);
@@ -1354,7 +1373,7 @@
 
         orderedBaseShifts.forEach(shiftName => {
           let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
-          if (alreadyAssigned) return; // 如果当天已经有人分配了这个岗位，跳过
+          if (alreadyAssigned) return;
 
           let foundS = baseShifts.find(s => s.name === shiftName);
           let level = foundS ? foundS.level : '中';
@@ -1397,7 +1416,6 @@
           }
         });
 
-        // 2.3 杜绝空白格：若还有上班人员没分到岗位，从“当天尚未被占用”的岗位中挑选
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
@@ -1415,7 +1433,6 @@
         });
       }
 
-      // 3. 【零次数二次扫尾与安全校验机制】
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
         let isHigh = shiftObj.level === '高';
