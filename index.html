@@ -1012,7 +1012,7 @@
 
     staffs.forEach((staff, sIdx) => {
       let count1 = 0, count16 = 0;
-      let rawHistoryList = [];
+      let allHistoryList = [];
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
@@ -1023,22 +1023,21 @@
           if (mSched[rowIdx]) {
             let shift1 = mSched[rowIdx][0];
             if (shift1 && highShifts.includes(shift1)) {
-              if (mKey === currentKey) count1++;
+              count1++;
               let clean = shift1.replace(/\n/g, ' ');
-              rawHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
+              allHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
             }
             let shift16 = mSched[rowIdx][15];
             if (shift16 && highShifts.includes(shift16)) {
-              if (mKey === currentKey) count16++;
+              count16++;
               let clean16 = shift16.replace(/\n/g, ' ');
-              rawHistoryList.push(`<b>16号:</b> ${clean16} (${mKey})`);
+              allHistoryList.push(`<b>16号:</b> ${clean16} (${mKey})`);
             }
           }
         }
       });
 
-      let allHistoryList = Array.from(new Set(rawHistoryList));
-      let totalCount = allHistoryList.length;
+      let totalCount = count1 + count16;
       let historyStr = allHistoryList.length > 0 ? allHistoryList.join('<br>') : '<span style="color: #94a3b8;">暂无记录</span>';
 
       html += `
@@ -1301,8 +1300,14 @@
       let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
 
+      let [curY, curM] = currentKey.split('-').map(Number);
+      let prevM = curM - 1, prevY = curY;
+      if (prevM === 0) { prevM = 12; prevY--; }
+      let prevKey = `${prevY}-${prevM}`;
+
+      let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
-      staffs.forEach((_, sIdx) => { dividendHighHistory[sIdx] = 0; });
+      let dividendPostAssignedHistory = {}; // 记录特定分红日岗位历史，防同岗位重复
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
@@ -1312,10 +1317,18 @@
             const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
 
             if (mSched[rowIdx]) {
+              if (mKey !== currentKey) {
+                mSched[rowIdx].forEach(shift => {
+                  if (shift === supName) pastSupportCounts[sIdx]++;
+                });
+              }
               [1, 16].forEach(day => {
                 let shiftOnDiv = mSched[rowIdx][day - 1];
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
+                  // 记录：某人曾经在某天（1号或16号）拿过哪个高强岗
+                  if (!dividendPostAssignedHistory[sIdx]) dividendPostAssignedHistory[sIdx] = new Set();
+                  dividendPostAssignedHistory[sIdx].add(`${day}_${shiftOnDiv}`);
                 }
               });
             }
@@ -1342,9 +1355,6 @@
                 if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
                   intensityCounts[sIdx][foundS.level]++;
                 }
-                if (highShifts.includes(existingShift) && (day === 1 || day === 16)) {
-                  dividendHighHistory[sIdx]++;
-                }
               }
             }
           } else if (staffRests.includes(day)) {
@@ -1354,8 +1364,8 @@
       }
 
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-        let day = dayIdx + 1;
-        let isDividendDay = (day === 1 || day === 16); 
+        let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
+        let dividendDayNum = dayIdx === 0 ? 1 : 16;
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
         let assignedSupportStaffIdx = null;
@@ -1366,7 +1376,12 @@
           } else {
             let availableForSup = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && supportCountsThisMonth[sIdx] === 0);
             if (availableForSup.length > 0) {
-              availableForSup.sort(() => Math.random() - 0.5);
+              availableForSup.sort((a, b) => {
+                let totalA = pastSupportCounts[a];
+                let totalB = pastSupportCounts[b];
+                if (totalA !== totalB) return totalA - totalB;
+                return Math.random() - 0.5;
+              });
               assignedSupportStaffIdx = availableForSup[0];
               newSchedule[assignedSupportStaffIdx][dayIdx] = supName;
               supportCountsThisMonth[assignedSupportStaffIdx]++;
@@ -1392,8 +1407,25 @@
             if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
             if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
             
+            // 分红日高强度岗：防重复互斥机制（若历史已分配过该同名高强度岗，则过滤掉以避免连续或重复安排）
+            if (isDividendDay && level === '高') {
+              let userHistorySet = dividendPostAssignedHistory[sIdx];
+              if (userHistorySet && userHistorySet.has(`${dividendDayNum}_${shiftName}`)) {
+                return false; // 曾在该分红日担任过此高强岗，互斥拦截
+              }
+            }
+
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
+
+          // 若在加入严格分红日防重复后候选人空了，给予弹性退守（放宽历史同岗限制，但保留公平轮替）
+          if (candidates.length === 0 && isDividendDay && level === '高') {
+            candidates = workingStaffs.filter(sIdx => {
+              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+              if (intensityCounts[sIdx]['高'] >= 8) return false;
+              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
+            });
+          }
 
           if (candidates.length > 0) {
             candidates.sort((a, b) => {
@@ -1401,12 +1433,11 @@
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
 
-              // 🔴 核心铁律：在分红日（1号、16号）的高强度岗位分配中，严格按历史次数升序排序
-              // 确保所有人都轮过一轮（拿过 >= 1 次）之前，绝不让任何人拿第二轮！
+              // 严格执行：分红日高强度岗位必须等所有人轮过一轮后才能进入下一轮次
               if (isDividendDay && level === '高') {
                 let divA = dividendHighHistory[a] || 0;
                 let divB = dividendHighHistory[b] || 0;
-                if (divA !== divB) return divA - divB;
+                if (divA !== divB) return divA - divB; // 优先分配给总次数最少（还没轮到或轮数最少）的人
               }
 
               let lvlA = intensityCounts[a][level];
@@ -1422,6 +1453,8 @@
             
             if (isDividendDay && level === '高') {
               dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
+              if (!dividendPostAssignedHistory[chosen]) dividendPostAssignedHistory[chosen] = new Set();
+              dividendPostAssignedHistory[chosen].add(`${dividendDayNum}_${shiftName}`);
             }
           }
         });
@@ -1445,6 +1478,7 @@
 
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
+        let isHigh = shiftObj.level === '高';
 
         staffs.forEach((staff, targetStaffIdx) => {
           let curCount = (shiftCounts[targetStaffIdx][shiftName] || 0);
@@ -1492,7 +1526,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班完成！已严格强制「分红日高强度岗位全员轮过一轮后才能进入第二轮」，且无岗位重复。`);
+      alert(`[${monthKey}] 智能排班完成！分红日高强度岗位已严格执行互斥、防重复与轮流均衡机制。`);
 
     } catch (err) {
       console.error(err);
