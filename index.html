@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>排班系统 - 修正月休8-10天测试版</title>
+  <title>排班系统 - 杜绝空白格修正版</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -20,12 +20,12 @@
 <body>
 
 <div class="card">
-  <h2>排班系统验证面板（已修正月休 8-10 天）</h2>
+  <h2>排班系统验证面板（杜绝空白格）</h2>
   <div style="margin-bottom: 10px;">
     <button class="btn" onclick="runStrictTest()">🚀 1. 运行排班与分配</button>
-    <button class="btn btn-check" onclick="checkDailyDuplicates()">🔍 2. 运行每日岗位重复校验</button>
+    <button class="btn btn-check" onclick="checkDailyBlanksAndDuplicates()">🔍 2. 运行每日空白与重复校验</button>
   </div>
-  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;">请点击“运行排班与分配”生成排班表（每人月休将严格锁定在 8-10 天）。</p>
+  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;">请点击“运行排班与分配”生成排班表。</p>
 </div>
 
 <div class="card">
@@ -54,22 +54,17 @@
 
   let globalSchedule = null; 
   let globalDays = 30;
-  let globalSupportCounts = null;
 
   function getCategory(shiftName) {
     if (!shiftName || shiftName === "休" || shiftName === "支援") return "";
     return shiftName.split('\n')[0].trim().toUpperCase();
   }
 
-  // 严格控制每个人月休 8-10 天的测试母体生成器
   function generateExactRests(days, staffCount) {
     let schedule = Array.from({ length: staffCount }, () => Array(days).fill(""));
     let restCounts = Array(staffCount).fill(0);
+    let targetRestPerStaff = staffs.map(() => Math.floor(Math.random() * 3) + 8); // 8-10天
 
-    // 1. 先为每个人随机指派一个目标休假天数（8, 9 或 10 天）
-    let targetRestPerStaff = staffs.map(() => Math.floor(Math.random() * 3) + 8); // 8, 9, 10
-
-    // 2. 随机选出正好 5 天休 4 人，其余 25 天休 5 人
     let days4Rest = [];
     while(days4Rest.length < 5) {
       let d = Math.floor(Math.random() * days);
@@ -80,11 +75,10 @@
       let targetRestCount = days4Rest.includes(day) ? 4 : 5;
       let restedToday = 0;
       
-      // 优先让还没达到目标休假天数的人休假
       let candidates = staffs.map((_, idx) => idx).sort((a, b) => {
         let diffA = targetRestPerStaff[a] - restCounts[a];
         let diffB = targetRestPerStaff[b] - restCounts[b];
-        return diffB - diffA; // 差额越大的优先
+        return diffB - diffA;
       });
 
       let shuffledCandidates = candidates.sort(() => Math.random() - 0.5);
@@ -107,23 +101,23 @@
     let supportCounts = Array(staffs.length).fill(0);
 
     for (let day = 0; day < days; day++) {
-      let assignedToday = new Set();
       let workingStaffs = [];
-
       staffs.forEach((_, sIdx) => {
         if (schedule[sIdx][day] !== "休") {
           workingStaffs.push(sIdx);
         }
       });
 
-      // 1. 严格先排满 12 个正式岗位
-      let shuffledWorkers = [...workingStaffs].sort(() => Math.random() - 0.5);
-      
-      shuffledWorkers.forEach(sIdx => {
-        if (assignedToday.size >= baseShifts.length) return;
+      let unassignedWorkers = [...workingStaffs].sort(() => Math.random() - 0.5);
+      let availableShifts = [...baseShifts].sort(() => Math.random() - 0.5);
 
-        let availableShifts = baseShifts.filter(s => {
-          if (assignedToday.has(s.name)) return false;
+      // 1. 优先安排满足连续同类限制的岗位
+      let assignedToday = new Set();
+      unassignedWorkers.forEach(sIdx => {
+        if (availableShifts.length === 0) return;
+
+        // 找一个不违反连续同类限制的岗位
+        let shiftIdx = availableShifts.findIndex(s => {
           let currentCat = getCategory(s.name);
           if (currentCat && day > 0) {
             let prevShift = schedule[sIdx][day - 1];
@@ -132,52 +126,63 @@
           return true;
         });
 
-        if (availableShifts.length > 0) {
-          let chosen = availableShifts[Math.floor(Math.random() * availableShifts.length)];
-          schedule[sIdx][day] = chosen.name;
-          assignedToday.add(chosen.name);
-        }
+        // 如果严格限制下找不到，放宽限制，直接从剩余岗位拿一个
+        if (shiftIdx === -1) shiftIdx = 0;
+
+        let chosenShift = availableShifts.splice(shiftIdx, 1)[0];
+        schedule[sIdx][day] = chosenShift.name;
+        assignedToday.add(sIdx);
       });
 
-      // 2. 支援岗逻辑
-      if (workingStaffs.length >= 13) {
-        let unassignedWorking = workingStaffs.filter(sIdx => schedule[sIdx][day] === "");
-        if (unassignedWorking.length > 0) {
-          unassignedWorking.sort((a, b) => supportCounts[a] - supportCounts[b]);
-          let targetStaff = unassignedWorking[0];
-          if (supportCounts[targetStaff] === 0) {
-            schedule[targetStaff][day] = "支援";
-            supportCounts[targetStaff]++;
-          }
+      // 更新未分配正式岗位的人
+      let remainingWorkers = workingStaffs.filter(sIdx => !assignedToday.has(sIdx));
+
+      // 2. 如果上班人数 >= 13，把多出的人安排为支援
+      if (workingStaffs.length >= 13 && remainingWorkers.length > 0) {
+        remainingWorkers.sort((a, b) => supportCounts[a] - supportCounts[b]);
+        let targetStaff = remainingWorkers[0];
+        if (supportCounts[targetStaff] === 0) {
+          schedule[targetStaff][day] = "支援";
+          supportCounts[targetStaff]++;
+          remainingWorkers.shift();
         }
       }
+
+      // 3. 终极兜底：如果还有任何上班的人没被安排（绝对不许出现空白格），强行补上剩余正式岗位或支援
+      remainingWorkers.forEach(sIdx => {
+        if (availableShifts.length > 0) {
+          let chosenShift = availableShifts.pop();
+          schedule[sIdx][day] = chosenShift.name;
+        } else {
+          schedule[sIdx][day] = "支援"; // 万一没有正式岗位了就归为支援
+        }
+      });
     }
 
     globalSchedule = schedule;
-    globalSupportCounts = supportCounts;
-
     renderTable(schedule, days, supportCounts);
-    document.getElementById('log').innerText = "✅ 排班生成完毕！请检查【总休】列，确保所有人的休假天数均严格在 8 到 10 天之间。";
+    document.getElementById('log').innerText = "✅ 排班生成完毕！所有上班员工均已填满岗位或支援，没有空白格。";
   }
 
-  function checkDailyDuplicates() {
+  function checkDailyBlanksAndDuplicates() {
     if (!globalSchedule) {
       alert("请先点击“运行排班与分配”生成表格！");
       return;
     }
 
-    let totalErrors = 0;
-    let errorDetails = [];
+    let blankErrors = 0;
+    let duplicateErrors = 0;
 
     for (let day = 0; day < globalDays; day++) {
       let dailyShiftsSeen = new Map();
       
       staffs.forEach((staff, sIdx) => {
         let val = globalSchedule[sIdx][day];
-        if (val && val !== "休" && val !== "支援") {
+        if (val === "") {
+          blankErrors++;
+        } else if (val !== "休" && val !== "支援") {
           if (dailyShiftsSeen.has(val)) {
-            totalErrors++;
-            errorDetails.push(`第 ${day + 1} 天：岗位【${val.replace(/\n/g, ' ')}】被 ${dailyShiftsSeen.get(val)} 和 ${staff.name} 同时撞岗！`);
+            duplicateErrors++;
           } else {
             dailyShiftsSeen.set(val, staff.name);
           }
@@ -185,12 +190,12 @@
       });
     }
 
-    if (totalErrors === 0) {
-      document.getElementById('log').innerText = `🔍 校验通过！全月 30 天中，没有发现任何一天有正式岗位重复撞车的情况。`;
-      alert("校验通过！没有发现岗位重复。");
+    if (blankErrors === 0 && duplicateErrors === 0) {
+      document.getElementById('log').innerText = `🔍 校验通过！全月 30 天中：0 个空白格，0 个重复岗位。完美！`;
+      alert("校验通过！没有空白格，也没有岗位重复。");
     } else {
-      document.getElementById('log').innerHTML = `❌ 发现 ${totalErrors} 处重复错误：<br>` + errorDetails.join("<br>");
-      alert(`发现 ${totalErrors} 处岗位重复，详情请看上方日志！`);
+      document.getElementById('log').innerText = `❌ 校验发现异常：空白格 ${blankErrors} 个，重复岗位 ${duplicateErrors} 处。`;
+      alert(`发现异常：空白格 ${blankErrors} 个，重复岗位 ${duplicateErrors} 处。`);
     }
   }
 
@@ -201,7 +206,7 @@
 
     staffs.forEach((staff, sIdx) => {
       let restTotal = schedule[sIdx].filter(v => v === "休").length;
-      let supTotal = supportCounts[sIdx];
+      let supTotal = schedule[sIdx].filter(v => v === "支援").length;
       html += `<tr><td class="staff-name">${staff.name}</td><td style="background:#fffbeb; font-weight:bold;">${restTotal}</td><td style="background:#e0f2fe; font-weight:bold;">${supTotal}</td>`;
       
       for(let d=0; d<days; d++) {
