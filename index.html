@@ -1428,24 +1428,27 @@
           }
 
           if (candidates.length > 0) {
-            candidates.sort((a, b) => {
+           candidates.sort((a, b) => {
+              // 1. 核心改进：优先让累积总次数为 0 的人上（彻底消灭 0 次）
+              let divA = dividendHighHistory[a] || 0;
+              let divB = dividendHighHistory[b] || 0;
+              if (divA === 0 && divB > 0) return -1; // a 是 0 次，优先排前面
+              if (divB === 0 && divA > 0) return 1;  // b 是 0 次，优先排前面
+
+              // 2. 其次按照分红日高强度历史总次数由少到多排序
+              if (divA !== divB) return divA - divB;
+
+              // 3. 岗位自身均衡
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
 
-              // 严格执行：分红日高强度岗位必须等所有人轮过一轮后才能进入下一轮次
-              if (isDividendDay && level === '高') {
-                let divA = dividendHighHistory[a] || 0;
-                let divB = dividendHighHistory[b] || 0;
-                if (divA !== divB) return divA - divB; // 优先分配给总次数最少（还没轮到或轮数最少）的人
-              }
-
               let lvlA = intensityCounts[a][level];
               let lvlB = intensityCounts[b][level];
               if (lvlA !== lvlB) return lvlA - lvlB;
+              
               return Math.random() - 0.5;
             });
-
             let chosen = candidates[0];
             newSchedule[chosen][dayIdx] = shiftName;
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
