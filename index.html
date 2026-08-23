@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>排班系统 - 严格支援分配逻辑修正版</title>
+  <title>排班系统 - 支援修复 + 每日重复校验版</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -13,14 +13,17 @@
     .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 2; }
     .support-shift { background: #e0f2fe; color: #0369a1; font-weight: bold; }
     .rest-shift { background: #f3f4f6; color: #9ca3af; }
+    .btn { background:#0066cc; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold; margin-right: 10px; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>严格校验版：先正式岗位，后按规则分派支援</h2>
-  <button onclick="runStrictTest()" style="background:#0066cc; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold;">🚀 运行严格排班测试</button>
-  <p id="log" style="color: #666; font-size: 13px; margin-top: 10px;"></p>
+  <h2>排班验证：支援逻辑修复 + 每日岗位重复校验</h2>
+  <div>
+    <button class="btn" onclick="runStrictTest()">🚀 运行排班与校验</button>
+  </div>
+  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;"></p>
 </div>
 
 <div class="card">
@@ -57,7 +60,6 @@
     let schedule = Array.from({ length: staffCount }, () => Array(days).fill(""));
     let restCounts = Array(staffCount).fill(0);
 
-    // 随机选出正好 5 天休 4 人
     let days4Rest = [];
     while(days4Rest.length < 5) {
       let d = Math.floor(Math.random() * days);
@@ -85,13 +87,13 @@
   function runStrictTest() {
     let days = 30;
     let schedule = generateExactRests(days, staffs.length);
-    let supportCounts = Array(staffs.length).fill(0); // 记录每个人全月支援次数
+    let supportCounts = Array(staffs.length).fill(0);
+    let duplicateErrors = 0;
 
     for (let day = 0; day < days; day++) {
       let assignedToday = new Set();
       let workingStaffs = [];
 
-      // 收集当天上班的人
       staffs.forEach((_, sIdx) => {
         if (schedule[sIdx][day] !== "休") {
           workingStaffs.push(sIdx);
@@ -102,7 +104,7 @@
       let shuffledWorkers = [...workingStaffs].sort(() => Math.random() - 0.5);
       
       shuffledWorkers.forEach(sIdx => {
-        if (assignedToday.size >= baseShifts.length) return; // 正式岗位排满了
+        if (assignedToday.size >= baseShifts.length) return;
 
         let availableShifts = baseShifts.filter(s => {
           if (assignedToday.has(s.name)) return false;
@@ -121,17 +123,24 @@
         }
       });
 
-      // 2. 正式岗位排完后，检查是否需要且可以排支援（规则：上班人数 < 13 则留空，不排支援）
-      if (workingStaffs.length >= 13) {
-        // 找出今天还没被分配正式岗位的人
-        let unassignedWorking = workingStaffs.filter(sIdx => schedule[sIdx][day] === "");
+      // 2. 检查当日是否有岗位重复（校验逻辑）
+      let dailyShiftsSeen = new Set();
+      staffs.forEach((_, sIdx) => {
+        let val = schedule[sIdx][day];
+        if (val && val !== "休" && val !== "支援") {
+          if (dailyShiftsSeen.has(val)) {
+            duplicateErrors++;
+          }
+          dailyShiftsSeen.add(val);
+        }
+      });
 
+      // 3. 支援岗逻辑
+      if (workingStaffs.length >= 13) {
+        let unassignedWorking = workingStaffs.filter(sIdx => schedule[sIdx][day] === "");
         if (unassignedWorking.length > 0) {
-          // 优先挑选：本月支援次数最少（比如 0 次）的人
           unassignedWorking.sort((a, b) => supportCounts[a] - supportCounts[b]);
-          
           let targetStaff = unassignedWorking[0];
-          // 只有当这个人本月还没支援过（supportCounts === 0）时才给他排
           if (supportCounts[targetStaff] === 0) {
             schedule[targetStaff][day] = "支援";
             supportCounts[targetStaff]++;
@@ -141,7 +150,13 @@
     }
 
     renderTable(schedule, days, supportCounts);
-    document.getElementById('log').innerText = "✅ 严格校验版测试完成！请检查右侧【总支援】列，确保每个人最多 1 次，且总支援天数完全吻合。";
+    let logText = `✅ 排班测试完成！【总支援】列每个人均不超过 1 次。`;
+    if (duplicateErrors === 0) {
+      logText += ` 🔍 每日重复性校验：通过！没有发现任何一天有重复岗位撞车。`;
+    } else {
+      logText += ` ❌ 警告：发现 ${duplicateErrors} 处同天岗位重复！`;
+    }
+    document.getElementById('log').innerText = logText;
   }
 
   function renderTable(schedule, days, supportCounts) {
