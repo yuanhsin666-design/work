@@ -1475,7 +1475,6 @@
         });
       }
 
-      // 强力平摊修正：确保全月各岗位均分，严禁出现 0 次（强化防漏版）
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
 
@@ -1496,7 +1495,7 @@
               if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
                 let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
                 
-                if (holderCurCount > 1 || holderCurCount > (shiftCounts[targetStaffIdx][shiftName] || 0)) {
+                if (holderCurCount >= 2) {
                   let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
                   let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
 
@@ -1511,34 +1510,6 @@
 
                     successFix = true;
                     break;
-                  }
-                }
-              }
-            }
-
-            if (!successFix) {
-              let eligibleHolders = staffs
-                .map((_, sIdx) => ({ sIdx, count: shiftCounts[sIdx][shiftName] || 0 }))
-                .filter(item => item.sIdx !== targetStaffIdx && item.count > 1)
-                .sort((a, b) => b.count - a.count);
-
-              for (let holder of eligibleHolders) {
-                if (successFix) break;
-                for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-                  if (newSchedule[holder.sIdx][dayIdx] === shiftName && !lockedMap[holder.sIdx][dayIdx] && !lockedMap[targetStaffIdx][dayIdx]) {
-                    let oldTargetShift = newSchedule[targetStaffIdx][dayIdx];
-                    if (oldTargetShift !== "休" && oldTargetShift !== supName) {
-                      newSchedule[targetStaffIdx][dayIdx] = shiftName;
-                      newSchedule[holder.sIdx][dayIdx] = oldTargetShift;
-
-                      shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
-                      shiftCounts[targetStaffIdx][oldTargetShift]--;
-                      shiftCounts[holder.sIdx][shiftName]--;
-                      shiftCounts[holder.sIdx][oldTargetShift] = (shiftCounts[holder.sIdx][oldTargetShift] || 0) + 1;
-
-                      successFix = true;
-                      break;
-                    }
                   }
                 }
               }
