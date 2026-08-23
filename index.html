@@ -1240,29 +1240,38 @@
     let isHigh = shiftObj && shiftObj.level === '高';
     let category = getShiftCategory(shiftName);
 
+    // 1. 同一天不能重复安排相同岗位
     for (let otherSIdx = 0; otherSIdx < currentSchedule.length; otherSIdx++) {
       if (otherSIdx !== sIdx && currentSchedule[otherSIdx][dayIdx] === shiftName) {
         return false;
       }
     }
 
+    // 2. 防疲劳限制：限制连续高强度班次不能超过 2 天（即最多连续 2 天高强度，第 3 天禁止再排高强度）
     if (isHigh) {
-      let consecutiveHigh = 1;
+      let consecutiveHighBefore = 0;
       for (let d = dayIdx - 1; d >= 0; d--) {
         let pS = currentSchedule[sIdx][d];
         let pObj = baseShifts.find(s => s.name === pS);
-        if (pObj && pObj.level === '高') consecutiveHigh++;
+        if (pObj && pObj.level === '高') consecutiveHighBefore++;
         else break;
       }
+
+      let consecutiveHighAfter = 0;
       for (let d = dayIdx + 1; d < totalDays; d++) {
         let nS = currentSchedule[sIdx][d];
         let nObj = baseShifts.find(s => s.name === nS);
-        if (nObj && nObj.level === '高') consecutiveHigh++;
+        if (nObj && nObj.level === '高') consecutiveHighAfter++;
         else break;
       }
-      if (consecutiveHigh >= 3) return false;
+
+      // 如果前后夹起来导致连续高强度天数 >= 3，则判定当前分配无效，强制打散！
+      if (consecutiveHighBefore + 1 + consecutiveHighAfter >= 3) {
+        return false;
+      }
     }
 
+    // 3. 相同大类岗位不能连续两天出现
     if (category) {
       if (dayIdx > 0) {
         let prevCat = getShiftCategory(currentSchedule[sIdx][dayIdx - 1]);
