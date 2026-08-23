@@ -1131,39 +1131,17 @@
   // -------------------------------------------------------------
   // 📋 【支援 \n 自动转直式】复制整表到 Google 试算表
   // -------------------------------------------------------------
-  async function copyTableWithStyles(tableId) {
+ async function copyTableWithStyles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
 
     const cloneTable = table.cloneNode(true);
-    
-    // 如果处于手动修改模式，将下拉选单转为纯文本再复制
-    if (tableId === 'scheduleTable' && isManualEditMode) {
-      const selects = table.querySelectorAll('select.shift-select');
-      const totalDays = getDaysInMonth(
-        parseInt(document.getElementById('yearSelect').value),
-        parseInt(document.getElementById('monthSelect').value)
-      );
-
-      staffs.forEach((_, sIdx) => {
-        for (let d = 0; d < totalDays; d++) {
-          const select = selects[sIdx * totalDays + d];
-          if (select) {
-            const val = select.options[select.selectedIndex].text;
-            const targetTd = cloneTable.querySelectorAll('tbody tr')[sIdx].querySelectorAll('td')[d + 1];
-            if (targetTd) targetTd.innerText = (val.includes('-- 未安排 --')) ? '' : val;
-          }
-        }
-      });
-    }
-
     const origCells = table.querySelectorAll('th, td');
     const cloneCells = cloneTable.querySelectorAll('th, td');
 
     origCells.forEach((origCell, index) => {
       const computed = window.getComputedStyle(origCell);
       const cloneCell = cloneCells[index];
-      if (!cloneCell) return;
       cloneCell.style.backgroundColor = computed.backgroundColor;
       cloneCell.style.color = computed.color;
       cloneCell.style.fontWeight = computed.fontWeight;
@@ -1172,11 +1150,11 @@
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
       
-      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
+      let cellText = (origCell.innerText || origCell.textContent).replace(/🔒/g, '').trim();
       
-      // 🌟 关键修正：把文字里输入的字面上的 "\n" 转换成真正的程序换行符
+      // 🌟 关键修复：把字面上的 \n 或真正的换行全部转成 Excel 换行标签
       cellText = cellText.replace(/\\n/g, '\n');
-
+      
       if (cellText.includes('\n')) {
         let lines = cellText.split('\n');
         cloneCell.innerHTML = lines.join('<br style="mso-data-placement:same-cell;">');
@@ -1185,48 +1163,19 @@
       }
     });
 
-    let plainTextRows = [];
-    const rows = cloneTable.querySelectorAll('tr');
-    rows.forEach(row => {
-      let rowCells = [];
-      row.querySelectorAll('th, td').forEach(cell => {
-        let t = (cell.innerText || cell.textContent).replace(/🔒/g, '').trim();
-        t = t.replace(/\\n/g, '\n'); // 同步处理纯文字
-        if (t.includes('\n')) {
-          rowCells.push(`"${t}"`);
-        } else {
-          rowCells.push(t);
-        }
-      });
-      plainTextRows.push(rowCells.join('\t'));
-    });
-    const plainTextContent = plainTextRows.join('\n');
-
     const htmlWrapper = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="utf-8">
-        <style>
-          table { border-collapse: collapse; direction: ltr; }
-          td, th { mso-number-format: '\\@'; white-space: pre-wrap; vertical-align: middle; text-align: center; border: 0.5pt solid #ccc; }
-          br { mso-data-placement: same-cell; }
-        </style>
-      </head>
-      <body>
-        <table dir="ltr">${cloneTable.innerHTML}</table>
-      </body>
-      </html>`;
+      <head><meta charset="utf-8"><style>td, th { mso-number-format: '\\@'; white-space: pre-wrap; vertical-align: middle; text-align: center; } br { mso-data-placement: same-cell; }</style></head>
+      <body>${cloneTable.outerHTML}</body></html>`;
 
     try {
       if (navigator.clipboard && window.ClipboardItem) {
         const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
-        const blobText = new Blob([plainTextContent], { type: "text/plain" });
+        const blobText = new Blob([cloneTable.innerText], { type: "text/plain" });
         await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
-        alert("✅ 已完美复制！试算表将自动辨识 \\n 并转为直式换行。");
+        alert("✅ 已成功复制（已完美支援 \\n 直式换行）！直接贴到试算表即可！");
       }
-    } catch (err) { 
-      alert("复制失败，请重试。"); 
-    }
+    } catch (err) { alert("复制失败，请重试。"); }
   }
 
   function getShiftCategory(shiftName) {
