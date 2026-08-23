@@ -176,7 +176,7 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计)</h3>
+    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计)[cite: 3]</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
@@ -1327,7 +1327,9 @@
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
                   if (!dividendPostAssignedHistory[sIdx]) dividendPostAssignedHistory[sIdx] = new Set();
+                  // 记录具体拿过哪一天以及哪个岗位，防止再次拿到相同岗位
                   dividendPostAssignedHistory[sIdx].add(`${day}_${shiftOnDiv}`);
+                  // 为了实现“所有人轮替过一次才能再轮第二次”，也记录岗位名称本身
                   dividendPostAssignedHistory[sIdx].add(`shift_${shiftOnDiv}`);
                 }
               });
@@ -1403,10 +1405,11 @@
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-            if (level === '高' && intensityCounts[sIdx]['高'] >= 2) return false;
-            if (level === '中' && intensityCounts[sIdx]['中'] >= 12) return false;
-            if (level === '低' && intensityCounts[sIdx]['低'] >= 10) return false;
+            if (level === '高' && intensityCounts[sIdx]['高'] >= 8) return false;
+            if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
+            if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
             
+            // 分红日高强度岗：严格互斥机制（不得拿过相同岗位，如yd拿过不能再拿yd）
             if (isDividendDay && level === '高') {
               let userHistorySet = dividendPostAssignedHistory[sIdx];
               if (userHistorySet && (userHistorySet.has(`${dividendDayNum}_${shiftName}`) || userHistorySet.has(`shift_${shiftName}`))) {
@@ -1417,23 +1420,27 @@
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
+          // 弹性退守：如果所有人都在历史拿过导致候选人为0，放宽同岗位限制，但保留0次优先
           if (candidates.length === 0 && isDividendDay && level === '高') {
             candidates = workingStaffs.filter(sIdx => {
               if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-              if (intensityCounts[sIdx]['高'] >= 2) return false;
+              if (intensityCounts[sIdx]['高'] >= 8) return false;
               return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
             });
           }
 
           if (candidates.length > 0) {
            candidates.sort((a, b) => {
+              // 1. 核心改进：优先让累积总次数为 0 的人上（彻底消灭 0 次）
               let divA = dividendHighHistory[a] || 0;
               let divB = dividendHighHistory[b] || 0;
               if (divA === 0 && divB > 0) return -1; 
               if (divB === 0 && divA > 0) return  1;  
 
+              // 2. 其次按照分红日高强度历史总次数由少到多排序
               if (divA !== divB) return divA - divB;
 
+              // 3. 岗位自身均衡
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
@@ -1475,6 +1482,7 @@
         });
       }
 
+      // 强力平摊修正：确保全月各岗位均分，严禁出现 0 次
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
 
