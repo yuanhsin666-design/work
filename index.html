@@ -1128,6 +1128,9 @@
   // -------------------------------------------------------------
   // 📋 【终极换行修复版】复制整表到 Google 试算表
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // 📋 【支援 \n 自动转直式】复制整表到 Google 试算表
+  // -------------------------------------------------------------
   async function copyTableWithStyles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
@@ -1171,7 +1174,9 @@
       
       let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
       
-      // 关键修改：利用 Excel 专用的 mso-data-placement 指令强迫换行
+      // 🌟 关键修正：把文字里输入的字面上的 "\n" 转换成真正的程序换行符
+      cellText = cellText.replace(/\\n/g, '\n');
+
       if (cellText.includes('\n')) {
         let lines = cellText.split('\n');
         cloneCell.innerHTML = lines.join('<br style="mso-data-placement:same-cell;">');
@@ -1180,14 +1185,13 @@
       }
     });
 
-    // 针对纯文字剪贴簿（Text/Plain），使用标准的换行符 \n 确保 Google Sheets 能够正确识别分行
     let plainTextRows = [];
     const rows = cloneTable.querySelectorAll('tr');
     rows.forEach(row => {
       let rowCells = [];
       row.querySelectorAll('th, td').forEach(cell => {
         let t = (cell.innerText || cell.textContent).replace(/🔒/g, '').trim();
-        // 如果文字内含换行，用双引号包裹并在纯文字中保留换行
+        t = t.replace(/\\n/g, '\n'); // 同步处理纯文字
         if (t.includes('\n')) {
           rowCells.push(`"${t}"`);
         } else {
@@ -1218,7 +1222,7 @@
         const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
         const blobText = new Blob([plainTextContent], { type: "text/plain" });
         await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
-        alert("✅ 已完美复制！贴到 Google 试算表后即会带有直式换行。");
+        alert("✅ 已完美复制！试算表将自动辨识 \\n 并转为直式换行。");
       }
     } catch (err) { 
       alert("复制失败，请重试。"); 
