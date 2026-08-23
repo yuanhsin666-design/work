@@ -1012,8 +1012,6 @@
 
     staffs.forEach((staff, sIdx) => {
       let count1 = 0, count16 = 0;
-      let shifts1Details = [];
-      let shifts16Details = [];
       let allHistoryList = [];
 
       Object.keys(allHistoryData).forEach(mKey => {
@@ -1027,14 +1025,12 @@
             if (shift1 && highShifts.includes(shift1)) {
               count1++;
               let clean = shift1.replace(/\n/g, ' ');
-              if (mKey === currentKey) shifts1Details.push(`[${mKey}] ${clean}`);
               allHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
             }
             let shift16 = mSched[rowIdx][15];
             if (shift16 && highShifts.includes(shift16)) {
               count16++;
               let clean16 = shift16.replace(/\n/g, ' ');
-              if (mKey === currentKey) shifts16Details.push(`[${mKey}] ${clean16}`);
               allHistoryList.push(`<b>16号:</b> ${clean16} (${mKey})`);
             }
           }
@@ -1424,7 +1420,6 @@
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
 
-              // 【核心修改】：分红日高强度岗位严格按历史总次数升序排序，轮流分配避免 0 次
               if (isDividendDay && level === '高') {
                 let divA = dividendHighHistory[a] || 0;
                 let divB = dividendHighHistory[b] || 0;
@@ -1442,7 +1437,6 @@
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
             if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
             
-            // 如果是分红日的高强度岗位，实时累加历史次数以便后续岗位继续公平轮换
             if (isDividendDay && level === '高') {
               dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
             }
