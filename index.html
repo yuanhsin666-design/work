@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>排班系统 - 第一部分完美版（含严控支援岗）</title>
+  <title>排班系统 - 严格支援分配逻辑修正版</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -18,21 +18,20 @@
 <body>
 
 <div class="card">
-  <h2>第一部分验证：17人全量 + 准确支援控制（每人最多1次、小于13人不排支援）</h2>
-  <button onclick="runPerfectPart1Test()" style="background:#0066cc; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold;">🚀 运行排班测试</button>
+  <h2>严格校验版：先正式岗位，后按规则分派支援</h2>
+  <button onclick="runStrictTest()" style="background:#0066cc; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold;">🚀 运行严格排班测试</button>
   <p id="log" style="color: #666; font-size: 13px; margin-top: 10px;"></p>
 </div>
 
 <div class="card">
   <div class="table-container">
-    <table id="perfectTestTable"></table>
+    <table id="strictTestTable"></table>
   </div>
 </div>
 
 <script>
   let staffs = ["大抠", "宏", "YU", "妮妮", "靓靓", "阿翔", "Kay", "达西", "Q娜", "海绵", "闵诗", "DKK", "施施", "小克", "小兔", "孫孫", "小美"].map(name => ({ name }));
   
-  // 12个正式岗位
   let baseShifts = [
     { name: "OL\nFB\nLY\nJY", type: "OL" },
     { name: "MT\nXO\nSH\nYS", type: "MT" },
@@ -53,11 +52,12 @@
     return shiftName.split('\n')[0].trim().toUpperCase();
   }
 
-  // 生成模拟休假（30天，每人月休8-10天，模拟每日4-5人休假）
-  function generateAccurateRests(days, staffCount) {
+  // 严格控制：30天，5天休4人（上班13人），25天休5人（上班12人）
+  function generateExactRests(days, staffCount) {
     let schedule = Array.from({ length: staffCount }, () => Array(days).fill(""));
     let restCounts = Array(staffCount).fill(0);
 
+    // 随机选出正好 5 天休 4 人
     let days4Rest = [];
     while(days4Rest.length < 5) {
       let d = Math.floor(Math.random() * days);
@@ -82,18 +82,27 @@
     return schedule;
   }
 
-  function runPerfectPart1Test() {
-    let days = 30; 
-    let schedule = generateAccurateRests(days, staffs.length);
-    let supportCounts = Array(staffs.length).fill(0); // 记录每个人当月支援次数
+  function runStrictTest() {
+    let days = 30;
+    let schedule = generateExactRests(days, staffs.length);
+    let supportCounts = Array(staffs.length).fill(0); // 记录每个人全月支援次数
 
     for (let day = 0; day < days; day++) {
       let assignedToday = new Set();
+      let workingStaffs = [];
+
+      // 收集当天上班的人
+      staffs.forEach((_, sIdx) => {
+        if (schedule[sIdx][day] !== "休") {
+          workingStaffs.push(sIdx);
+        }
+      });
+
+      // 1. 严格先排满 12 个正式岗位
+      let shuffledWorkers = [...workingStaffs].sort(() => Math.random() - 0.5);
       
-      // 1. 优先分配 12 个正式岗位给上班的人
-      staffs.forEach((staff, sIdx) => {
-        if (schedule[sIdx][day] === "休") return;
-        if (assignedToday.size >= baseShifts.length) return; 
+      shuffledWorkers.forEach(sIdx => {
+        if (assignedToday.size >= baseShifts.length) return; // 正式岗位排满了
 
         let availableShifts = baseShifts.filter(s => {
           if (assignedToday.has(s.name)) return false;
@@ -112,26 +121,27 @@
         }
       });
 
-      // 2. 统计当天上班人数
-      let workingStaffs = [];
-      staffs.forEach((_, sIdx) => {
-        if (schedule[sIdx][day] !== "休") workingStaffs.push(sIdx);
-      });
-
-      // 3. 支援岗逻辑：上班人数 >= 13 且 有多余人时，安排支援（每人全月最多1次，不重复）
+      // 2. 正式岗位排完后，检查是否需要且可以排支援（规则：上班人数 < 13 则留空，不排支援）
       if (workingStaffs.length >= 13) {
-        staffs.forEach((_, sIdx) => {
-          if (schedule[sIdx][day] === "" && supportCounts[sIdx] === 0) {
-            // 挑出一个还没排班且本月没支援过的人
-            schedule[sIdx][day] = "支援";
-            supportCounts[sIdx]++;
+        // 找出今天还没被分配正式岗位的人
+        let unassignedWorking = workingStaffs.filter(sIdx => schedule[sIdx][day] === "");
+
+        if (unassignedWorking.length > 0) {
+          // 优先挑选：本月支援次数最少（比如 0 次）的人
+          unassignedWorking.sort((a, b) => supportCounts[a] - supportCounts[b]);
+          
+          let targetStaff = unassignedWorking[0];
+          // 只有当这个人本月还没支援过（supportCounts === 0）时才给他排
+          if (supportCounts[targetStaff] === 0) {
+            schedule[targetStaff][day] = "支援";
+            supportCounts[targetStaff]++;
           }
-        });
+        }
       }
     }
 
     renderTable(schedule, days, supportCounts);
-    document.getElementById('log').innerText = "✅ 第一部分测试完成！请检查右侧总支援次数，确保每个人最多只有 1 次支援，且不再出现同一个人连续支援的情况。";
+    document.getElementById('log').innerText = "✅ 严格校验版测试完成！请检查右侧【总支援】列，确保每个人最多 1 次，且总支援天数完全吻合。";
   }
 
   function renderTable(schedule, days, supportCounts) {
@@ -155,7 +165,7 @@
       html += `</tr>`;
     });
     html += `</tbody>`;
-    document.getElementById('perfectTestTable').innerHTML = html;
+    document.getElementById('strictTestTable').innerHTML = html;
   }
 </script>
 
