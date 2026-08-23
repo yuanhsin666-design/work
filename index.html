@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (分红日高强度轮流均衡版)</title>
+  <title>智能动态排班工作表 (分红日高强度轮流均衡严格版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度轮流均衡版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度强制轮流版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -1402,6 +1402,18 @@
             if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
             if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
             
+            // 🌟 核心强制限制：在分红日安排高强度岗位时，若有人还没轮满第一轮（历史次数为0），则严禁分配给历史次数 >= 1 的人！
+            if (isDividendDay && level === '高') {
+              let myCount = dividendHighHistory[sIdx] || 0;
+              let everyoneCounts = staffs.map((_, idx) => dividendHighHistory[idx] || 0);
+              let minCount = Math.min(...everyoneCounts);
+              
+              // 如果还有人处于较低的轮次，则不允许当前轮次更高的人被选中
+              if (myCount > minCount) {
+                return false;
+              }
+            }
+
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
@@ -1410,13 +1422,6 @@
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
-
-              // 严格执行：分红日高强度岗位必须等所有人轮过一轮后才能进入下一轮次
-              if (isDividendDay && level === '高') {
-                let divA = dividendHighHistory[a] || 0;
-                let divB = dividendHighHistory[b] || 0;
-                if (divA !== divB) return divA - divB; // 优先分配给总次数最少（还没轮到或轮数最少）的人
-              }
 
               let lvlA = intensityCounts[a][level];
               let lvlB = intensityCounts[b][level];
@@ -1502,7 +1507,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班完成！分红日高强度岗位已严格按“全员轮过一轮再进入下一轮”机制分配。`);
+      alert(`[${monthKey}] 智能排班完成！分红日高强度岗位已强制执行“所有人必须各轮过一轮才能进入第二轮”的排班规则。`);
 
     } catch (err) {
       console.error(err);
