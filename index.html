@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度轮流均衡加强版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度轮流均衡版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -1475,7 +1475,7 @@
         });
       }
 
-     // 强力平摊修正：确保全月各岗位均分，严禁出现 0 次（已加強版）
+      // 强力平摊修正：确保全月各岗位均分，严禁出现 0 次（强化防漏版）
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
 
@@ -1485,21 +1485,17 @@
           if (curCount === 0) {
             let successFix = false;
 
-            // 迴圈尋找任何一天，把該崗位從次數最多的人那裡調配過來
             for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
               if (successFix) break;
 
-              // 目標當天不能是休假、支援或被鎖定
               let targetDayShift = newSchedule[targetStaffIdx][dayIdx];
               if (!targetDayShift || targetDayShift === "休" || targetDayShift === supName || lockedMap[targetStaffIdx][dayIdx]) continue;
 
-              // 尋找當天持有這個崗位的人
               let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
 
               if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
                 let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
                 
-                // 只要持有者的次數大於 1 次，就允許調換（原本限制要 >= 2，現在放寬並增加備用方案）
                 if (holderCurCount > 1 || holderCurCount > (shiftCounts[targetStaffIdx][shiftName] || 0)) {
                   let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
                   let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
@@ -1520,7 +1516,6 @@
               }
             }
 
-            // 如果上面還沒解掉，進行第二輪暴力解：不管三七二十一，直接找次數最多的人的非鎖定日強制覆蓋
             if (!successFix) {
               let eligibleHolders = staffs
                 .map((_, sIdx) => ({ sIdx, count: shiftCounts[sIdx][shiftName] || 0 }))
@@ -1551,7 +1546,6 @@
           }
         });
       });
-      }
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
@@ -1559,7 +1553,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班完成！已完美消滅所有 0 次缺口，各崗位均分達成！`);
+      alert(`[${monthKey}] 智能排班完成！分红日高强度岗位已严格执行互斥、防重复与轮流均衡机制。`);
 
     } catch (err) {
       console.error(err);
