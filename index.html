@@ -1307,7 +1307,6 @@
 
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
-      let staffLastMonthHighShift = {}; 
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
@@ -1326,9 +1325,6 @@
                 let shiftOnDiv = mSched[rowIdx][day - 1];
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
-                  if (mKey === prevKey) {
-                    staffLastMonthHighShift[sIdx] = shiftOnDiv; 
-                  }
                 }
               });
             }
@@ -1402,15 +1398,10 @@
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-            if (level === '高' && (shiftCounts[sIdx][shiftName] || 0) >= 2) return false;
             if (level === '高' && intensityCounts[sIdx]['高'] >= 8) return false;
             if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
             if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
             
-            if (isDividendDay && level === '高') {
-              if (staffLastMonthHighShift[sIdx] === shiftName) return false;
-            }
-
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
@@ -1420,10 +1411,11 @@
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
 
+              // 严格执行：分红日高强度岗位必须等所有人轮过一轮后才能进入下一轮次
               if (isDividendDay && level === '高') {
                 let divA = dividendHighHistory[a] || 0;
                 let divB = dividendHighHistory[b] || 0;
-                if (divA !== divB) return divA - divB;
+                if (divA !== divB) return divA - divB; // 优先分配给总次数最少（还没轮到或轮数最少）的人
               }
 
               let lvlA = intensityCounts[a][level];
@@ -1485,8 +1477,6 @@
                   let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
                   let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
 
-                  if (isHigh && (shiftCounts[targetStaffIdx][shiftName] || 0) >= 2) validForTarget = false;
-
                   if (validForTarget && validForHolder) {
                     newSchedule[targetStaffIdx][dayIdx] = shiftName;
                     newSchedule[holderStaffIdx][dayIdx] = targetDayShift;
@@ -1512,7 +1502,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班完成！分红日高强度岗位已按轮流机制重新分配。`);
+      alert(`[${monthKey}] 智能排班完成！分红日高强度岗位已严格按“全员轮过一轮再进入下一轮”机制分配。`);
 
     } catch (err) {
       console.error(err);
