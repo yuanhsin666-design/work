@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>排班系统 - 支援修复 + 每日重复校验版</title>
+  <title>排班系统 - 独立校验按钮版</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -14,16 +14,18 @@
     .support-shift { background: #e0f2fe; color: #0369a1; font-weight: bold; }
     .rest-shift { background: #f3f4f6; color: #9ca3af; }
     .btn { background:#0066cc; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold; margin-right: 10px; }
+    .btn-check { background:#10b981; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>排班验证：支援逻辑修复 + 每日岗位重复校验</h2>
-  <div>
-    <button class="btn" onclick="runStrictTest()">🚀 运行排班与校验</button>
+  <h2>排班系统验证面板</h2>
+  <div style="margin-bottom: 10px;">
+    <button class="btn" onclick="runStrictTest()">🚀 1. 运行排班与分配</button>
+    <button class="btn btn-check" onclick="checkDailyDuplicates()">🔍 2. 运行每日岗位重复校验</button>
   </div>
-  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;"></p>
+  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;">请先点击“运行排班与分配”生成排班表。</p>
 </div>
 
 <div class="card">
@@ -50,12 +52,15 @@
     { name: "TD\n5001\n以上", type: "TD" }
   ];
 
+  let globalSchedule = null; // 用于存储当前的排班数据以便校验
+  let globalDays = 30;
+  let globalSupportCounts = null;
+
   function getCategory(shiftName) {
     if (!shiftName || shiftName === "休" || shiftName === "支援") return "";
     return shiftName.split('\n')[0].trim().toUpperCase();
   }
 
-  // 严格控制：30天，5天休4人（上班13人），25天休5人（上班12人）
   function generateExactRests(days, staffCount) {
     let schedule = Array.from({ length: staffCount }, () => Array(days).fill(""));
     let restCounts = Array(staffCount).fill(0);
@@ -86,9 +91,9 @@
 
   function runStrictTest() {
     let days = 30;
+    globalDays = days;
     let schedule = generateExactRests(days, staffs.length);
     let supportCounts = Array(staffs.length).fill(0);
-    let duplicateErrors = 0;
 
     for (let day = 0; day < days; day++) {
       let assignedToday = new Set();
@@ -123,19 +128,7 @@
         }
       });
 
-      // 2. 检查当日是否有岗位重复（校验逻辑）
-      let dailyShiftsSeen = new Set();
-      staffs.forEach((_, sIdx) => {
-        let val = schedule[sIdx][day];
-        if (val && val !== "休" && val !== "支援") {
-          if (dailyShiftsSeen.has(val)) {
-            duplicateErrors++;
-          }
-          dailyShiftsSeen.add(val);
-        }
-      });
-
-      // 3. 支援岗逻辑
+      // 2. 支援岗逻辑
       if (workingStaffs.length >= 13) {
         let unassignedWorking = workingStaffs.filter(sIdx => schedule[sIdx][day] === "");
         if (unassignedWorking.length > 0) {
@@ -149,14 +142,46 @@
       }
     }
 
+    globalSchedule = schedule;
+    globalSupportCounts = supportCounts;
+
     renderTable(schedule, days, supportCounts);
-    let logText = `✅ 排班测试完成！【总支援】列每个人均不超过 1 次。`;
-    if (duplicateErrors === 0) {
-      logText += ` 🔍 每日重复性校验：通过！没有发现任何一天有重复岗位撞车。`;
-    } else {
-      logText += ` ❌ 警告：发现 ${duplicateErrors} 处同天岗位重复！`;
+    document.getElementById('log').innerText = "✅ 排班生成完毕！现在你可以点击绿色按钮【执行每日岗位重复校验】来检查结果。";
+  }
+
+  // 独立的校验按钮触发函数
+  function checkDailyDuplicates() {
+    if (!globalSchedule) {
+      alert("请先点击“运行排班与分配”生成表格！");
+      return;
     }
-    document.getElementById('log').innerText = logText;
+
+    let totalErrors = 0;
+    let errorDetails = [];
+
+    for (let day = 0; day < globalDays; day++) {
+      let dailyShiftsSeen = new Map(); // 记录岗位名称 -> 员工姓名
+      
+      staffs.forEach((staff, sIdx) => {
+        let val = globalSchedule[sIdx][day];
+        if (val && val !== "休" && val !== "支援") {
+          if (dailyShiftsSeen.has(val)) {
+            totalErrors++;
+            errorDetails.push(`第 ${day + 1} 天：岗位【${val.replace(/\n/g, ' ')}】被 ${dailyShiftsSeen.get(val)} 和 ${staff.name} 同时撞岗！`);
+          } else {
+            dailyShiftsSeen.set(val, staff.name);
+          }
+        }
+      });
+    }
+
+    if (totalErrors === 0) {
+      document.getElementById('log').innerText = `🔍 校验通过！全月 30 天中，没有发现任何一天有正式岗位重复撞车的情况。`;
+      alert("校验通过！没有发现岗位重复。");
+    } else {
+      document.getElementById('log').innerHTML = `❌ 发现 ${totalErrors} 处重复错误：<br>` + errorDetails.join("<br>");
+      alert(`发现 ${totalErrors} 处岗位重复，详情请看上方日志！`);
+    }
   }
 
   function renderTable(schedule, days, supportCounts) {
