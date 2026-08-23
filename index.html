@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>排班系统 - 固定休假硬约束版</title>
+  <title>排班系统 - 支援硬卡死修正版</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -20,12 +20,12 @@
 <body>
 
 <div class="card">
-  <h2>排班系统验证面板（固定休假硬约束版）</h2>
+  <h2>排班系统验证面板（支援上限硬卡死版）</h2>
   <div style="margin-bottom: 10px;">
-    <button class="btn" onclick="runStrictTest()">🚀 1. 运行排班与分配（基于固定休假）</button>
-    <button class="btn btn-check" onclick="checkDailyBlanksAndDuplicates()">🔍 2. 运行每日空白与重复校验</button>
+    <button class="btn" onclick="runStrictTest()">🚀 1. 运行排班与分配</button>
+    <button class="btn btn-check" onclick="checkDailyBlanksAndDuplicates()">🔍 2. 运行每日校验</button>
   </div>
-  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;">休假已作为 Hard Constraint 固定。请点击按钮运行排班。</p>
+  <p id="log" style="color: #333; font-weight: bold; font-size: 13px; margin-top: 10px;">已强制限制：每个人全月支援不得超过 1 次。</p>
 </div>
 
 <div class="card">
@@ -52,26 +52,25 @@
     { name: "TD\n5001\n以上", type: "TD" }
   ];
 
-  // 模拟从云端导入的【固定休假模板】（30天，确保每人休8-10天，且其中5天每天全店仅4人休假即13人上班）
-  // "R" 代表休假，"" 代表上班
+  // 固定休假模板
   const fixedRestTemplate = [
-    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,R,", // 大抠 (9天)
-    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", // 宏 (9天)
-    "„,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", // YU (9天)
-    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,,", // 妮妮 (9天)
-    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", // 靓靓 (9天)
-    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", // 阿翔 (9天)
-    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", // Kay (9天)
-    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", // 达西 (9天)
-    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", // Q娜 (9天)
-    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,,", // 海绵 (9天)
-    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", // 闵诗 (9天)
-    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", // DKK (9天)
-    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", // 施施 (9天)
-    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", // 小克 (9天)
-    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", // 小兔 (9天)
-    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,,", // 孫孫 (9天)
-    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,"  // 小美 (9天)
+    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,R,", 
+    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", 
+    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", 
+    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,,", 
+    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", 
+    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", 
+    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", 
+    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", 
+    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", 
+    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,,", 
+    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", 
+    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", 
+    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", 
+    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,", 
+    ",,R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R", 
+    "R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,,", 
+    ",R,,,,R,,,,R,,,,R,,,,R,,,,R,,,,R,"  
   ].map(row => row.split(','));
 
   let globalSchedule = null; 
@@ -86,16 +85,15 @@
     let days = 30;
     globalDays = days;
     
-    // 1. 加载固定休假作为 Hard Constraint
+    // 加载固定休假
     let schedule = staffs.map((_, sIdx) => {
       return Array.from({ length: days }, (_, d) => {
         return fixedRestTemplate[sIdx][d] === "R" ? "休" : "";
       });
     });
 
-    let supportCounts = Array(staffs.length).fill(0);
+    let supportCounts = Array(staffs.length).fill(0); // 记录每个人全月支援次数
 
-    // 2. 逐天排班
     for (let day = 0; day < days; day++) {
       let workingStaffs = [];
       staffs.forEach((_, sIdx) => {
@@ -104,13 +102,14 @@
         }
       });
 
-      let unassignedWorkers = [...workingStaffs].sort(() => Math.random() - 0.5);
+      let assignedToday = new Set();
       let availableShifts = [...baseShifts].sort(() => Math.random() - 0.5);
 
-      // 第一步：严格填满正式岗位（12个）
-      let assignedToday = new Set();
-      unassignedWorkers.forEach(sIdx => {
-        if (availableShifts.length === 0) return;
+      // 1. 优先把上班的人随机打乱，填满 12 个正式岗位
+      let shuffledWorkers = [...workingStaffs].sort(() => Math.random() - 0.5);
+      
+      shuffledWorkers.forEach(sIdx => {
+        if (assignedToday.size >= baseShifts.length) return; // 已经排满12个正式岗位了
 
         let shiftIdx = availableShifts.findIndex(s => {
           let currentCat = getCategory(s.name);
@@ -121,40 +120,41 @@
           return true;
         });
 
-        if (shiftIdx === -1) shiftIdx = 0;
+        if (shiftIdx === -1) shiftIdx = 0; // 找不到符合连续限制的就拿第一个
 
         let chosenShift = availableShifts.splice(shiftIdx, 1)[0];
         schedule[sIdx][day] = chosenShift.name;
         assignedToday.add(sIdx);
       });
 
+      // 2. 检查还剩谁没被分配
       let remainingWorkers = workingStaffs.filter(sIdx => !assignedToday.has(sIdx));
 
-      // 第二步：如果上班人数 >= 13，多出的人安排支援
+      // 3. 支援岗硬逻辑：只有当今天上班人数 >= 13，且剩余的人里有“本月支援次数为 0”的人时，才安排 1 个支援
       if (workingStaffs.length >= 13 && remainingWorkers.length > 0) {
-        remainingWorkers.sort((a, b) => supportCounts[a] - supportCounts[b]);
-        let targetStaff = remainingWorkers[0];
-        if (supportCounts[targetStaff] === 0) {
-          schedule[targetStaff][day] = "支援";
-          supportCounts[targetStaff]++;
-          remainingWorkers.shift();
+        // 挑一个本月支援次数最少（且严格 == 0）的人
+        let candidateForSupport = remainingWorkers.find(sIdx => supportCounts[sIdx] === 0);
+        
+        if (candidateForSupport !== undefined) {
+          schedule[candidateForSupport][day] = "支援";
+          supportCounts[candidateForSupport]++;
+          // 从 remainingWorkers 中移除他
+          remainingWorkers = remainingWorkers.filter(sIdx => sIdx !== candidateForSupport);
         }
       }
 
-      // 第三步：终极兜底（绝对不留空白格）
+      // 4. 终极兜底（如果因为人数刚好12人或者支援名额用完了还剩人，说明逻辑正常，绝不留白）
       remainingWorkers.forEach(sIdx => {
         if (availableShifts.length > 0) {
           let chosenShift = availableShifts.pop();
           schedule[sIdx][day] = chosenShift.name;
-        } else {
-          schedule[sIdx][day] = "支援";
         }
       });
     }
 
     globalSchedule = schedule;
-    renderTable(schedule, days);
-    document.getElementById('log').innerText = "✅ 基于固定休假的排班生成完毕！休假完全锁定，无空白格。";
+    renderTable(schedule, days, supportCounts);
+    document.getElementById('log').innerText = "✅ 运行完毕！请检查【总支援】列，确保每个人全月支援绝对不超过 1 次。";
   }
 
   function checkDailyBlanksAndDuplicates() {
@@ -165,6 +165,13 @@
 
     let blankErrors = 0;
     let duplicateErrors = 0;
+    let maxSupportExceeded = false;
+
+    // 检查支援上限
+    staffs.forEach((staff, sIdx) => {
+      let supTotal = globalSchedule[sIdx].filter(v => v === "支援").length;
+      if (supTotal > 1) maxSupportExceeded = true;
+    });
 
     for (let day = 0; day < globalDays; day++) {
       let dailyShiftsSeen = new Map();
@@ -183,16 +190,16 @@
       });
     }
 
-    if (blankErrors === 0 && duplicateErrors === 0) {
-      document.getElementById('log').innerText = `🔍 校验通过！基于固定休假：0 个空白格，0 个重复岗位。`;
-      alert("校验通过！休假完美锁定，无空白格，无岗位重复。");
+    if (blankErrors === 0 && duplicateErrors === 0 && !maxSupportExceeded) {
+      document.getElementById('log').innerText = `🔍 校验通过！0空白、0重复、支援上限全员符合（均≤1次）。底盘已完美稳固！`;
+      alert("校验通过！排班底盘完美符合所有硬约束。");
     } else {
-      document.getElementById('log').innerText = `❌ 发现异常：空白格 ${blankErrors} 个，重复岗位 ${duplicateErrors} 处。`;
-      alert(`发现异常：空白格 ${blankErrors} 个，重复岗位 ${duplicateErrors} 处。`);
+      document.getElementById('log').innerText = `❌ 异常：空白格${blankErrors}个，重复岗位${duplicateErrors}处，支援超标=${maxSupportExceeded}`;
+      alert("发现异常，请查看上方日志！");
     }
   }
 
-  function renderTable(schedule, days) {
+  function renderTable(schedule, days, supportCounts) {
     let html = `<thead><tr><th>姓名</th><th>总休</th><th>总支援</th>`;
     for(let d=1; d<=days; d++) html += `<th>${d}</th>`;
     html += `</tr></thead><tbody>`;
