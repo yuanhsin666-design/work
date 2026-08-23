@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (分红日详细岗位与次数记录版)</title>
+  <title>智能动态排班工作表 (分红日高强度轮流均衡版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 平均值上下浮动 ±1 计算版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度轮流均衡版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -906,7 +906,6 @@
     let totalHigh = 0, totalMid = 0, totalLow = 0;
     let staffCount = staffs.length;
 
-    // 1. 先统计全员总次数，计算各自的平均值
     staffs.forEach((staff, sIdx) => {
       allShifts.forEach(shiftName => {
         let count = (scheduleData && scheduleData[sIdx]) ? scheduleData[sIdx].filter(item => item === shiftName).length : 0;
@@ -927,7 +926,6 @@
     let avgMid = staffCount > 0 ? (totalMid / staffCount) : 0;
     let avgLow = staffCount > 0 ? (totalLow / staffCount) : 0;
 
-    // 范围：平均值 - 1 ~ 平均值 + 1
     let rangeHighMin = Math.max(0, (avgHigh - 1)).toFixed(1);
     let rangeHighMax = (avgHigh + 1).toFixed(1);
     let rangeMidMin = Math.max(0, (avgMid - 1)).toFixed(1);
@@ -1426,6 +1424,7 @@
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
 
+              // 【核心修改】：分红日高强度岗位严格按历史总次数升序排序，轮流分配避免 0 次
               if (isDividendDay && level === '高') {
                 let divA = dividendHighHistory[a] || 0;
                 let divB = dividendHighHistory[b] || 0;
@@ -1442,6 +1441,11 @@
             newSchedule[chosen][dayIdx] = shiftName;
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
             if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
+            
+            // 如果是分红日的高强度岗位，实时累加历史次数以便后续岗位继续公平轮换
+            if (isDividendDay && level === '高') {
+              dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
+            }
           }
         });
 
@@ -1514,7 +1518,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班完成！`);
+      alert(`[${monthKey}] 智能排班完成！分红日高强度岗位已按轮流机制重新分配。`);
 
     } catch (err) {
       console.error(err);
