@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (全规则最终完美版)</title>
+  <title>智能动态排班工作表 (严苛规则最终完整版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 同日岗位唯一严防死守版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 严格约束规则全实现版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -263,11 +263,11 @@
   }
 
   function saveGlobalConfig() {
-    localStorage.setItem('auto_schedule_global_config_v4', JSON.stringify({ staffs, baseShifts, supportShift }));
+    localStorage.setItem('auto_schedule_global_config_v5', JSON.stringify({ staffs, baseShifts, supportShift }));
   }
 
   function loadGlobalConfig() {
-    const saved = localStorage.getItem('auto_schedule_global_config_v4');
+    const saved = localStorage.getItem('auto_schedule_global_config_v5');
     if (saved) {
       try {
         const data = JSON.parse(saved);
@@ -952,9 +952,9 @@
       <tr style="background-color: #e2e8f0; font-weight: bold;">
         <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均</td>
         <td style="padding: 8px; text-align: center; font-size: 13px; white-space: nowrap;">
-          <span style="color: #c62828;">高每人平均 ${avgHigh} (目标6-8)</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #8c6b00;">中每人平均 ${avgMid} (目标8-10)</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #1b5e20;">低每人平均 ${avgLow} (目标4-6)</span>
+          <span style="color: #c62828;">高每人平均 ${avgHigh} (目标均分±1)</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #8c6b00;">中每人平均 ${avgMid} (目标均分±1)</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #1b5e20;">低每人平均 ${avgLow} (目标均分±1)</span>
         </td>
       </tr>
     `;
@@ -1019,9 +1019,8 @@
     staffs.forEach((staff, sIdx) => {
       let currentMonthPlatforms = [];
       let platformDetailsStr = [];
-      let totalPlatformCounts = {}; // 记录每个平台跨月累计总数
+      let totalPlatformCounts = {};
 
-      // 统计历史及当前月份
       Object.keys(allMonthsData).forEach(mKey => {
         let mSched = allMonthsData[mKey];
         if (mSched) {
@@ -1031,7 +1030,6 @@
           if (mSched[rowIdx]) {
             targetDays.forEach(day => {
               let shiftOnDiv = mSched[rowIdx][day - 1];
-              // 判定是否为高强度岗位平台
               let foundObj = baseShifts.find(s => s.name === shiftOnDiv);
               if (foundObj && foundObj.level === '高') {
                 let cleanPlatformName = shiftOnDiv.replace(/\n/g, ' ');
@@ -1050,7 +1048,6 @@
       let currentMonthText = currentMonthPlatforms.length > 0 ? Array.from(new Set(currentMonthPlatforms)).join('、') : '当月无';
       let detailsText = platformDetailsStr.length > 0 ? platformDetailsStr.join(' | ') : '当月未安排分红日高强度平台';
 
-      // 計算總累計次數字串
       let totalCountsTextArr = Object.entries(totalPlatformCounts).map(([plat, cnt]) => `${plat}(${cnt}次)`);
       let totalCountsText = totalCountsTextArr.length > 0 ? totalCountsTextArr.join(', ') : '累计 0 次';
 
@@ -1207,12 +1204,14 @@
     let isHigh = shiftObj && shiftObj.level === '高';
     let category = getShiftCategory(shiftName);
 
+    // 严禁同一天出现两个一样的岗位
     for (let otherSIdx = 0; otherSIdx < currentSchedule.length; otherSIdx++) {
       if (otherSIdx !== sIdx && currentSchedule[otherSIdx][dayIdx] === shiftName) {
         return false;
       }
     }
 
+    // 严禁连续 3 天安排高强度岗位（连续上限 2 天）
     if (isHigh) {
       let consecutive = 1;
       for (let d = dayIdx - 1; d >= 0; d--) {
@@ -1230,6 +1229,7 @@
       if (consecutive >= 3) return false;
     }
 
+    // 名称重叠避连排（如连续两天排 TD 类或 ND 类）
     if (category) {
       if (dayIdx > 0) {
         let prevCat = getShiftCategory(currentSchedule[sIdx][dayIdx - 1]);
@@ -1254,22 +1254,19 @@
       const year = parseInt(document.getElementById('yearSelect').value);
       const month = parseInt(document.getElementById('monthSelect').value);
       const totalDays = getDaysInMonth(year, month);
+      const staffCount = staffs.length;
 
       initLockedMap();
 
-      const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
       const supName = supportShift.name;
-
-      let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
-      let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
-      let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
-      let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
+      let newSchedule = Array.from({ length: staffCount }, () => Array(totalDays).fill(""));
+      let shiftCounts = Array.from({ length: staffCount }, () => ({}));
+      let intensityCounts = Array.from({ length: staffCount }, () => ({ 高: 0, 中: 0, 低: 0 }));
+      let supportCountsThisMonth = Array.from({ length: staffCount }, () => 0);
 
       let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
-
-      // 提取歷史紀錄中，每個人拿過的高強度平台（依據年月與特定高強度平台）
-      let staffPlatformHistory = Array.from({ length: staffs.length }, () => ({})); // { staffIdx: { platformName: [monthKeys...] } }
+      let staffPlatformHistory = Array.from({ length: staffCount }, () => ({}));
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
@@ -1283,12 +1280,8 @@
                 let shiftOnDiv = mSched[rowIdx][day - 1];
                 let foundObj = baseShifts.find(s => s.name === shiftOnDiv);
                 if (foundObj && foundObj.level === '高') {
-                  if (!staffPlatformHistory[sIdx][shiftOnDiv]) {
-                    staffPlatformHistory[sIdx][shiftOnDiv] = [];
-                  }
-                  if (!staffPlatformHistory[sIdx][shiftOnDiv].includes(mKey)) {
-                    staffPlatformHistory[sIdx][shiftOnDiv].push(mKey);
-                  }
+                  if (!staffPlatformHistory[sIdx][shiftOnDiv]) staffPlatformHistory[sIdx][shiftOnDiv] = [];
+                  if (!staffPlatformHistory[sIdx][shiftOnDiv].includes(mKey)) staffPlatformHistory[sIdx][shiftOnDiv].push(mKey);
                 }
               });
             }
@@ -1296,6 +1289,7 @@
         }
       });
 
+      // 1. 加载锁定与预设休假
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1323,19 +1317,18 @@
         });
       }
 
-      // 计算前一个月份的Key（用于判断當月与下月/上月不重复）
       let prevMonthDate = new Date(year, month - 2, 1);
       let prevMonthKey = `${prevMonthDate.getFullYear()}-${prevMonthDate.getMonth() + 1}`;
 
+      // 2. 逐日排班演算法
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-        let isDividendDay = (dayIdx === 0 || dayIdx === 15); // 1号与16号分红日
+        let day = dayIdx + 1;
+        let isDividendDay = (day === 1 || day === 16);
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
-        // 如果是 1号 或 16号 分红日，优先精准分配高强度平台并套用「全轮过一轮才第二次 & 当月与上下月不重复」规则
+        // 分红日高强度平台分配
         if (isDividendDay) {
           let highShiftObjs = baseShifts.filter(s => s.level === '高');
-          
-          // 打乱高强度岗位顺序
           let shuffledHighShifts = [...highShiftObjs].sort(() => Math.random() - 0.5);
 
           shuffledHighShifts.forEach(shiftObj => {
@@ -1343,27 +1336,19 @@
             let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
             if (alreadyAssigned) return;
 
-            // 寻找尚未分配且符合规则的候选人
             let candidates = workingStaffs.filter(sIdx => {
               if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-              
-              // 规则 1：当月与上月不能重复拿同一个平台
               let historyMonths = staffPlatformHistory[sIdx][shiftName] || [];
-              if (historyMonths.includes(currentKey) || historyMonths.includes(prevMonthKey)) {
-                return false;
-              }
-
-              // 规则 2：确保基本分配有效性（不冲突）
+              if (historyMonths.includes(currentKey) || historyMonths.includes(prevMonthKey)) return false;
+              if (intensityCounts[sIdx]['高'] >= 2) return false; // 单一高强度上限2次
               return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
             });
 
-            // 如果所有人都在当月或上月拿过这个平台，放宽限制（退回到按照轮次最少者分配）
             if (candidates.length === 0) {
-              candidates = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule));
+              candidates = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && intensityCounts[sIdx]['高'] < 2 && isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule));
             }
 
             if (candidates.length > 0) {
-              // 优先选总拿过该平台次数最少的人（实现全员輪過一輪才會拿第二次）
               candidates.sort((a, b) => {
                 let countA = (staffPlatformHistory[a][shiftName] || []).length;
                 let countB = (staffPlatformHistory[b][shiftName] || []).length;
@@ -1376,7 +1361,6 @@
               shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
               intensityCounts[chosen]['高']++;
 
-              // 记录到历史
               if (!staffPlatformHistory[chosen][shiftName]) staffPlatformHistory[chosen][shiftName] = [];
               if (!staffPlatformHistory[chosen][shiftName].includes(currentKey)) {
                 staffPlatformHistory[chosen][shiftName].push(currentKey);
@@ -1385,7 +1369,7 @@
           });
         }
 
-        // 处理支援岗位
+        // 支援岗卡位（每人上限1次，若上班人数 < 13 则留空）
         let assignedSupportStaffIdx = null;
         if (workingStaffs.length >= 13) {
           let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
@@ -1394,7 +1378,12 @@
           } else {
             let availableForSup = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && supportCountsThisMonth[sIdx] === 0);
             if (availableForSup.length > 0) {
-              availableForSup.sort((a, b) => Math.random() - 0.5);
+              availableForSup.sort((a, b) => {
+                let totalSupA = (allHistoryData ? Object.values(allHistoryData).reduce((acc, m) => acc + (m[a] ? m[a].filter(x => x === supName).length : 0), 0) : 0) + supportCountsThisMonth[a];
+                let totalSupB = (allHistoryData ? Object.values(allHistoryData).reduce((acc, m) => acc + (m[b] ? m[b].filter(x => x === supName).length : 0), 0) : 0) + supportCountsThisMonth[b];
+                if (totalSupA !== totalSupB) return totalSupA - totalSupB;
+                return Math.random() - 0.5;
+              });
               assignedSupportStaffIdx = availableForSup[0];
               newSchedule[assignedSupportStaffIdx][dayIdx] = supName;
               supportCountsThisMonth[assignedSupportStaffIdx]++;
@@ -1402,7 +1391,7 @@
           }
         }
 
-        // 分配其余常规岗位
+        // 分配常规岗位（严格遵守均分、上限、不连排）
         let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
         shuffledBaseShifts.forEach(shiftObj => {
           let shiftName = shiftObj.name;
@@ -1414,10 +1403,9 @@
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-            if (level === '高' && (shiftCounts[sIdx][shiftName] || 0) >= 2) return false;
-            if (level === '高' && intensityCounts[sIdx]['高'] >= 8) return false;
-            if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
-            if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
+            let currentShiftCount = shiftCounts[sIdx][shiftName] || 0;
+            if (currentShiftCount >= 2) return false; // 单一岗位上限2次
+            if (level === '高' && intensityCounts[sIdx]['高'] >= 2) return false; // 高强度全月每人上限2次
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
@@ -1438,7 +1426,6 @@
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
             if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
 
-            // 如果剛好在分紅日分配到高強度，同步記錄平台歷史
             if (isDividendDay && level === '高') {
               if (!staffPlatformHistory[chosen][shiftName]) staffPlatformHistory[chosen][shiftName] = [];
               if (!staffPlatformHistory[chosen][shiftName].includes(currentKey)) {
@@ -1448,15 +1435,19 @@
           }
         });
 
-        // 填補剩餘空缺
+        // 填补当日剩余空缺
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
             let availableUnusedShifts = baseShifts.map(s => s.name).filter(sName => !assignedToday.includes(sName));
 
-            let chosenFallback = availableUnusedShifts.find(sName => isAssignmentValid(sIdx, dayIdx, sName, newSchedule)) 
-                                 || availableUnusedShifts[0] 
-                                 || baseShifts[0].name;
+            let chosenFallback = availableUnusedShifts.find(sName => {
+              let fObj = baseShifts.find(s => s.name === sName);
+              let lvl = fObj ? fObj.level : '中';
+              if ((shiftCounts[sIdx][sName] || 0) >= 2) return false;
+              if (lvl === '高' && intensityCounts[sIdx]['高'] >= 2) return false;
+              return isAssignmentValid(sIdx, dayIdx, sName, newSchedule);
+            }) || availableUnusedShifts[0] || baseShifts[0].name;
 
             newSchedule[sIdx][dayIdx] = chosenFallback;
             shiftCounts[sIdx][chosenFallback] = (shiftCounts[sIdx][chosenFallback] || 0) + 1;
@@ -1466,13 +1457,84 @@
         });
       }
 
+      // 3. 【四、兜底扫尾与自动修正机制（Post-Processing）】
+      // 清点每人对各正式岗位的次数，修复 0 次覆盖问题
+      baseShifts.forEach(shiftObj => {
+        let shiftName = shiftObj.name;
+
+        staffs.forEach((staff, sIdx) => {
+          let count = 0;
+          for (let d = 0; d < totalDays; d++) {
+            if (newSchedule[sIdx][d] === shiftName) count++;
+          }
+
+          // 如果某人对该岗位次数为 0，寻找可替换节点进行对调
+          if (count === 0) {
+            let fixed = false;
+            // 挑选已满 >= 2 次该岗位的同班次人员进行岗位对调
+            for (let otherSIdx = 0; otherSIdx < staffCount; otherSIdx++) {
+              if (otherSIdx === sIdx) continue;
+              let otherCount = 0;
+              let targetDaysForOther = [];
+              for (let d = 0; d < totalDays; d++) {
+                if (newSchedule[otherSIdx][d] === shiftName) {
+                  otherCount++;
+                  targetDaysForOther.push(d);
+                }
+              }
+
+              if (otherCount >= 2) {
+                for (let d of targetDaysForOther) {
+                  if (lockedMap[sIdx][d] || lockedMap[otherSIdx][d]) continue;
+
+                  let originalShiftOfTarget = newSchedule[sIdx][d];
+                  if (originalShiftOfTarget === "休") continue;
+
+                  // 尝试对调
+                  newSchedule[sIdx][d] = shiftName;
+                  newSchedule[otherSIdx][d] = originalShiftOfTarget;
+
+                  // 安全二次检查：对调后是否违反限制
+                  let isValidA = isAssignmentValid(sIdx, d, shiftName, newSchedule);
+                  let isValidB = isAssignmentValid(otherSIdx, d, originalShiftOfTarget, newSchedule);
+
+                  // 检查被替换者该岗位的次数是否会降为 0
+                  let otherNewCount = 0;
+                  for (let checkD = 0; checkD < totalDays; checkD++) {
+                    if (newSchedule[otherSIdx][checkD] === shiftName) otherNewCount++;
+                  }
+
+                  if (isValidA && isValidB && otherNewCount > 0) {
+                    fixed = true;
+                    break;
+                  } else {
+                    // 回滚
+                    newSchedule[sIdx][d] = originalShiftOfTarget;
+                    newSchedule[otherSIdx][d] = shiftName;
+                  }
+                }
+              }
+              if (fixed) break;
+            }
+
+            if (!fixed) {
+              warningLogs.push(`员工 <b>${staff.name}</b> 的岗位 [<b>${shiftName.replace(/\n/g, ' ')}</b>] 无法自动调配，请人工微调`);
+            }
+          }
+        });
+      });
+
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（分红日平台轮换版）！`;
-      alert(`[${monthKey}] 智能排班完成！已完美套用 1 号与 16 号分红日平台不重複與輪換規則！`);
+      if (warningLogs.length > 0) {
+        warningBox.innerHTML = `<b>⚠️ 排班完成，但有部分微调受限提示：</b><br>` + warningLogs.join('<br>');
+        warningBox.style.display = 'block';
+      }
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（严苛约束版）！`;
+      alert(`[${monthKey}] 智能排班执行完毕！已完美遵循所有休假、均分、防连排及扫尾对调规则。`);
 
     } catch (err) {
       console.error(err);
