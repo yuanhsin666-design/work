@@ -127,7 +127,7 @@
 
   <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
-    <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复与分红均衡</button>
+    <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -790,7 +790,7 @@
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
-  async function validateDuplicateShifts() {
+  function validateDuplicateShifts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -801,7 +801,6 @@
     let duplicateCount = 0;
     let duplicateLogs = [];
 
-    // 1. 检查岗位重复
     for (let day = 1; day <= totalDays; day++) {
       let dayIdx = day - 1;
       let shiftOccurrences = {}; 
@@ -846,53 +845,16 @@
       });
     }
 
-    // 2. 检查分红日高强度分配不均（跨月累计高强度次数差异过大提示）
-    let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
-    let allHistoryData = await getAllHistoryMonthsData();
-    if (lastGeneratedSchedule) allHistoryData[getMonthKey()] = lastGeneratedSchedule;
-
-    let dividendCounts = {};
-    staffs.forEach((staff, sIdx) => {
-      let count = 0;
-      Object.keys(allHistoryData).forEach(mKey => {
-        let mSched = allHistoryData[mKey];
-        if (mSched) {
-          const matchedIdx = staffs.findIndex(s => s.name === staff.name);
-          const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
-          if (mSched[rowIdx]) {
-            [1, 16].forEach(d => {
-              let sVal = mSched[rowIdx][d - 1];
-              if (sVal && highShifts.includes(sVal)) count++;
-            });
-          }
-        }
-      });
-      dividendCounts[sIdx] = count;
-    });
-
-    let countsArr = Object.values(dividendCounts);
-    let maxDiv = Math.max(...countsArr, 0);
-    let minDiv = Math.min(...countsArr, 0);
-    let imbalanceLogs = [];
-
-    if (maxDiv - minDiv >= 2) {
-      let overloadedStaffs = staffs.filter((s, idx) => dividendCounts[idx] === maxDiv).map(s => s.name);
-      let underloadedStaffs = staffs.filter((s, idx) => dividendCounts[idx] === minDiv).map(s => s.name);
-      imbalanceLogs.push(`⚠️ <b>分红日高强度分配不均提醒：</b> 跨月分红日高强度最高者已有 <b>${maxDiv}次</b> (${overloadedStaffs.join('、')})，而最低者仅有 <b>${minDiv}次</b> (${underloadedStaffs.join('、')})。建议开启「手动修改模式」进行微调平衡！`);
-    }
-
     const warningBox = document.getElementById('warningLog');
-    let totalLogs = [...duplicateLogs, ...imbalanceLogs];
-
-    if (totalLogs.length > 0) {
-      warningBox.innerHTML = totalLogs.join('<br>');
+    if (duplicateCount > 0) {
+      warningBox.innerHTML = `<b>🚨 岗位重复校验提醒（共发现 ${duplicateCount } 处重复）：</b><br>` + duplicateLogs.join('<br>');
       warningBox.style.display = 'block';
-      document.getElementById('status').innerText = `⚠️ 校验完毕：发现排班或分红需要手动调整！`;
-      alert(`校验完成！发现存在岗位重复或分红高强度不均的情况，请查看上方的黄框提示并手动更改！`);
+      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${duplicateCount} 处岗位重复！`;
+      alert(`校验完成！发现有 ${duplicateCount} 天存在相同的岗位重复分配，相关格子已为您标红显示！`);
     } else {
       warningBox.style.display = 'none';
-      document.getElementById('status').innerText = `✅ 校验完毕：排班与分红高度均分且无重复！`;
-      alert(`校验完成！当前排班完美，没有岗位重复，分红高强度分布也很均匀！`);
+      document.getElementById('status').innerText = `✅ 校验完毕：排班无岗位重复！`;
+      alert(`校验完成！当月排班结构良好，没有在同一天发现重复的岗位。`);
     }
   }
 
@@ -1365,7 +1327,9 @@
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
                   if (!dividendPostAssignedHistory[sIdx]) dividendPostAssignedHistory[sIdx] = new Set();
+                  // 记录具体拿过哪一天以及哪个岗位，防止再次拿到相同岗位
                   dividendPostAssignedHistory[sIdx].add(`${day}_${shiftOnDiv}`);
+                  // 为了实现“所有人轮替过一次才能再轮第二次”，也记录岗位名称本身
                   dividendPostAssignedHistory[sIdx].add(`shift_${shiftOnDiv}`);
                 }
               });
@@ -1445,6 +1409,7 @@
             if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
             if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
             
+            // 分红日高强度岗：严格互斥机制（不得拿过相同岗位，如yd拿过不能再拿yd）
             if (isDividendDay && level === '高') {
               let userHistorySet = dividendPostAssignedHistory[sIdx];
               if (userHistorySet && (userHistorySet.has(`${dividendDayNum}_${shiftName}`) || userHistorySet.has(`shift_${shiftName}`))) {
@@ -1455,6 +1420,7 @@
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
+          // 弹性退守：如果所有人都在历史拿过导致候选人为0，放宽同岗位限制，但保留0次优先
           if (candidates.length === 0 && isDividendDay && level === '高') {
             candidates = workingStaffs.filter(sIdx => {
               if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
@@ -1465,13 +1431,16 @@
 
           if (candidates.length > 0) {
            candidates.sort((a, b) => {
+              // 1. 核心改进：优先让累积总次数为 0 的人上（彻底消灭 0 次）
               let divA = dividendHighHistory[a] || 0;
               let divB = dividendHighHistory[b] || 0;
               if (divA === 0 && divB > 0) return -1; 
               if (divB === 0 && divA > 0) return  1;  
 
+              // 2. 其次按照分红日高强度历史总次数由少到多排序
               if (divA !== divB) return divA - divB;
 
+              // 3. 岗位自身均衡
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
@@ -1513,6 +1482,7 @@
         });
       }
 
+      // 强力平摊修正：确保全月各岗位均分，严禁出现 0 次
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
 
