@@ -176,7 +176,7 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计)</h3>
+    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计)[cite: 3]</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
@@ -1307,7 +1307,7 @@
 
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
-      let dividendShiftHistory = {}; // 【改】改成计数式：{ sIdx: { shiftName: 次数 } }，1号与16号合并计算，不再分开
+      let dividendPostAssignedHistory = {}; 
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
@@ -1326,9 +1326,11 @@
                 let shiftOnDiv = mSched[rowIdx][day - 1];
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
-                  // 【改】不分1号/16号，同一个岗位名称的次数合并累计
-                  if (!dividendShiftHistory[sIdx]) dividendShiftHistory[sIdx] = {};
-                  dividendShiftHistory[sIdx][shiftOnDiv] = (dividendShiftHistory[sIdx][shiftOnDiv] || 0) + 1;
+                  if (!dividendPostAssignedHistory[sIdx]) dividendPostAssignedHistory[sIdx] = new Set();
+                  // 记录具体拿过哪一天以及哪个岗位，防止再次拿到相同岗位
+                  dividendPostAssignedHistory[sIdx].add(`${day}_${shiftOnDiv}`);
+                  // 为了实现“所有人轮替过一次才能再轮第二次”，也记录岗位名称本身
+                  dividendPostAssignedHistory[sIdx].add(`shift_${shiftOnDiv}`);
                 }
               });
             }
@@ -1406,85 +1408,49 @@
             if (level === '高' && intensityCounts[sIdx]['高'] >= 8) return false;
             if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
             if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
-
-            // 【新增：全岗位平摊】不分强度，该岗位只要还有人次数没追上2次，
-            // 已经拿到2次的人就不能抢第3次，避免"3次vs1次"这种落差
-            let shiftCountsAll = staffs.map((_, idx) => shiftCounts[idx][shiftName] || 0);
-            let minShiftCount = Math.min(...shiftCountsAll);
-            let myShiftCount = shiftCounts[sIdx][shiftName] || 0;
-            if (myShiftCount >= 2 && minShiftCount < 2) return false;
             
-            // 分红日高强度岗：严格拦截（不是软性排序）
+            // 分红日高强度岗：严格互斥机制（不得拿过相同岗位，如yd拿过不能再拿yd）
             if (isDividendDay && level === '高') {
-              // 规则①【总次数优先】：只要还有人分红日一次都没拿过（不分岗位），
-              // 已经拿过的人就不能再拿第二次
-              let allDividendTotals = staffs.map((_, idx) => dividendHighHistory[idx] || 0);
-              let minDividendTotal = Math.min(...allDividendTotals);
-              if ((dividendHighHistory[sIdx] || 0) > minDividendTotal) return false;
-
-              // 规则②【同岗位持续拦截】：这个人对这个岗位的分红日次数，
-              // 必须等全员对这个岗位的次数都追上，才可以再拿一次（1号16号合并计算）
-              let shiftTotals = staffs.map((_, idx) => (dividendShiftHistory[idx] && dividendShiftHistory[idx][shiftName]) || 0);
-              let minShiftTotal = Math.min(...shiftTotals);
-              let myShiftTotal = (dividendShiftHistory[sIdx] && dividendShiftHistory[sIdx][shiftName]) || 0;
-              if (myShiftTotal > minShiftTotal) return false;
+              let userHistorySet = dividendPostAssignedHistory[sIdx];
+              if (userHistorySet && (userHistorySet.has(`${dividendDayNum}_${shiftName}`) || userHistorySet.has(`shift_${shiftName}`))) {
+                return false; 
+              }
             }
 
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
-          // 若候选人空了，分两段退守：
-          // 第一段：先放宽规则②（同岗位持续拦截），但仍守住规则①（总次数优先，更重要）
+          // 弹性退守：如果所有人都在历史拿过导致候选人为0，放宽同岗位限制，但保留0次优先
           if (candidates.length === 0 && isDividendDay && level === '高') {
             candidates = workingStaffs.filter(sIdx => {
               if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
               if (intensityCounts[sIdx]['高'] >= 8) return false;
-              let allDividendTotals = staffs.map((_, idx) => dividendHighHistory[idx] || 0);
-              let minDividendTotal = Math.min(...allDividendTotals);
-              if ((dividendHighHistory[sIdx] || 0) > minDividendTotal) return false;
-              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
-            });
-          }
-          // 第二段：真的还是没人，两条规则都放宽，保证岗位不空
-          if (candidates.length === 0 && isDividendDay && level === '高') {
-            candidates = workingStaffs.filter(sIdx => {
-              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-              if (intensityCounts[sIdx]['高'] >= 8) return false;
-              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
-            });
-          }
-
-          // 通用退守：非分红日、或分红日但非高强度时，若因「全岗位平摊2次上限」卡到没人，
-          // 放宽这条次数限制（保留强度总量上限与基本合法性），避免岗位当天空着
-          if (candidates.length === 0) {
-            candidates = workingStaffs.filter(sIdx => {
-              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-              if (level === '高' && intensityCounts[sIdx]['高'] >= 8) return false;
-              if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
-              if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
               return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
             });
           }
 
           if (candidates.length > 0) {
-            candidates.sort((a, b) => {
+           candidates.sort((a, b) => {
+              // 1. 核心改进：优先让累积总次数为 0 的人上（彻底消灭 0 次）
+              let divA = dividendHighHistory[a] || 0;
+              let divB = dividendHighHistory[b] || 0;
+              if (divA === 0 && divB > 0) return -1; 
+              if (divB === 0 && divA > 0) return  1;  
+
+              // 2. 其次按照分红日高强度历史总次数由少到多排序
+              if (divA !== divB) return divA - divB;
+
+              // 3. 岗位自身均衡
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
 
-              // 严格执行：分红日高强度岗位必须等所有人轮过一轮后才能进入下一轮次
-              if (isDividendDay && level === '高') {
-                let divA = dividendHighHistory[a] || 0;
-                let divB = dividendHighHistory[b] || 0;
-                if (divA !== divB) return divA - divB; // 优先分配给总次数最少（还没轮到或轮数最少）的人
-              }
-
               let lvlA = intensityCounts[a][level];
               let lvlB = intensityCounts[b][level];
               if (lvlA !== lvlB) return lvlA - lvlB;
+              
               return Math.random() - 0.5;
             });
-
             let chosen = candidates[0];
             newSchedule[chosen][dayIdx] = shiftName;
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
@@ -1492,8 +1458,9 @@
             
             if (isDividendDay && level === '高') {
               dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
-              if (!dividendShiftHistory[chosen]) dividendShiftHistory[chosen] = {};
-              dividendShiftHistory[chosen][shiftName] = (dividendShiftHistory[chosen][shiftName] || 0) + 1;
+              if (!dividendPostAssignedHistory[chosen]) dividendPostAssignedHistory[chosen] = new Set();
+              dividendPostAssignedHistory[chosen].add(`${dividendDayNum}_${shiftName}`);
+              dividendPostAssignedHistory[chosen].add(`shift_${shiftName}`);
             }
           }
         });
@@ -1515,85 +1482,49 @@
         });
       }
 
-      let zeroFixFailLog = [];
-
+      // 强力平摊修正：确保全月各岗位均分，严禁出现 0 次
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
 
         staffs.forEach((staff, targetStaffIdx) => {
           let curCount = (shiftCounts[targetStaffIdx][shiftName] || 0);
-          if (curCount !== 0) return;
 
-          let successFix = false;
+          if (curCount === 0) {
+            let successFix = false;
 
-          // 第一优先：找一天目标员工正好排「支援」，直接跟当天排该岗位的人对调，
-          // 支援没有次数下限，不会因为拿掉而产生新的0，风险最低
-          for (let dayIdx = 0; dayIdx < totalDays && !successFix; dayIdx++) {
-            if (lockedMap[targetStaffIdx][dayIdx]) continue;
-            if (newSchedule[targetStaffIdx][dayIdx] !== supName) continue;
+            for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+              if (successFix) break;
 
-            let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
-            if (holderStaffIdx === -1 || holderStaffIdx === targetStaffIdx || lockedMap[holderStaffIdx][dayIdx]) continue;
+              let targetDayShift = newSchedule[targetStaffIdx][dayIdx];
+              if (!targetDayShift || targetDayShift === "休" || targetDayShift === supName || lockedMap[targetStaffIdx][dayIdx]) continue;
 
-            let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
-            if (holderCurCount < 2) continue;
-            // 支援上限0或1次：holder 接手支援后不能超过上限
-            if ((supportCountsThisMonth[holderStaffIdx] || 0) >= 1) continue;
+              let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
 
-            let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
-            let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, supName, newSchedule);
-            if (!validForTarget || !validForHolder) continue;
+              if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
+                let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
+                
+                if (holderCurCount >= 2) {
+                  let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
+                  let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
 
-            newSchedule[targetStaffIdx][dayIdx] = shiftName;
-            newSchedule[holderStaffIdx][dayIdx] = supName;
+                  if (validForTarget && validForHolder) {
+                    newSchedule[targetStaffIdx][dayIdx] = shiftName;
+                    newSchedule[holderStaffIdx][dayIdx] = targetDayShift;
 
-            shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
-            shiftCounts[holderStaffIdx][shiftName] = holderCurCount - 1;
-            supportCountsThisMonth[targetStaffIdx] = Math.max(0, (supportCountsThisMonth[targetStaffIdx] || 0) - 1);
-            supportCountsThisMonth[holderStaffIdx] = (supportCountsThisMonth[holderStaffIdx] || 0) + 1;
+                    shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
+                    shiftCounts[targetStaffIdx][targetDayShift]--;
+                    shiftCounts[holderStaffIdx][shiftName]--;
+                    shiftCounts[holderStaffIdx][targetDayShift] = (shiftCounts[holderStaffIdx][targetDayShift] || 0) + 1;
 
-            successFix = true;
-          }
-
-          // 第二优先：一般岗位对调，双方都要 >=2 次才动，避免把0的问题换到别人身上
-          for (let dayIdx = 0; dayIdx < totalDays && !successFix; dayIdx++) {
-            if (lockedMap[targetStaffIdx][dayIdx]) continue;
-
-            let targetDayShift = newSchedule[targetStaffIdx][dayIdx];
-            if (!targetDayShift || targetDayShift === "休" || targetDayShift === supName) continue;
-            if ((shiftCounts[targetStaffIdx][targetDayShift] || 0) < 2) continue; // 换掉后自己不能变0
-
-            let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
-            if (holderStaffIdx === -1 || holderStaffIdx === targetStaffIdx || lockedMap[holderStaffIdx][dayIdx]) continue;
-
-            let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
-            if (holderCurCount < 2) continue;
-
-            let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
-            let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
-            if (!validForTarget || !validForHolder) continue;
-
-            newSchedule[targetStaffIdx][dayIdx] = shiftName;
-            newSchedule[holderStaffIdx][dayIdx] = targetDayShift;
-
-            shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
-            shiftCounts[targetStaffIdx][targetDayShift] -= 1;
-            shiftCounts[holderStaffIdx][shiftName] = holderCurCount - 1;
-            shiftCounts[holderStaffIdx][targetDayShift] = (shiftCounts[holderStaffIdx][targetDayShift] || 0) + 1;
-
-            successFix = true;
-          }
-
-          if (!successFix) {
-            zeroFixFailLog.push(`员工 ${staff.name} 的岗位 ${shiftName.replace(/\n/g, '')} 无法自动调配，请人工微调`);
+                    successFix = true;
+                    break;
+                  }
+                }
+              }
+            }
           }
         });
       });
-
-      if (zeroFixFailLog.length > 0) {
-        warningBox.innerHTML = zeroFixFailLog.map(msg => `⚠️ ${msg}`).join('<br>');
-        warningBox.style.display = 'block';
-      }
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
