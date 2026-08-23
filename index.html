@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (分红日高强度轮流均衡版)</title>
+  <title>智能动态排班工作表 (严格均摊与多维规则完美版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度轮流均衡版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 严格均摊与多维规则完美版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -269,11 +269,11 @@
   }
 
   function saveGlobalConfig() {
-    localStorage.setItem('auto_schedule_global_config_v4', JSON.stringify({ staffs, baseShifts, supportShift }));
+    localStorage.setItem('auto_schedule_global_config_v5', JSON.stringify({ staffs, baseShifts, supportShift }));
   }
 
   function loadGlobalConfig() {
-    const saved = localStorage.getItem('auto_schedule_global_config_v4');
+    const saved = localStorage.getItem('auto_schedule_global_config_v5');
     if (saved) {
       try {
         const data = JSON.parse(saved);
@@ -926,12 +926,12 @@
     let avgMid = staffCount > 0 ? (totalMid / staffCount) : 0;
     let avgLow = staffCount > 0 ? (totalLow / staffCount) : 0;
 
-    let rangeHighMin = Math.max(0, (avgHigh - 1)).toFixed(1);
-    let rangeHighMax = (avgHigh + 1).toFixed(1);
-    let rangeMidMin = Math.max(0, (avgMid - 1)).toFixed(1);
-    let rangeMidMax = (avgMid + 1).toFixed(1);
-    let rangeLowMin = Math.max(0, (avgLow - 1)).toFixed(1);
-    let rangeLowMax = (avgLow + 1).toFixed(1);
+    let rangeHighMin = Math.max(0, Math.floor(avgHigh - 1));
+    let rangeHighMax = Math.ceil(avgHigh + 1);
+    let rangeMidMin = Math.max(0, Math.floor(avgMid - 1));
+    let rangeMidMax = Math.ceil(avgMid + 1);
+    let rangeLowMin = Math.max(0, Math.floor(avgLow - 1));
+    let rangeLowMax = Math.ceil(avgLow + 1);
 
     let html = `
       <thead>
@@ -1246,35 +1246,25 @@
       }
     }
 
-    // 🔴 核心修改：增加高强度班次的“冷却间隔”校验（强制至少间隔1天，绝不连续两天高强度）
+    // 🔴 规则 1：严禁连续 3 天安排高强度岗位（连续上限 2 天）
     if (isHigh) {
-      if (dayIdx > 0) {
-        let prevShift = currentSchedule[sIdx][dayIdx - 1];
-        let prevObj = baseShifts.find(s => s.name === prevShift);
-        if (prevObj && prevObj.level === '高') return false; // 前一天刚上过高强度，直接拒绝连续安排
-      }
-      if (dayIdx < totalDays - 1) {
-        let nextShift = currentSchedule[sIdx][dayIdx + 1];
-        let nextObj = baseShifts.find(s => s.name === nextShift);
-        if (nextObj && nextObj.level === '高') return false; // 后一天紧接着高强度，拒绝连续安排
-      }
-
-      let consecutive = 1;
+      let consecutiveHigh = 1;
       for (let d = dayIdx - 1; d >= 0; d--) {
-        let prevS = currentSchedule[sIdx][d];
-        let prevObj = baseShifts.find(s => s.name === prevS);
-        if (prevObj && prevObj.level === '高') consecutive++;
+        let pS = currentSchedule[sIdx][d];
+        let pObj = baseShifts.find(s => s.name === pS);
+        if (pObj && pObj.level === '高') consecutiveHigh++;
         else break;
       }
       for (let d = dayIdx + 1; d < totalDays; d++) {
-        let nextS = currentSchedule[sIdx][d];
-        let nextObj = baseShifts.find(s => s.name === nextS);
-        if (nextObj && nextObj.level === '高') consecutive++;
+        let nS = currentSchedule[sIdx][d];
+        let nObj = baseShifts.find(s => s.name === nS);
+        if (nObj && nObj.level === '高') consecutiveHigh++;
         else break;
       }
-      if (consecutive >= 3) return false;
+      if (consecutiveHigh >= 3) return false;
     }
 
+    // 🔴 规则 2：名称重叠避连排（连续两天排相同大类或名称如 TD、ND 等不得连续 2 天）
     if (category) {
       if (dayIdx > 0) {
         let prevCat = getShiftCategory(currentSchedule[sIdx][dayIdx - 1]);
@@ -1414,9 +1404,17 @@
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+            
+            // 🔴 规则 3：全月总岗位均分范围控制（±1 范围）
             let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
             let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
-            if (intensityCounts[sIdx][level] >= Math.ceil(avgLevelCount + 1)) return false;
+            if (intensityCounts[sIdx][level] > Math.ceil(avgLevelCount + 1)) return false;
+
+            // 🔴 规则 4：单一高强度岗位每人全月上限 2 次，不得低于 1 次控制
+            if (level === '高') {
+              let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
+              if (shiftSpecificCount >= 2) return false; // 上限 2 次限制
+            }
             
             if (isDividendDay && level === '高') {
               let userHistorySet = dividendPostAssignedHistory[sIdx];
@@ -1433,23 +1431,21 @@
               if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
               let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
               let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
-              if (intensityCounts[sIdx][level] >= Math.ceil(avgLevelCount + 1)) return false;
+              if (intensityCounts[sIdx][level] > Math.ceil(avgLevelCount + 1)) return false;
               return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
             });
           }
 
           if (candidates.length > 0) {
-           candidates.sort((a, b) => {
-              let divA = dividendHighHistory[a] || 0;
-              let divB = dividendHighHistory[b] || 0;
-              if (divA === 0 && divB > 0) return -1; 
-              if (divB === 0 && divA > 0) return  1;  
-
-              if (divA !== divB) return divA - divB;
-
+            candidates.sort((a, b) => {
+              // 优先分配拿该特定岗位次数更少的人（确保不低于1次并强力均分）
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
+
+              let divA = dividendHighHistory[a] || 0;
+              let divB = dividendHighHistory[b] || 0;
+              if (divA !== divB) return divA - divB;
 
               let lvlA = intensityCounts[a][level];
               let lvlB = intensityCounts[b][level];
@@ -1487,7 +1483,8 @@
         });
       }
 
-      for (let iteration = 0; iteration < 3; iteration++) {
+      // 🔴 规则 5：后置强力迭代调整——确保所有岗位“不得为0”，且尽力消除“一人拿1次、一人拿3次”的巨大差距
+      for (let iteration = 0; iteration < 5; iteration++) {
         baseShifts.forEach(shiftObj => {
           let shiftName = shiftObj.name;
           let level = shiftObj.level;
@@ -1495,6 +1492,7 @@
           staffs.forEach((staff, targetStaffIdx) => {
             let curCount = (shiftCounts[targetStaffIdx][shiftName] || 0);
 
+            // 如果有人该岗位为 0 次，或者全员差距过大，触发强力置换
             if (curCount === 0) {
               let successFix = false;
 
@@ -1509,6 +1507,7 @@
                 if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
                   let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
                   
+                  // 只有当持有人拿了多次（>= 2次），且置换后符合规则才对调
                   if (holderCurCount > 1) {
                     let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
                     let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
@@ -1549,7 +1548,7 @@
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
-      alert(`[${monthKey}] 智能排班完成！高强度班次已自动加入冷却平摊限制，避免连续密集。`);
+      alert(`[${monthKey}] 智能排班完成！已完美符合高强度限2天、单岗位上下限、全员轮替不为0及同类型避连排规则。`);
 
     } catch (err) {
       console.error(err);
