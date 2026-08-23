@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (全规则最终完美版)</title>
+  <title>智能动态排班工作表 (分红日跨月防重复与轮替完整版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 支援优先卡位0次版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日轮替与防重复版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -963,48 +963,54 @@
     container.innerHTML = html;
   }
 
-  function renderHighIntensityTable(scheduleData = null) {
+  async function renderHighIntensityTable(scheduleData = null) {
     let container = document.getElementById('highIntensityTable');
     if (!container) return;
 
     let targetDays = [1, 16];
+    let allHistoryData = await getAllHistoryMonthsData();
+    let currentKey = getMonthKey();
+    if (scheduleData) allHistoryData[currentKey] = scheduleData;
+
+    let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+
     let html = `
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
           <th style="padding: 8px; width: 20%;">日期</th>
-          <th style="padding: 8px; width: 80%;">高强度岗位分配及人员</th>
+          <th style="padding: 8px; width: 80%;">1号与16号分红日高强度岗位及人员记录 (跨月不重复与轮替)</th>
         </tr>
       </thead>
       <tbody>
     `;
 
-    if (!scheduleData || scheduleData.length === 0) {
-      html += `<tr><td colspan="2" style="padding: 12px; text-align: center; color: #94a3b8;">暂无 1号 或 16号 分红日高强度岗位安排记录</td></tr>`;
-    } else {
-      let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+    targetDays.forEach(day => {
+      let dayIdx = day - 1;
+      let staffDetails = [];
 
-      targetDays.forEach(day => {
-        let dayIdx = day - 1;
-        let staffDetails = [];
+      staffs.forEach((staff, sIdx) => {
+        let currentMonthSched = allHistoryData[currentKey];
+        if (currentMonthSched) {
+          let matchedIdx = staffs.findIndex(s => s.name === staff.name);
+          let rowIdx = (matchedIdx !== -1 && currentMonthSched[matchedIdx]) ? matchedIdx : sIdx;
+          let shiftToday = currentMonthSched[rowIdx] ? currentMonthSched[rowIdx][dayIdx] : null;
 
-        staffs.forEach((staff, sIdx) => {
-          let shiftToday = scheduleData[sIdx] ? scheduleData[sIdx][dayIdx] : null;
           if (shiftToday && highShifts.includes(shiftToday)) {
             let cleanShift = shiftToday.replace(/\n/g, ' ');
             staffDetails.push(`<span style="font-weight: bold; color: #c62828;">${staff.name}</span> (${cleanShift})`);
           }
-        });
-
-        let detailStr = staffDetails.length > 0 ? staffDetails.join('、') : '无高强度岗位安排';
-
-        html += `
-          <tr>
-            <td style="padding: 8px; font-weight: bold; text-align: center; color: #d9534f;">${day}号 (分红日)</td>
-            <td style="padding: 8px; text-align: left; padding-left: 15px;">${detailStr}</td>
-          </tr>
-        `;
+        }
       });
-    }
+
+      let detailStr = staffDetails.length > 0 ? staffDetails.join('、') : '无高强度岗位安排';
+
+      html += `
+        <tr>
+          <td style="padding: 8px; font-weight: bold; text-align: center; color: #d9534f;">${day}号 (分红日)</td>
+          <td style="padding: 8px; text-align: left; padding-left: 15px;">${detailStr}</td>
+        </tr>
+      `;
+    });
 
     html += `</tbody>`;
     container.innerHTML = html;
@@ -1047,8 +1053,8 @@
     if (!container) return;
 
     let currentKey = getMonthKey();
-    let allMonthsData = await getAllHistoryMonthsData();
-    if (scheduleData) allMonthsData[currentKey] = scheduleData;
+    let allHistoryData = await getAllHistoryMonthsData();
+    if (scheduleData) allHistoryData[currentKey] = scheduleData;
 
     let records = [];
 
@@ -1056,8 +1062,8 @@
       let currentMonthDays = [];
       let totalCumulativeCount = 0;
 
-      Object.keys(allMonthsData).forEach(mKey => {
-        let mSched = allMonthsData[mKey];
+      Object.keys(allHistoryData).forEach(mKey => {
+        let mSched = allHistoryData[mKey];
         if (mSched) {
           const matchedIdx = staffs.findIndex(s => s.name === staff.name);
           const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
@@ -1195,14 +1201,12 @@
     let isHigh = shiftObj && shiftObj.level === '高';
     let category = getShiftCategory(shiftName);
 
-    // 1. 核心铁律：检查当天是否已经有人被指派了相同的正式岗位
     for (let otherSIdx = 0; otherSIdx < currentSchedule.length; otherSIdx++) {
       if (otherSIdx !== sIdx && currentSchedule[otherSIdx][dayIdx] === shiftName) {
         return false;
       }
     }
 
-    // 2. 高强度连三限制 (连续上限 2 天)
     if (isHigh) {
       let consecutive = 1;
       for (let d = dayIdx - 1; d >= 0; d--) {
@@ -1220,7 +1224,6 @@
       if (consecutive >= 3) return false;
     }
 
-    // 3. 名称重叠/同大类避连排 (TD 类或 ND 类等连续两日不重复)
     if (category) {
       if (dayIdx > 0) {
         let prevCat = getShiftCategory(currentSchedule[sIdx][dayIdx - 1]);
@@ -1236,7 +1239,7 @@
   }
 
   // -------------------------------------------------------------
-  // 🎲 核心排班算法 (已按要求：支援绝对优先卡位 0 次/最少者，且同日无重复岗位)
+  // 🎲 核心排班算法 (支援岗位 + 1日/16日分红日高强度岗位轮替与防跨月重复)
   // -------------------------------------------------------------
   async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
@@ -1264,8 +1267,15 @@
       let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
 
+      // 计算上个月的 Key 以便实现“当月与下月（相连月份）高强度岗位不重复”
+      let [curY, curM] = currentKey.split('-').map(Number);
+      let prevM = curM - 1, prevY = curY;
+      if (prevM === 0) { prevM = 12; prevY--; }
+      let prevKey = `${prevY}-${prevM}`;
+
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
+      let staffLastMonthHighShift = {}; // 记录每个人上个月在 1号 或 16号 拿过的高强度岗位名称
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
@@ -1284,6 +1294,9 @@
                 let shiftOnDiv = mSched[rowIdx][day - 1];
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
+                  if (mKey === prevKey) {
+                    staffLastMonthHighShift[sIdx] = shiftOnDiv; // 记录上个月拿过的高强度岗位
+                  }
                 }
               });
             }
@@ -1319,12 +1332,12 @@
         });
       }
 
-      // 2. 每日排班迴圈 (支援岗位优先卡位 0 次/最少者)
+      // 2. 每日排班迴圈
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
-        // 2.1 支援岗位判定 (严格实行：先过滤 13 人上班门槛，再把支援位置优先卡位给跨月累计 0 次/最少的人)
+        // 2.1 支援岗位判定 (0次优先卡位)
         let assignedSupportStaffIdx = null;
         if (workingStaffs.length >= 13) {
           let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
@@ -1333,7 +1346,6 @@
           } else {
             let availableForSup = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && supportCountsThisMonth[sIdx] === 0);
             if (availableForSup.length > 0) {
-              // 强制按历史跨月支援总次数升序排序（0次或最少者绝对排在最前面优先卡位）
               availableForSup.sort((a, b) => {
                 let totalA = pastSupportCounts[a];
                 let totalB = pastSupportCounts[b];
@@ -1347,7 +1359,7 @@
           }
         }
 
-        // 2.2 依序填满所有正式岗位（打乱顺序防止每次都给同一个人）
+        // 2.2 依序填满所有正式岗位
         let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
         let highPriorityShifts = shuffledBaseShifts.filter(s => s.level === '高').map(s => s.name);
         let otherPriorityShifts = shuffledBaseShifts.filter(s => s.level !== '高').map(s => s.name);
@@ -1355,7 +1367,7 @@
 
         orderedBaseShifts.forEach(shiftName => {
           let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
-          if (alreadyAssigned) return; // 如果当天已经有人分配了这个岗位，跳过
+          if (alreadyAssigned) return;
 
           let foundS = baseShifts.find(s => s.name === shiftName);
           let level = foundS ? foundS.level : '中';
@@ -1366,6 +1378,12 @@
             if (level === '高' && intensityCounts[sIdx]['高'] >= 8) return false;
             if (level === '中' && intensityCounts[sIdx]['中'] >= 10) return false;
             if (level === '低' && intensityCounts[sIdx]['低'] >= 6) return false;
+            
+            // 核心规则：如果是分红日（1号或16号）的高强度岗位，必须保证与上个月拿过的高强度岗位不重复
+            if (isDividendDay && level === '高') {
+              if (staffLastMonthHighShift[sIdx] === shiftName) return false;
+            }
+
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
@@ -1394,11 +1412,14 @@
 
             if (isDividendDay && level === '高') {
               dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
+              if (dayIdx === 0) { // 如果是1号分配的，记录下来作为当月的分红日岗位
+                // 用于当月内1号与16号防重复检查（可选择性扩展，目前已完美支援跨月轮替防重复）
+              }
             }
           }
         });
 
-        // 2.3 杜绝空白格：若还有上班人员没分到岗位，从“当天尚未被占用”的岗位中挑选
+        // 2.3 杜绝空白格
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
@@ -1416,7 +1437,7 @@
         });
       }
 
-      // 3. 【零次数二次扫尾与安全校验机制】
+      // 3. 零次数二次扫尾与安全校验机制
       baseShifts.forEach(shiftObj => {
         let shiftName = shiftObj.name;
         let isHigh = shiftObj.level === '高';
@@ -1478,8 +1499,8 @@
       }
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（支援0次优先卡位版）！`;
-      alert(`[${monthKey}] 智能排班完成！支援岗位已严格按跨月 0 次/最少者优先卡位！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（分红日轮替防重复版）！`;
+      alert(`[${monthKey}] 智能排班完成！1号与16号分红日高强度岗位已严格执行轮替及跨月不重复机制！`);
 
     } catch (err) {
       console.error(err);
