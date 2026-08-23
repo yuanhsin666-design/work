@@ -1475,40 +1475,71 @@
         });
       }
 
-      // 强力多轮平摊修正：确保全月各岗位均分，严禁出现 0 次
-      for (let round = 0; round < 3; round++) {
-        baseShifts.forEach(shiftObj => {
-          let shiftName = shiftObj.name;
+     // 强力平摊修正：确保全月各岗位均分，严禁出现 0 次（已加強版）
+      baseShifts.forEach(shiftObj => {
+        let shiftName = shiftObj.name;
 
-          staffs.forEach((staff, targetStaffIdx) => {
-            let curCount = (shiftCounts[targetStaffIdx][shiftName] || 0);
+        staffs.forEach((staff, targetStaffIdx) => {
+          let curCount = (shiftCounts[targetStaffIdx][shiftName] || 0);
 
-            if (curCount === 0) {
-              let successFix = false;
+          if (curCount === 0) {
+            let successFix = false;
 
-              for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+            // 迴圈尋找任何一天，把該崗位從次數最多的人那裡調配過來
+            for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+              if (successFix) break;
+
+              // 目標當天不能是休假、支援或被鎖定
+              let targetDayShift = newSchedule[targetStaffIdx][dayIdx];
+              if (!targetDayShift || targetDayShift === "休" || targetDayShift === supName || lockedMap[targetStaffIdx][dayIdx]) continue;
+
+              // 尋找當天持有這個崗位的人
+              let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
+
+              if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
+                let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
+                
+                // 只要持有者的次數大於 1 次，就允許調換（原本限制要 >= 2，現在放寬並增加備用方案）
+                if (holderCurCount > 1 || holderCurCount > (shiftCounts[targetStaffIdx][shiftName] || 0)) {
+                  let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
+                  let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
+
+                  if (validForTarget && validForHolder) {
+                    newSchedule[targetStaffIdx][dayIdx] = shiftName;
+                    newSchedule[holderStaffIdx][dayIdx] = targetDayShift;
+
+                    shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
+                    shiftCounts[targetStaffIdx][targetDayShift]--;
+                    shiftCounts[holderStaffIdx][shiftName]--;
+                    shiftCounts[holderStaffIdx][targetDayShift] = (shiftCounts[holderStaffIdx][targetDayShift] || 0) + 1;
+
+                    successFix = true;
+                    break;
+                  }
+                }
+              }
+            }
+
+            // 如果上面還沒解掉，進行第二輪暴力解：不管三七二十一，直接找次數最多的人的非鎖定日強制覆蓋
+            if (!successFix) {
+              let eligibleHolders = staffs
+                .map((_, sIdx) => ({ sIdx, count: shiftCounts[sIdx][shiftName] || 0 }))
+                .filter(item => item.sIdx !== targetStaffIdx && item.count > 1)
+                .sort((a, b) => b.count - a.count);
+
+              for (let holder of eligibleHolders) {
                 if (successFix) break;
-
-                let targetDayShift = newSchedule[targetStaffIdx][dayIdx];
-                if (!targetDayShift || targetDayShift === "休" || targetDayShift === supName || lockedMap[targetStaffIdx][dayIdx]) continue;
-
-                let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
-
-                if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
-                  let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
-                  
-                  if (holderCurCount >= 2) {
-                    let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
-                    let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
-
-                    if (validForTarget && validForHolder) {
+                for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+                  if (newSchedule[holder.sIdx][dayIdx] === shiftName && !lockedMap[holder.sIdx][dayIdx] && !lockedMap[targetStaffIdx][dayIdx]) {
+                    let oldTargetShift = newSchedule[targetStaffIdx][dayIdx];
+                    if (oldTargetShift !== "休" && oldTargetShift !== supName) {
                       newSchedule[targetStaffIdx][dayIdx] = shiftName;
-                      newSchedule[holderStaffIdx][dayIdx] = targetDayShift;
+                      newSchedule[holder.sIdx][dayIdx] = oldTargetShift;
 
                       shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
-                      shiftCounts[targetStaffIdx][targetDayShift]--;
-                      shiftCounts[holderStaffIdx][shiftName]--;
-                      shiftCounts[holderStaffIdx][targetDayShift] = (shiftCounts[holderStaffIdx][targetDayShift] || 0) + 1;
+                      shiftCounts[targetStaffIdx][oldTargetShift]--;
+                      shiftCounts[holder.sIdx][shiftName]--;
+                      shiftCounts[holder.sIdx][oldTargetShift] = (shiftCounts[holder.sIdx][oldTargetShift] || 0) + 1;
 
                       successFix = true;
                       break;
@@ -1517,8 +1548,9 @@
                 }
               }
             }
-          });
+          }
         });
+      });
       }
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
