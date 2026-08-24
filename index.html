@@ -1472,6 +1472,9 @@ async function getAllHistoryMonthsData() {
       // ==========================================
       // 2. 【核心优化】：像支援岗位一样，优先强制固定分红日（1号和16号）的高强度岗位！
       // ==========================================
+      // ==========================================
+      // 2. 【核心优化+2轮冷却限制】：优先固定分红日高强度岗位，且同一岗位严格 2 轮冷却！
+      // ==========================================
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -1484,28 +1487,27 @@ async function getAllHistoryMonthsData() {
 
         // 针对当天的每一个高强度岗位，强制进行优先指派
         highShifts.forEach(shiftName => {
-          // 如果该岗位在当天已经被锁定或指派了，就跳过
           let alreadyHas = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
           if (alreadyHas || availableStaffs.length === 0) return;
 
-          // 筛选符合 2轮冷却 限制的候选人
+          // 【核心拦截】：第一层筛选：严格满足“同一岗位 2 轮冷却”
           let candidates = availableStaffs.filter(sIdx => {
             let userMap = userLastAssignedDividendRound[sIdx] || {};
             let lastIdx = userMap[shiftName];
             if (lastIdx !== undefined) {
               let roundsPassed = currentActiveRoundIndex - lastIdx;
-              if (roundsPassed < 2) return false; // 冷却期未满
+              if (roundsPassed < 2) return false; // 冷却期未满（例如 8/1拿了，8/16和9/1都不能拿）
             }
             return true;
           });
 
-          // 如果冷却期限制导致没有候选人，则放宽限制（从全体可用员工中选）
+          // 【安全垫】：如果所有人都在该岗位的冷却期中，为了不让岗位开天窗，退一步允许从“非当前岗位冷却”的人里选
           if (candidates.length === 0) {
             candidates = [...availableStaffs];
           }
 
           if (candidates.length > 0) {
-            // 按照“历史分红高强度总次数最少”的人优先排序，彻底解决 0 次拿不到的问题！
+            // 按照“历史分红高强度总次数最少”的人优先排序
             candidates.sort((a, b) => {
               let histA = dividendHighHistory[a] || 0;
               let histB = dividendHighHistory[b] || 0;
@@ -1516,10 +1518,9 @@ async function getAllHistoryMonthsData() {
             let chosen = candidates[0];
             newSchedule[chosen][dayIdx] = shiftName;
             
-            // 从可用名单中移除已被指派的人
             availableStaffs = availableStaffs.filter(s => s !== chosen);
 
-            // 更新统计数据
+            // 更新统计与该岗位的最后拿取轮次记录
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
             intensityCounts[chosen]['High' in intensityCounts[chosen] ? 'High' : '高']++;
             dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
