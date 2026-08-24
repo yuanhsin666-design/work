@@ -1056,17 +1056,28 @@
   }
 
 async function getAllHistoryMonthsData() {
-    let currentKey = getMonthKey(); // 例如当前是 "2026-09"
+    let currentKey = getMonthKey(); // 例如当前是 "2026-09" 或 "2026-10"
+    let [curYear, curMonth] = currentKey.split('-').map(Number);
+    let curTotalMonths = curYear * 12 + curMonth; // 换算成总月份数来做精准数字比较
+
     let allMonthsData = {};
 
     try {
       const { data: cloudRes, error } = await supabaseClient.from('schedules').select('month_key, data');
       if (!error && cloudRes) {
         cloudRes.forEach(row => {
-          // 【严格限制】：必须确保 row.month_key 绝对小于或等于当前查看的月份 (currentKey)
-          // 这样人在 9月 时，10月的数据绝对进不来！
-          if (row.month_key && row.month_key <= currentKey && row.data && row.data.lastGeneratedSchedule) {
-            allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
+          if (row.month_key && row.data && row.data.lastGeneratedSchedule) {
+            let parts = row.month_key.split('-');
+            if (parts.length === 2) {
+              let rYear = Number(parts[0]);
+              let rMonth = Number(parts[1]);
+              let rTotalMonths = rYear * 12 + rMonth;
+
+              // 【核心修复】：用纯数字大小比较，绝对禁止未来的月份混入当前月份！
+              if (rTotalMonths <= curTotalMonths) {
+                allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
+              }
+            }
           }
         });
       }
@@ -1076,14 +1087,20 @@ async function getAllHistoryMonthsData() {
       let k = localStorage.key(i);
       if (k.startsWith('auto_schedule_month_')) {
         let mKey = k.replace('auto_schedule_month_', '');
-        // 同理，本地缓存也必须严格小于等于当前月份
-        if (mKey <= currentKey && !allMonthsData[mKey]) {
-          try {
-            let parsed = JSON.parse(localStorage.getItem(k));
-            if (parsed && parsed.lastGeneratedSchedule) {
-              allMonthsData[mKey] = parsed.lastGeneratedSchedule;
-            }
-          } catch(e){}
+        let parts = mKey.split('-');
+        if (parts.length === 2) {
+          let mYear = Number(parts[0]);
+          let mMonth = Number(parts[1]);
+          let mTotalMonths = mYear * 12 + mMonth;
+
+          if (mTotalMonths <= curTotalMonths && !allMonthsData[mKey]) {
+            try {
+              let parsed = JSON.parse(localStorage.getItem(k));
+              if (parsed && parsed.lastGeneratedSchedule) {
+                allMonthsData[mKey] = parsed.lastGeneratedSchedule;
+              }
+            } catch(e){}
+          }
         }
       }
     }
