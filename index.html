@@ -247,7 +247,7 @@
   function getMonthKey() {
     const year = document.getElementById('yearSelect').value;
     const month = document.getElementById('monthSelect').value;
-    return `${year}-${String(month).padStart(2, '0')}`;
+    return `${year}-${month}`;
   }
 
   function initLockedMap(forceReset = false) {
@@ -993,13 +993,7 @@
 
     let currentKey = getMonthKey();
     let allHistoryData = await getAllHistoryMonthsData();
-    
-    // 【核心修复】：严格限制。如果当前传进来的 scheduleData 为空，代表当前月（例如 8 月）没有生成过常规排班或者没有排过高强度岗位，直接将当前月份的数据设为空数组，绝不读取幽灵缓存或未来月份数据！
-    if (scheduleData) {
-      allHistoryData[currentKey] = scheduleData;
-    } else {
-      allHistoryData[currentKey] = null; // 清空当前月，防止串台
-    }
+    if (scheduleData) allHistoryData[currentKey] = scheduleData;
 
     let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
 
@@ -1021,26 +1015,23 @@
       let allHistoryList = [];
 
       Object.keys(allHistoryData).forEach(mKey => {
-        // 【核心防护】：只统计小于等于当前查看月份、且 mKey 确凿有数据的历史，绝不把 9月 或 10月 等未来/其他月份混进来
-        if (mKey <= currentKey) {
-          let mSched = allHistoryData[mKey];
-          if (mSched) {
-            const matchedIdx = staffs.findIndex(s => s.name === staff.name);
-            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+        let mSched = allHistoryData[mKey];
+        if (mSched) {
+          const matchedIdx = staffs.findIndex(s => s.name === staff.name);
+          const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
 
-            if (mSched[rowIdx]) {
-              let shift1 = mSched[rowIdx][0];
-              if (shift1 && highShifts.includes(shift1)) {
-                count1++;
-                let clean = shift1.replace(/\n/g, ' ');
-                allHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
-              }
-              let shift16 = mSched[rowIdx][15];
-              if (shift16 && highShifts.includes(shift16)) {
-                count16++;
-                let clean16 = shift16.replace(/\n/g, ' ');
-                allHistoryList.push(`<b>16号:</b> ${clean16} (${mKey})`);
-              }
+          if (mSched[rowIdx]) {
+            let shift1 = mSched[rowIdx][0];
+            if (shift1 && highShifts.includes(shift1)) {
+              count1++;
+              let clean = shift1.replace(/\n/g, ' ');
+              allHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
+            }
+            let shift16 = mSched[rowIdx][15];
+            if (shift16 && highShifts.includes(shift16)) {
+              count16++;
+              let clean16 = shift16.replace(/\n/g, ' ');
+              allHistoryList.push(`<b>16号:</b> ${clean16} (${mKey})`);
             }
           }
         }
@@ -1064,15 +1055,15 @@
     container.innerHTML = html;
   }
 
-  async function getAllHistoryMonthsData() {
-    let currentKey = getMonthKey(); 
+async function getAllHistoryMonthsData() {
+    let currentKey = getMonthKey(); // 当前选中的年月，例如 "2026-08"
     let allMonthsData = {};
 
     try {
       const { data: cloudRes, error } = await supabaseClient.from('schedules').select('month_key, data');
       if (!error && cloudRes) {
         cloudRes.forEach(row => {
-          // 严格限制：只获取 <= 当前选中月份的历史数据
+          // 【核心修复】：只取小于等于当前查看月份的历史数据，过滤掉未来月份
           if (row.month_key <= currentKey && row.data && row.data.lastGeneratedSchedule) {
             allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
           }
@@ -1084,7 +1075,7 @@
       let k = localStorage.key(i);
       if (k.startsWith('auto_schedule_month_')) {
         let mKey = k.replace('auto_schedule_month_', '');
-        // 严格限制：只获取 <= 当前选中月份的历史数据
+        // 【核心修复】：同样严格限制本地缓存只取当前及过去的月份
         if (mKey <= currentKey && !allMonthsData[mKey]) {
           try {
             let parsed = JSON.parse(localStorage.getItem(k));
@@ -1113,22 +1104,20 @@
       let totalCumulativeCount = 0;
 
       Object.keys(allHistoryData).forEach(mKey => {
-        if (mKey <= currentKey) {
-          let mSched = allHistoryData[mKey];
-          if (mSched) {
-            const matchedIdx = staffs.findIndex(s => s.name === staff.name);
-            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+        let mSched = allHistoryData[mKey];
+        if (mSched) {
+          const matchedIdx = staffs.findIndex(s => s.name === staff.name);
+          const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
 
-            if (mSched[rowIdx]) {
-              mSched[rowIdx].forEach((shift, dIdx) => {
-                if (shift === supportShift.name) {
-                  totalCumulativeCount++;
-                  if (mKey === currentKey) {
-                    currentMonthDays.push(`${dIdx + 1}号`);
-                  }
+          if (mSched[rowIdx]) {
+            mSched[rowIdx].forEach((shift, dIdx) => {
+              if (shift === supportShift.name) {
+                totalCumulativeCount++;
+                if (mKey === currentKey) {
+                  currentMonthDays.push(`${dIdx + 1}号`);
                 }
-              });
-            }
+              }
+            });
           }
         }
       });
@@ -1386,28 +1375,26 @@
       let userLastAssignedDividendRound = {}; 
 
       Object.keys(allHistoryData).forEach(mKey => {
-        if (mKey <= currentKey) {
-          let mSched = allHistoryData[mKey];
-          if (mSched) {
-            staffs.forEach((staff, sIdx) => {
-              const matchedIdx = staffs.findIndex(s => s.name === staff.name);
-              const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+        let mSched = allHistoryData[mKey];
+        if (mSched) {
+          staffs.forEach((staff, sIdx) => {
+            const matchedIdx = staffs.findIndex(s => s.name === staff.name);
+            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
 
-              if (mSched[rowIdx]) {
-                if (mKey !== currentKey) {
-                  mSched[rowIdx].forEach(shift => {
-                    if (shift === supName) pastSupportCounts[sIdx]++;
-                  });
-                }
-                [1, 16].forEach(day => {
-                  let shiftOnDiv = mSched[rowIdx][day - 1];
-                  if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
-                    dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
-                  }
+            if (mSched[rowIdx]) {
+              if (mKey !== currentKey) {
+                mSched[rowIdx].forEach(shift => {
+                  if (shift === supName) pastSupportCounts[sIdx]++;
                 });
               }
-            });
-          }
+              [1, 16].forEach(day => {
+                let shiftOnDiv = mSched[rowIdx][day - 1];
+                if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
+                  dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
+                }
+              });
+            }
+          });
         }
       });
 
@@ -1444,16 +1431,14 @@
       staffs.forEach((_, sIdx) => {
         let lastRoundIndexForSpecificShift = {};
         allRounds.forEach((round, rIndex) => {
-          if (round.mKey <= currentKey) {
-            let mSched = (round.mKey === currentKey) ? newSchedule : allHistoryData[round.mKey];
-            if (mSched) {
-              const matchedIdx = staffs.findIndex(s => s.name === staffs[sIdx].name);
-              const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
-              if (mSched[rowIdx]) {
-                let shiftOnDiv = mSched[rowIdx][round.dayNum - 1];
-                if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
-                  lastRoundIndexForSpecificShift[shiftOnDiv] = rIndex;
-                }
+          let mSched = (round.mKey === currentKey) ? newSchedule : allHistoryData[round.mKey];
+          if (mSched) {
+            const matchedIdx = staffs.findIndex(s => s.name === staffs[sIdx].name);
+            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+            if (mSched[rowIdx]) {
+              let shiftOnDiv = mSched[rowIdx][round.dayNum - 1];
+              if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
+                lastRoundIndexForSpecificShift[shiftOnDiv] = rIndex;
               }
             }
           }
@@ -1655,7 +1640,7 @@
 
     } catch (err) {
       console.error(err);
-      alert("排班发生错误：" + err.message);
+      alert("排班执行发生错误：" + err.message);
     }
   }
 
