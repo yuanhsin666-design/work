@@ -1594,20 +1594,20 @@ async function getAllHistoryMonthsData() {
 
          if (candidates.length > 0) {
             candidates.sort((a, b) => {
-              // 1. 【核心新增】优先选择当前该强度次数最少的人，实现真正的平均！
+              // 1. 【核心优化】优先选择当前分到【这个具体岗位】次数最少的人，实现单个岗位绝对平均！
+              let countA_shift = shiftCounts[a][shiftName] || 0;
+              let countB_shift = shiftCounts[b][shiftName] || 0;
+              if (countA_shift !== countB_shift) return countA_shift - countB_shift;
+
+              // 2. 其次选择当前该强度（高/中/低）次数最少的人
               let countA_level = intensityCounts[a][level] || 0;
               let countB_level = intensityCounts[b][level] || 0;
               if (countA_level !== countB_level) return countA_level - countB_level;
 
-              // 2. 其次保持原有的高强度均衡逻辑
+              // 3. 其次均衡高强度
               let highA = intensityCounts[a]['高'] || 0;
               let highB = intensityCounts[b]['高'] || 0;
               if (highA !== highB) return highA - highB;
-
-              // 3. 其次保持特定岗位次数均衡
-              let countA = shiftCounts[a][shiftName] || 0;
-              let countB = shiftCounts[b][shiftName] || 0;
-              if (countA !== countB) return countA - countB;
               
               return Math.random() - 0.5;
             });
