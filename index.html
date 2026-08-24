@@ -1055,7 +1055,7 @@
     container.innerHTML = html;
   }
 
-async function getAllHistoryMonthsData() {
+  async function getAllHistoryMonthsData() {
     let currentKey = getMonthKey(); // 当前选中的年月，例如 "2026-08"
     let allMonthsData = {};
 
@@ -1640,7 +1640,7 @@ async function getAllHistoryMonthsData() {
 
     } catch (err) {
       console.error(err);
-      alert("排班执行发生错误：" + err.message);
+      alert("排班发生错误：" + err.message);
     }
   }
 
