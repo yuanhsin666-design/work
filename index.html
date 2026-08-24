@@ -1442,18 +1442,20 @@
           }
 
           if (candidates.length > 0) {
-            candidates.sort((a, b) => {
+           candidates.sort((a, b) => {
+              // 优先让近期高强度较少的人上
+              let highA = intensityCounts[a]['高'] || 0;
+              let highB = intensityCounts[b]['高'] || 0;
+              if (highA !== highB) return highA - highB;
+
+              // 检查 a 和 b 是否刚刚在昨天做过高强度，如果昨天刚做过，适当降低优先级（往后排），让没做过的人先上
+              let aDidHighYesterday = (dayIdx > 0 && baseShifts.find(s => s.name === newSchedule[a][dayIdx - 1])?.level === '高');
+              let bDidHighYesterday = (dayIdx > 0 && baseShifts.find(s => s.name === newSchedule[b][dayIdx - 1])?.level === '高');
+              if (aDidHighYesterday !== bDidHighYesterday) return aDidHighYesterday ? 1 : -1;
+
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
-
-              let divA = dividendHighHistory[a] || 0;
-              let divB = dividendHighHistory[b] || 0;
-              if (divA !== divB) return divA - divB;
-
-              let lvlA = intensityCounts[a][level];
-              let lvlB = intensityCounts[b][level];
-              if (lvlA !== lvlB) return lvlA - lvlB;
               
               return Math.random() - 0.5;
             });
