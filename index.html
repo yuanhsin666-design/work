@@ -1056,7 +1056,7 @@
   }
 
 async function getAllHistoryMonthsData() {
-    let currentKey = getMonthKey(); // 例如当前是 "2026-09" 或 "2026-10"
+    let currentKey = getMonthKey(); // 例如当前是 "2026-08"
     let [curYear, curMonth] = currentKey.split('-').map(Number);
     let curTotalMonths = curYear * 12 + curMonth; // 换算成总月份数来做精准数字比较
 
@@ -1073,7 +1073,7 @@ async function getAllHistoryMonthsData() {
               let rMonth = Number(parts[1]);
               let rTotalMonths = rYear * 12 + rMonth;
 
-              // 【核心修复】：用纯数字大小比较，绝对禁止未来的月份混入当前月份！
+              // 【核心修复】：用纯数字大小比较，绝对禁止未来的月份（如9月、10月）混入当前月份（如8月）！
               if (rTotalMonths <= curTotalMonths) {
                 allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
               }
