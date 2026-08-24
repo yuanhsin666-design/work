@@ -1505,27 +1505,35 @@ function balanceSchedule(schedule, staffList, baseShifts) {
             candidates = [...availableStaffs];
           }
 
+          // 如果没有严格符合上限的候选人，放宽限制从全体上班人员中按最少次数挑选
+          if (candidates.length === 0) {
+            candidates = workingStaffs.filter(sIdx => {
+              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+              if (level === '高') {
+                let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
+                if (shiftSpecificCount >= 2) return false;
+              }
+              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
+            });
+          }
+
           if (candidates.length > 0) {
-            // 按照“历史分红高强度总次数最少”的人优先排序
             candidates.sort((a, b) => {
-              let histA = dividendHighHistory[a] || 0;
-              let histB = dividendHighHistory[b] || 0;
-              if (histA !== histB) return histA - histB;
+              let highA = intensityCounts[a]['高'] || 0;
+              let highB = intensityCounts[b]['高'] || 0;
+              if (highA !== highB) return highA - highB;
+
+              let countA = shiftCounts[a][shiftName] || 0;
+              let countB = shiftCounts[b][shiftName] || 0;
+              if (countA !== countB) return countA - countB;
+              
               return Math.random() - 0.5;
             });
 
-            let chosen = candidates[0];
+            let chosen = candidates[0]; // 确保正确定义
             newSchedule[chosen][dayIdx] = shiftName;
-            
-            availableStaffs = availableStaffs.filter(s => s !== chosen);
-
-            // 更新统计与该岗位的最后拿取轮次记录
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
-            intensityCounts[chosen]['High' in intensityCounts[chosen] ? 'High' : '高']++;
-            dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
-            
-            if (!userLastAssignedDividendRound[chosen]) userLastAssignedDividendRound[chosen] = {};
-            userLastAssignedDividendRound[chosen][shiftName] = currentActiveRoundIndex;
+            if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
           }
         });
       });
