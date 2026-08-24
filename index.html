@@ -1055,7 +1055,7 @@
     container.innerHTML = html;
   }
 
-  async function getAllHistoryMonthsData() {
+async function getAllHistoryMonthsData() {
     let currentKey = getMonthKey(); // 当前选中的年月，例如 "2026-08"
     let allMonthsData = {};
 
@@ -1063,7 +1063,7 @@
       const { data: cloudRes, error } = await supabaseClient.from('schedules').select('month_key, data');
       if (!error && cloudRes) {
         cloudRes.forEach(row => {
-          // 【核心修复】：只取小于等于当前查看月份的历史数据，过滤掉未来月份
+          // 【严格限制】：只取小于等于当前查看月份的历史数据，绝对过滤掉未来月份
           if (row.month_key <= currentKey && row.data && row.data.lastGeneratedSchedule) {
             allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
           }
@@ -1075,7 +1075,7 @@
       let k = localStorage.key(i);
       if (k.startsWith('auto_schedule_month_')) {
         let mKey = k.replace('auto_schedule_month_', '');
-        // 【核心修复】：同样严格限制本地缓存只取当前及过去的月份
+        // 【严格限制】：同步过滤本地缓存，只取当前及过去的月份
         if (mKey <= currentKey && !allMonthsData[mKey]) {
           try {
             let parsed = JSON.parse(localStorage.getItem(k));
@@ -1087,7 +1087,7 @@
       }
     }
     return allMonthsData;
-  }
+}
 
   async function renderSupportStaffTable(scheduleData = null) {
     let container = document.getElementById('supportStaffTable');
