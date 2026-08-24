@@ -1295,36 +1295,42 @@ async function getAllHistoryMonthsData() {
     return true;
   }
 
-  function balanceSchedule(schedule, staffList, baseShifts) {
+function balanceSchedule(schedule, staffList, baseShifts) {
     let totalDays = schedule[0].length;
     
-    staffList.forEach((staffName, sIdx) => {
-      baseShifts.forEach(shiftObj => {
-        let sName = shiftObj.name;
-        let count = schedule[sIdx].filter(day => day === sName).length;
-        
-        if (count === 0) {
-          for (let targetDay = 0; targetDay < totalDays; targetDay++) {
-            let currentShiftOnDay = schedule[sIdx][targetDay];
-            if (currentShiftOnDay === "休") {
-              for (let otherSIdx = 0; otherSIdx < staffList.length; otherSIdx++) {
-                if (otherSIdx === sIdx) continue;
-                if (schedule[otherSIdx][targetDay] === sName) {
-                  let otherTotalCount = schedule[otherSIdx].filter(d => d === sName).length;
-                  if (otherTotalCount > 1) {
-                    schedule[sIdx][targetDay] = sName;
-                    schedule[otherSIdx][targetDay] = "休";
-                    break;
+    // 多轮迭代对齐：如果某些员工的某个强度超标，而另一个人欠缺，自动在同天进行对调
+    for (let iteration = 0; iteration < 3; iteration++) {
+      staffList.forEach((_, sIdx) => {
+        baseShifts.forEach(shiftObj => {
+          let sName = shiftObj.name;
+          let targetLevel = shiftObj.level;
+          
+          let count = schedule[sIdx].filter(day => day === sName).length;
+          
+          if (count === 0) {
+            for (let targetDay = 0; targetDay < totalDays; targetDay++) {
+              if (schedule[sIdx][targetDay] === "休") {
+                for (let otherSIdx = 0; otherSIdx < staffList.length; otherSIdx++) {
+                  if (otherSIdx === sIdx) continue;
+                  if (schedule[otherSIdx][targetDay] === sName) {
+                    let otherTotalCount = schedule[otherSIdx].filter(d => d === sName).length;
+                    
+                    // 只有当对方该岗位很多，且调换后不会破坏目标时才对调
+                    if (otherTotalCount > 1) {
+                      schedule[sIdx][targetDay] = sName;
+                      schedule[otherSIdx][targetDay] = "休";
+                      break;
+                    }
                   }
                 }
+                let newCount = schedule[sIdx].filter(day => day === sName).length;
+                if (newCount > 0) break;
               }
-              let newCount = schedule[sIdx].filter(day => day === sName).length;
-              if (newCount > 0) break;
             }
           }
-        }
+        });
       });
-    });
+    }
   }
 
   function getSortedDividendRounds(allHistoryData, currentKey) {
