@@ -194,7 +194,7 @@
   </div>
 </div>
 
-<script[cite: 5]>
+<script>
   const SUPABASE_URL = 'https://sgtxweyklcyimerwvuhu.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_IiIoN5F_XaIqEsvmKmzdqg_7jqR7Qcb'; 
   const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1055,22 +1055,16 @@
     container.innerHTML = html;
   }
 
-  // 🛠️ 关键修改：过滤历史月份，只允许获取“当前所选月份及之前”的数据，实现严格的逐月递进累计
   async function getAllHistoryMonthsData() {
-    let currentKey = getMonthKey(); // 格式 "YYYY-M" 或 "YYYY-MM"
-    let [currYear, currMonth] = currentKey.split('-').map(Number);
+    let currentKey = getMonthKey();
     let allMonthsData = {};
 
     try {
       const { data: cloudRes, error } = await supabaseClient.from('schedules').select('month_key, data');
       if (!error && cloudRes) {
         cloudRes.forEach(row => {
-          if (row.month_key && row.data && row.data.lastGeneratedSchedule) {
-            let [y, m] = row.month_key.split('-').map(Number);
-            // 过滤条件：年份小于当前年份，或者年份相同但月份小于等于当前月份
-            if (y < currYear || (y === currYear && m <= currMonth)) {
-              allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
-            }
+          if (row.data && row.data.lastGeneratedSchedule) {
+            allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
           }
         });
       }
@@ -1080,16 +1074,13 @@
       let k = localStorage.key(i);
       if (k.startsWith('auto_schedule_month_')) {
         let mKey = k.replace('auto_schedule_month_', '');
-        let [y, m] = mKey.split('-').map(Number);
-        if (y < currYear || (y === currYear && m <= currMonth)) {
-          if (!allMonthsData[mKey]) {
-            try {
-              let parsed = JSON.parse(localStorage.getItem(k));
-              if (parsed && parsed.lastGeneratedSchedule) {
-                allMonthsData[mKey] = parsed.lastGeneratedSchedule;
-              }
-            } catch(e){}
-          }
+        if (!allMonthsData[mKey]) {
+          try {
+            let parsed = JSON.parse(localStorage.getItem(k));
+            if (parsed && parsed.lastGeneratedSchedule) {
+              allMonthsData[mKey] = parsed.lastGeneratedSchedule;
+            }
+          } catch(e){}
         }
       }
     }
