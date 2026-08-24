@@ -987,9 +987,75 @@
     container.innerHTML = html;
   }
 
-async function renderHighIntensityTable(scheduleData = null)
+  async function renderHighIntensityTable(scheduleData = null) {
+    let container = document.getElementById('highIntensityTable');
+    if (!container) return;
 
-async function getAllHistoryMonthsData() {
+    let currentKey = getMonthKey();
+    let allHistoryData = await getAllHistoryMonthsData();
+    if (scheduleData) allHistoryData[currentKey] = scheduleData;
+
+    let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+
+    let html = `
+      <thead>
+        <tr style="background-color: #f8fafc; font-weight: bold;">
+          <th style="padding: 8px; width: 18%;">人员姓名</th>
+          <th style="padding: 8px; width: 15%;">1号拿过岗位与次数</th>
+          <th style="padding: 8px; width: 15%;">16号拿过岗位与次数</th>
+          <th style="padding: 8px; width: 35%;">历史拿过的高强度岗位明细 (跨月记录)</th>
+          <th style="padding: 8px; width: 17%; color: #c62828;">分红日高强度总次数</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    staffs.forEach((staff, sIdx) => {
+      let count1 = 0, count16 = 0;
+      let allHistoryList = [];
+
+      Object.keys(allHistoryData).forEach(mKey => {
+        let mSched = allHistoryData[mKey];
+        if (mSched) {
+          const matchedIdx = staffs.findIndex(s => s.name === staff.name);
+          const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+
+          if (mSched[rowIdx]) {
+            let shift1 = mSched[rowIdx][0];
+            if (shift1 && highShifts.includes(shift1)) {
+              count1++;
+              let clean = shift1.replace(/\n/g, ' ');
+              allHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
+            }
+            let shift16 = mSched[rowIdx][15];
+            if (shift16 && highShifts.includes(shift16)) {
+              count16++;
+              let clean16 = shift16.replace(/\n/g, ' ');
+              allHistoryList.push(`<b>16号:</b> ${clean16} (${mKey})`);
+            }
+          }
+        }
+      });
+
+      let totalCount = count1 + count16;
+      let historyStr = allHistoryList.length > 0 ? allHistoryList.join('<br>') : '<span style="color: #94a3b8;">暂无记录</span>';
+
+      html += `
+        <tr>
+          <td style="font-weight: bold; padding: 8px;">${staff.name}</td>
+          <td style="padding: 8px; color: ${count1 > 0 ? '#1b5e20' : '#94a3b8'}; font-weight: bold;">${count1} 次</td>
+          <td style="padding: 8px; color: ${count16 > 0 ? '#1b5e20' : '#94a3b8'}; font-weight: bold;">${count16} 次</td>
+          <td style="padding: 8px; text-align: left; padding-left: 10px; font-size: 11px; line-height: 1.5;">${historyStr}</td>
+          <td style="padding: 8px; color: #c62828; font-weight: bold;">累计 ${totalCount} 次</td>
+        </tr>
+      `;
+    });
+
+    html += `</tbody>`;
+    container.innerHTML = html;
+  }
+
+  async function getAllHistoryMonthsData() {
     let currentKey = getMonthKey(); // 当前选中的年月，例如 "2026-08"
     let allMonthsData = {};
 
@@ -1574,7 +1640,7 @@ async function getAllHistoryMonthsData() {
 
     } catch (err) {
       console.error(err);
-      alert("排班执行发生错误：" + err.message);
+      alert("排班发生错误：" + err.message);
     }
   }
 
