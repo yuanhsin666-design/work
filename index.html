@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (绝对无零岗位严苛版)</title>
+  <title>智能动态排班工作表 (分红日高强度两轮冷却严苛版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 绝对无零岗位严苛版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度两轮冷却严苛版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -176,7 +176,7 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计)</h3>
+    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计，同一岗位2轮冷却)</h3>
     <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
@@ -1314,6 +1314,37 @@
     });
   }
 
+  function getSortedDividendRounds(allHistoryData, currentKey) {
+    let rounds = [];
+    Object.keys(allHistoryData).forEach(mKey => {
+      let mSched = allHistoryData[mKey];
+      if (mSched) {
+        rounds.push({ key: `${mKey}-1`, mKey, dayNum: 1 });
+        rounds.push({ key: `${mKey}-16`, mKey, dayNum: 16 });
+      }
+    });
+    rounds.push({ key: `${currentKey}-1`, mKey: currentKey, dayNum: 1 });
+    rounds.push({ key: `${currentKey}-16`, mKey: currentKey, dayNum: 16 });
+
+    rounds.sort((a, b) => {
+      let [yA, mA] = a.mKey.split('-').map(Number);
+      let [yB, mB] = b.mKey.split('-').map(Number);
+      if (yA !== yB) return yA - yB;
+      if (mA !== mB) return mA - mB;
+      return a.dayNum - b.dayNum;
+    });
+
+    let uniqueRounds = [];
+    let mapKeys = new Set();
+    rounds.forEach(r => {
+      if (!mapKeys.has(r.key)) {
+        mapKeys.add(r.key);
+        uniqueRounds.push(r);
+      }
+    });
+    return uniqueRounds;
+  }
+
   async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
@@ -1337,14 +1368,9 @@
       let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
 
-      let [curY, curM] = currentKey.split('-').map(Number);
-      let prevM = curM - 1, prevY = curY;
-      if (prevM === 0) { prevM = 12; prevY--; }
-      let prevKey = `${prevY}-${prevM}`;
-
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
-      let dividendPostAssignedHistory = {}; 
+      let userLastAssignedDividendRound = {}; 
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
@@ -1363,8 +1389,6 @@
                 let shiftOnDiv = mSched[rowIdx][day - 1];
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
-                  if (!dividendPostAssignedHistory[sIdx]) dividendPostAssignedHistory[sIdx] = new Set();
-                  dividendPostAssignedHistory[sIdx].add(`${mKey}_${day}_${shiftOnDiv}`);
                 }
               });
             }
@@ -1399,10 +1423,33 @@
         });
       }
 
+      let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
+      let currentRoundIdx = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === (totalDays >= 16 ? 1 : 1)); 
+
+      staffs.forEach((_, sIdx) => {
+        let lastRoundIndexForSpecificShift = {};
+        allRounds.forEach((round, rIndex) => {
+          let mSched = (round.mKey === currentKey) ? newSchedule : allHistoryData[round.mKey];
+          if (mSched) {
+            const matchedIdx = staffs.findIndex(s => s.name === staffs[sIdx].name);
+            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+            if (mSched[rowIdx]) {
+              let shiftOnDiv = mSched[rowIdx][round.dayNum - 1];
+              if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
+                lastRoundIndexForSpecificShift[shiftOnDiv] = rIndex;
+              }
+            }
+          }
+        });
+        userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
+      });
+
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
         let dividendDayNum = dayIdx === 0 ? 1 : 16;
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
+
+        let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDayNum);
 
         let assignedSupportStaffIdx = null;
         if (workingStaffs.length >= 13) {
@@ -1450,9 +1497,13 @@
             }
             
             if (isDividendDay && level === '高') {
-              let userHistorySet = dividendPostAssignedHistory[sIdx];
-              if (userHistorySet && userHistorySet.has(`${currentKey}_${dividendDayNum}_${shiftName}`)) {
-                return false; 
+              let userMap = userLastAssignedDividendRound[sIdx] || {};
+              let lastIdx = userMap[shiftName];
+              if (lastIdx !== undefined) {
+                let roundsPassed = currentActiveRoundIndex - lastIdx;
+                if (roundsPassed < 2) {
+                  return false; 
+                }
               }
             }
 
@@ -1498,8 +1549,8 @@
             
             if (isDividendDay && level === '高') {
               dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
-              if (!dividendPostAssignedHistory[chosen]) dividendPostAssignedHistory[chosen] = new Set();
-              dividendPostAssignedHistory[chosen].add(`${currentKey}_${dividendDayNum}_${shiftName}`);
+              if (!userLastAssignedDividendRound[chosen]) userLastAssignedDividendRound[chosen] = {};
+              userLastAssignedDividendRound[chosen][shiftName] = currentActiveRoundIndex;
             }
           }
         });
@@ -1582,8 +1633,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（已强制消零）！`;
-      alert(`[${monthKey}] 排班生成完毕！已成功通过后置对调补偿消除所有 0 次岗位，确保全员各岗位均至少有 1 次以上！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（高强度分红日2轮冷却机制生效）！`;
+      alert(`[${monthKey}] 排班生成完毕！分红日高强度岗位已严格遵循“同一岗位需经历两轮（两次分红循环）后才能再次分派”的冷却机制。`);
 
     } catch (err) {
       console.error(err);
