@@ -1385,8 +1385,12 @@ async function getAllHistoryMonthsData() {
       let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
 
-      let allHistoryData = await getAllHistoryMonthsData();
+     let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
+
+      // 【核心关键修复】：把当前正在排班的 newSchedule 直接塞进当前月份的历史池中，
+      // 这样在排班逻辑和统计时，就能立刻实时识别当月已经分出去的高强度岗位！
+      allHistoryData[currentKey] = newSchedule;
 
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
@@ -1407,6 +1411,7 @@ async function getAllHistoryMonthsData() {
               }
               [1, 16].forEach(day => {
                 let shiftOnDiv = mSched[rowIdx][day - 1];
+                // 只要是高强度岗位，全部计入跨月总次数统计
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
                 }
