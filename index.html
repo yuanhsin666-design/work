@@ -1056,14 +1056,14 @@
   }
 
 async function getAllHistoryMonthsData() {
-    let currentKey = getMonthKey(); // 当前选中的年月，例如 "2026-08"
+    let currentKey = getMonthKey(); // 当前选中的年月，例如 "2026-10"
     let allMonthsData = {};
 
     try {
       const { data: cloudRes, error } = await supabaseClient.from('schedules').select('month_key, data');
       if (!error && cloudRes) {
         cloudRes.forEach(row => {
-          // 【严格防护】：严格要求 row.month_key 必须小于等于当前选中的月份，彻底挡住未来月份（如9月、10月）
+          // 【修改这里】：允许抓取所有小于或等于当前月份的历史及当月数据
           if (row.month_key && row.month_key <= currentKey && row.data && row.data.lastGeneratedSchedule) {
             allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
           }
@@ -1075,7 +1075,6 @@ async function getAllHistoryMonthsData() {
       let k = localStorage.key(i);
       if (k.startsWith('auto_schedule_month_')) {
         let mKey = k.replace('auto_schedule_month_', '');
-        // 【严格防护】：同样限制本地缓存必须小于等于当前月份
         if (mKey <= currentKey && !allMonthsData[mKey]) {
           try {
             let parsed = JSON.parse(localStorage.getItem(k));
