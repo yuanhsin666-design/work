@@ -1590,18 +1590,26 @@ async function getAllHistoryMonthsData() {
             });
           }
 
-          if (candidates.length > 0) {
+         if (candidates.length > 0) {
             candidates.sort((a, b) => {
+              // 1. 【核心新增】优先选择当前该强度次数最少的人，实现真正的平均！
+              let countA_level = intensityCounts[a][level] || 0;
+              let countB_level = intensityCounts[b][level] || 0;
+              if (countA_level !== countB_level) return countA_level - countB_level;
+
+              // 2. 其次保持原有的高强度均衡逻辑
               let highA = intensityCounts[a]['高'] || 0;
               let highB = intensityCounts[b]['高'] || 0;
               if (highA !== highB) return highA - highB;
 
+              // 3. 其次保持特定岗位次数均衡
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
               if (countA !== countB) return countA - countB;
               
               return Math.random() - 0.5;
             });
+
             let chosen = candidates[0];
             newSchedule[chosen][dayIdx] = shiftName;
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
