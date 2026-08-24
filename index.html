@@ -1390,6 +1390,8 @@ async function getAllHistoryMonthsData() {
 
       // 【核心关键修复】：把当前正在排班的 newSchedule 直接塞进当前月份的历史池中，
       // 这样在排班逻辑和统计时，就能立刻实时识别当月已经分出去的高强度岗位！
+      let allHistoryData = await getAllHistoryMonthsData();
+      let currentKey = getMonthKey();
       allHistoryData[currentKey] = newSchedule;
 
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
@@ -1399,19 +1401,22 @@ async function getAllHistoryMonthsData() {
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
         if (mSched) {
+          // 【严格防护】：只有当 mKey 严格小于当前月份（即过去真正的历史月份）时，
+          // 它的支援次数才能计入 pastSupportCounts！这样未来的 9月、10月 绝对不会污染 8 月。
+          let isStrictlyPast = (mKey < currentKey); 
+
           staffs.forEach((staff, sIdx) => {
             const matchedIdx = staffs.findIndex(s => s.name === staff.name);
             const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
 
             if (mSched[rowIdx]) {
-              if (mKey !== currentKey) {
+              if (isStrictlyPast) {
                 mSched[rowIdx].forEach(shift => {
                   if (shift === supName) pastSupportCounts[sIdx]++;
                 });
               }
               [1, 16].forEach(day => {
                 let shiftOnDiv = mSched[rowIdx][day - 1];
-                // 只要是高强度岗位，全部计入跨月总次数统计
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
                 }
