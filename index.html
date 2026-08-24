@@ -78,11 +78,11 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 绝对无零岗位严苛版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 绝对无零岗位严苛版)</span>[cite: 5]</h2>
   
   <div class="control-grid">
     <div class="form-group">
-      <label>📅 选择排班月份：</label>
+      <label>📅 选择排班月份：[cite: 5]</label>
       <div style="display: flex; gap: 5px;">
         <select id="yearSelect" style="flex:1;" onchange="onDateChange()"></select>
         <select id="monthSelect" style="flex:1;" onchange="onDateChange()"></select>
@@ -90,7 +90,7 @@
     </div>
 
     <div class="form-group">
-      <label>👥 员工管理：</label>
+      <label>👥 员工管理：[cite: 5]</label>
       <div style="display: flex; gap: 5px;">
         <input type="text" id="newName" placeholder="员工姓名" style="flex: 1;">
         <button onclick="addStaff()">添加</button>
@@ -102,16 +102,16 @@
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🌐 导入当前月份的云端假表：</label>
+      <label>🌐 导入当前月份的云端假表：[cite: 5]</label>
       <div style="display: flex; gap: 5px; margin-bottom: 8px;">
         <input type="text" id="cloudUrlInput" placeholder="粘贴【当前选择月份】的 Google 试算表链接" style="flex: 1;">
-        <button class="success" onclick="fetchCloudRests()">🌐 抓取当月休假日</button>
-        <button class="danger" onclick="clearCurrentMonthRests()">🗑️ 清空当月休假</button>
+        <button class="success" onclick="fetchCloudRests()">🌐 抓取当月休假日[cite: 5]</button>
+        <button class="danger" onclick="clearCurrentMonthRests()">🗑️ 清空当月休假[cite: 5]</button>
       </div>
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🏷️ 岗位与强度设置：</label>
+      <label>🏷️ 岗位与强度设置：[cite: 5]</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
         <input type="text" id="newShiftName" placeholder="岗位名称 (换行用 \n)" style="flex:2; min-width: 150px;">
         <select id="newShiftLevel" style="flex:1; min-width: 100px;">
@@ -126,9 +126,9 @@
   </div>
 
   <div class="toolbar">
-    <button onclick="generateSchedule()">🎲 执行智能排班</button>
-    <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
-    <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
+    <button onclick="generateSchedule()">🎲 执行智能排班[cite: 5]</button>
+    <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位[cite: 5]</button>
+    <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据[cite: 5]</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
   <div id="warningLog" class="log-box"></div>
@@ -136,17 +136,17 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0;">📅 <span id="currentMonthTitle"></span> 排班工作表预览</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表</button>
+    <h3 style="margin:0;">📅 <span id="currentMonthTitle"></span> 排班工作表预览[cite: 5]</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表[cite: 5]</button>
   </div>
 
   <div class="lock-controls">
-    <label><b>🔐 当月锁定控制台：</b></label>
-    <button class="lock-btn" onclick="lockAllCells()">🔒 一键锁定当月全表</button>
-    <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月</button>
-    <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期</button>
-    <button id="toggleEditBtn" class="edit-btn" onclick="toggleManualEditMode()">✏️ 开启手动修改模式</button>
-    <span style="font-size: 12px; color: #666;">💡 提示：非修改模式下，点击表格任意單格可直接切换「單格鎖定」狀態。</span>
+    <label><b>🔐 当月锁定控制台：[cite: 5]</b></label>
+    <button class="lock-btn" onclick="lockAllCells()">🔒 一键锁定当月全表[cite: 5]</button>
+    <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月[cite: 5]</button>
+    <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期[cite: 5]</button>
+    <button id="toggleEditBtn" class="edit-btn" onclick="toggleManualEditMode()">✏️ 开启手动修改模式[cite: 5]</button>
+    <span style="font-size: 12px; color: #666;">💡 提示：非修改模式下，点击表格任意單格可直接切换「單格鎖定」狀態。[cite: 5]</span>
   </div>
 
   <div class="table-container">
@@ -156,8 +156,8 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0;">📊 当月员工岗位及强度次数统计</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('statsTable')">📋 复制统计表</button>
+    <h3 style="margin:0;">📊 当月员工岗位及强度次数统计[cite: 5]</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('statsTable')">📋 复制统计表[cite: 5]</button>
   </div>
   <div class="table-container">
     <table id="statsTable"></table>
@@ -166,8 +166,8 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #1a4f8b;">📊 当月人员岗位强度次数汇总表</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('intensitySummaryTable')">📋 复制汇总表</button>
+    <h3 style="margin:0; color: #1a4f8b;">📊 当月人员岗位强度次数汇总表[cite: 5]</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('intensitySummaryTable')">📋 复制汇总表[cite: 5]</button>
   </div>
   <div class="table-container">
     <table id="intensitySummaryTable"></table>
@@ -176,8 +176,8 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计)</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
+    <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计)[cite: 5]</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表[cite: 5]</button>
   </div>
   <div class="table-container">
     <table id="highIntensityTable"></table>
@@ -186,8 +186,8 @@
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-    <h3 style="margin:0; color: #006064;">🔵 全员支援岗位记录表 (跨月累计)</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表</button>
+    <h3 style="margin:0; color: #006064;">🔵 全员支援岗位记录表 (跨月累计)[cite: 5]</h3>
+    <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表[cite: 5]</button>
   </div>
   <div class="table-container">
     <table id="supportStaffTable"></table>
@@ -1286,7 +1286,7 @@
     return true;
   }
 
-  // --- 新增：智能排班后的“消除0次与绝对平均”微调补偿机制 ---
+  // --- 智能排班后的“消除0次与绝对平均”微调补偿机制 ---
   function balanceSchedule(schedule, staffList, baseShifts) {
     let totalDays = schedule[0].length;
     
@@ -1576,7 +1576,7 @@
         });
       }
 
-      // --- 关键：运行终极均分消零兜底补救 ---
+      // 运行终极均分消零兜底补救
       balanceSchedule(newSchedule, staffs, baseShifts);
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
