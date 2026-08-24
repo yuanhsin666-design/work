@@ -1563,12 +1563,16 @@ async function getAllHistoryMonthsData() {
           let foundS = baseShifts.find(s => s.name === shiftName);
           let level = foundS ? foundS.level : '中';
 
+          // 计算当前各强度的平均值与允许的最大上限 (平均值向上取整 + 1，或严格限制在动态目标范围内)
+          let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
+          let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
+          let maxAllowedLevelCount = Math.ceil(avgLevelCount + 1); // 严格卡死上限，防止单人超标
+
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
             
-            let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
-            let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
-            if (intensityCounts[sIdx][level] > Math.ceil(avgLevelCount + 1)) return false;
+            // 【核心修正】：如果该员工此强度的当前次数已经达到了上限，直接一票否决！
+            if (intensityCounts[sIdx][level] >= maxAllowedLevelCount) return false;
 
             if (level === '高') {
               let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
@@ -1577,6 +1581,14 @@ async function getAllHistoryMonthsData() {
 
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
+
+          // 【安全垫】：如果因为卡得太紧导致候选人为空，自动放宽一次限制，从当前该强度最少的人里挑
+          if (candidates.length === 0) {
+            candidates = workingStaffs.filter(sIdx => {
+              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
+            });
+          }
 
           if (candidates.length > 0) {
             candidates.sort((a, b) => {
