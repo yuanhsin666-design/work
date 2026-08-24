@@ -1567,13 +1567,13 @@ async function getAllHistoryMonthsData() {
           let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
           let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
           
-          // 根据不同强度设定严格的硬卡上限（高强度上限8，中强度上限9，低强度上限6）
+          // 根据您更新后的目标区间设置严格的硬卡上限（高上限8，中上限9，低上限6）
           let hardMaxLimit = level === '高' ? 8 : (level === '中' ? 9 : 6);
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
             
-            // 【核心硬卡控】：如果该员工该强度的当前次数已经达到了目标上限，绝对不准再分配！
+            // 严格限制：当达到目标区间最大值时，绝对不再分配
             if (intensityCounts[sIdx][level] >= hardMaxLimit) return false;
 
             if (level === '高') {
