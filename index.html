@@ -993,7 +993,15 @@
 
     let currentKey = getMonthKey();
     let allHistoryData = await getAllHistoryMonthsData();
-    if (scheduleData) allHistoryData[currentKey] = scheduleData;
+    
+    // 【强制校验】：如果传入了当前月的 scheduleData，或者当前内存中有最新排班，
+    // 必须用当前的排班覆盖历史数据，防止读到残留的旧缓存！
+    if (scheduleData) {
+      allHistoryData[currentKey] = scheduleData;
+    } else {
+      // 如果当前月没有生成排班，强制将当前月的历史记录清空，绝对不读取旧残留数据
+      allHistoryData[currentKey] = null; 
+    }
 
     let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
 
@@ -1016,7 +1024,8 @@
 
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
-        if (mSched) {
+        // 确保 mSched 确实存在且为当前年月或有效历史月份
+        if (mSched && mKey <= currentKey) {
           const matchedIdx = staffs.findIndex(s => s.name === staff.name);
           const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
 
