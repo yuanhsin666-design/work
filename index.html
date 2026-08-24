@@ -1570,22 +1570,22 @@ function balanceSchedule(schedule, staffList, baseShifts) {
         let otherPriorityShifts = shuffledBaseShifts.filter(s => s.level !== '高').map(s => s.name);
         let orderedBaseShifts = [...highPriorityShifts, ...otherPriorityShifts];
 
-        orderedBaseShifts.forEach(shiftName => {
+orderedBaseShifts.forEach(shiftName => {
           let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
           if (alreadyAssigned) return;
 
           let foundS = baseShifts.find(s => s.name === shiftName);
           let level = foundS ? foundS.level : '中';
 
-          // 计算当前各强度的平均值与允许的最大上限 (平均值向上取整 + 1，或严格限制在动态目标范围内)
+          // 计算当前该强度的平均值与允许的最大上限
           let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
           let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
-          let maxAllowedLevelCount = Math.ceil(avgLevelCount + 1); // 严格卡死上限，防止单人超标
+          let maxAllowedLevelCount = Math.ceil(avgLevelCount + 1);
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
             
-            // 【核心修正】：如果该员工此强度的当前次数已经达到了上限，直接一票否决！
+            // 严格卡死上限，防止单人超标
             if (intensityCounts[sIdx][level] >= maxAllowedLevelCount) return false;
 
             if (level === '高') {
@@ -1595,6 +1595,38 @@ function balanceSchedule(schedule, staffList, baseShifts) {
 
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
+
+          // 如果没有严格符合上限的候选人，安全垫放宽限制
+          if (candidates.length === 0) {
+            candidates = workingStaffs.filter(sIdx => {
+              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+              if (level === '高') {
+                let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
+                if (shiftSpecificCount >= 2) return false;
+              }
+              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
+            });
+          }
+
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => {
+              let highA = intensityCounts[a]['高'] || 0;
+              let highB = intensityCounts[b]['高'] || 0;
+              if (highA !== highB) return highA - highB;
+
+              let countA = shiftCounts[a][shiftName] || 0;
+              let countB = shiftCounts[b][shiftName] || 0;
+              if (countA !== countB) return countA - countB;
+              
+              return Math.random() - 0.5;
+            });
+
+            let chosen = candidates[0];
+            newSchedule[chosen][dayIdx] = shiftName;
+            shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
+            if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
+          }
+        });
 
           // 【安全垫】：如果因为卡得太紧导致候选人为空，自动放宽一次限制，从当前该强度最少的人里挑
           if (candidates.length === 0) {
