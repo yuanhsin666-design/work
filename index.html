@@ -1365,7 +1365,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-  async function generateSchedule() {
+ async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1416,6 +1416,7 @@ async function getAllHistoryMonthsData() {
         }
       });
 
+      // 1. 先读取用户锁定的单元格与请假表
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1430,7 +1431,7 @@ async function getAllHistoryMonthsData() {
               if (existingShift === supName) {
                 supportCountsThisMonth[sIdx]++;
               } else {
-                shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
+                shiftCounts[sIdx][existingShift] = (shiftCounts[existingShift] || 0) + 1;
                 let foundS = baseShifts.find(s => s.name === existingShift);
                 if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
                   intensityCounts[sIdx][foundS.level]++;
@@ -1444,7 +1445,6 @@ async function getAllHistoryMonthsData() {
       }
 
       let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
-      let currentRoundIdx = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === (totalDays >= 16 ? 1 : 1)); 
 
       staffs.forEach((_, sIdx) => {
         let lastRoundIndexForSpecificShift = {};
@@ -1464,13 +1464,73 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
+      // ==========================================
+      // 2. 【核心优化】：像支援岗位一样，优先强制固定分红日（1号和16号）的高强度岗位！
+      // ==========================================
+      [1, 16].forEach(dividendDay => {
+        if (dividendDay > totalDays) return;
+        let dayIdx = dividendDay - 1;
+        let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDay);
+
+        // 获取当天可以上班且未被锁定的员工
+        let availableStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => {
+          return newSchedule[sIdx][dayIdx] !== "休" && !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
+        });
+
+        // 针对当天的每一个高强度岗位，强制进行优先指派
+        highShifts.forEach(shiftName => {
+          // 如果该岗位在当天已经被锁定或指派了，就跳过
+          let alreadyHas = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
+          if (alreadyHas || availableStaffs.length === 0) return;
+
+          // 筛选符合 2轮冷却 限制的候选人
+          let candidates = availableStaffs.filter(sIdx => {
+            let userMap = userLastAssignedDividendRound[sIdx] || {};
+            let lastIdx = userMap[shiftName];
+            if (lastIdx !== undefined) {
+              let roundsPassed = currentActiveRoundIndex - lastIdx;
+              if (roundsPassed < 2) return false; // 冷却期未满
+            }
+            return true;
+          });
+
+          // 如果冷却期限制导致没有候选人，则放宽限制（从全体可用员工中选）
+          if (candidates.length === 0) {
+            candidates = [...availableStaffs];
+          }
+
+          if (candidates.length > 0) {
+            // 按照“历史分红高强度总次数最少”的人优先排序，彻底解决 0 次拿不到的问题！
+            candidates.sort((a, b) => {
+              let histA = dividendHighHistory[a] || 0;
+              let histB = dividendHighHistory[b] || 0;
+              if (histA !== histB) return histA - histB;
+              return Math.random() - 0.5;
+            });
+
+            let chosen = candidates[0];
+            newSchedule[chosen][dayIdx] = shiftName;
+            
+            // 从可用名单中移除已被指派的人
+            availableStaffs = availableStaffs.filter(s => s !== chosen);
+
+            // 更新统计数据
+            shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
+            intensityCounts[chosen]['High' in intensityCounts[chosen] ? 'High' : '高']++;
+            dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
+            
+            if (!userLastAssignedDividendRound[chosen]) userLastAssignedDividendRound[chosen] = {};
+            userLastAssignedDividendRound[chosen][shiftName] = currentActiveRoundIndex;
+          }
+        });
+      });
+
+      // 3. 接着处理常规日期的排班与剩余岗位的填补
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
-        let dividendDayNum = dayIdx === 0 ? 1 : 16;
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
-        let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDayNum);
-
+        // 处理支援岗位
         let assignedSupportStaffIdx = null;
         if (workingStaffs.length >= 13) {
           let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
@@ -1515,46 +1575,15 @@ async function getAllHistoryMonthsData() {
               let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
               if (shiftSpecificCount >= 2) return false; 
             }
-            
-            if (isDividendDay && level === '高') {
-              let userMap = userLastAssignedDividendRound[sIdx] || {};
-              let lastIdx = userMap[shiftName];
-              if (lastIdx !== undefined) {
-                let roundsPassed = currentActiveRoundIndex - lastIdx;
-                if (roundsPassed < 2) {
-                  return false; 
-                }
-              }
-            }
 
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
-          if (candidates.length === 0 && isDividendDay && level === '高') {
-            candidates = workingStaffs.filter(sIdx => {
-              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-              let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
-              let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
-              if (intensityCounts[sIdx][level] > Math.ceil(avgLevelCount + 1)) return false;
-              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
-            });
-          }
-
           if (candidates.length > 0) {
             candidates.sort((a, b) => {
-              if (isDividendDay && level === '高') {
-                let divHistA = dividendHighHistory[a] || 0;
-                let divHistB = dividendHighHistory[b] || 0;
-                if (divHistA !== divHistB) return divHistA - divHistB;
-              }
-
               let highA = intensityCounts[a]['高'] || 0;
               let highB = intensityCounts[b]['高'] || 0;
               if (highA !== highB) return highA - highB;
-
-              let aDidHighYesterday = (dayIdx > 0 && baseShifts.find(s => s.name === newSchedule[a][dayIdx - 1])?.level === '高');
-              let bDidHighYesterday = (dayIdx > 0 && baseShifts.find(s => s.name === newSchedule[b][dayIdx - 1])?.level === '高');
-              if (aDidHighYesterday !== bDidHighYesterday) return aDidHighYesterday ? 1 : -1;
 
               let countA = shiftCounts[a][shiftName] || 0;
               let countB = shiftCounts[b][shiftName] || 0;
@@ -1566,15 +1595,10 @@ async function getAllHistoryMonthsData() {
             newSchedule[chosen][dayIdx] = shiftName;
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
             if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
-            
-            if (isDividendDay && level === '高') {
-              dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
-              if (!userLastAssignedDividendRound[chosen]) userLastAssignedDividendRound[chosen] = {};
-              userLastAssignedDividendRound[chosen][shiftName] = currentActiveRoundIndex;
-            }
           }
         });
 
+        // 填补当天剩下的空白格子
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
@@ -1592,60 +1616,6 @@ async function getAllHistoryMonthsData() {
         });
       }
 
-      for (let iteration = 0; iteration < 10; iteration++) {
-        baseShifts.forEach(shiftObj => {
-          let shiftName = shiftObj.name;
-          let level = shiftObj.level;
-
-          staffs.forEach((staff, targetStaffIdx) => {
-            let curCount = (shiftCounts[targetStaffIdx][shiftName] || 0);
-
-            if (curCount === 0) {
-              let successFix = false;
-
-              for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-                if (successFix) break;
-
-                let targetDayShift = newSchedule[targetStaffIdx][dayIdx];
-                if (!targetDayShift || targetDayShift === "休" || targetDayShift === supName || lockedMap[targetStaffIdx][dayIdx]) continue;
-
-                let holderStaffIdx = staffs.findIndex((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
-
-                if (holderStaffIdx !== -1 && holderStaffIdx !== targetStaffIdx && !lockedMap[holderStaffIdx][dayIdx]) {
-                  let holderCurCount = shiftCounts[holderStaffIdx][shiftName] || 0;
-                  
-                  if (holderCurCount > 1 || iteration >= 5) {
-                    let validForTarget = isAssignmentValid(targetStaffIdx, dayIdx, shiftName, newSchedule);
-                    let validForHolder = isAssignmentValid(holderStaffIdx, dayIdx, targetDayShift, newSchedule);
-
-                    if (validForTarget && validForHolder) {
-                      newSchedule[targetStaffIdx][dayIdx] = shiftName;
-                      newSchedule[holderStaffIdx][dayIdx] = targetDayShift;
-
-                      shiftCounts[targetStaffIdx][shiftName] = (shiftCounts[targetStaffIdx][shiftName] || 0) + 1;
-                      shiftCounts[targetStaffIdx][targetDayShift]--;
-                      shiftCounts[holderStaffIdx][shiftName]--;
-                      shiftCounts[holderStaffIdx][targetDayShift] = (shiftCounts[holderStaffIdx][targetDayShift] || 0) + 1;
-
-                      let oldTargetFound = baseShifts.find(s => s.name === targetDayShift);
-                      if (oldTargetFound) {
-                        intensityCounts[targetStaffIdx][oldTargetFound.level]--;
-                        intensityCounts[targetStaffIdx][level]++;
-                        intensityCounts[holderStaffIdx][level]--;
-                        intensityCounts[holderStaffIdx][oldTargetFound.level]++;
-                      }
-
-                      successFix = true;
-                      break;
-                    }
-                  }
-                }
-              }
-            }
-          });
-        });
-      }
-
       balanceSchedule(newSchedule, staffs, baseShifts);
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
@@ -1653,8 +1623,8 @@ async function getAllHistoryMonthsData() {
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（高强度分红日2轮冷却机制生效）！`;
-      alert(`[${monthKey}] 排班生成完毕！分红日高强度岗位已严格遵循“同一岗位需经历两轮（两次分红循环）后才能再次分派”的冷却机制。`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（分红日高强度岗位已优先强制固定分配）！`;
+      alert(`[${monthKey}] 排班生成完毕！分红日（1号与16号）的高强度岗位现在已像支援岗位一样被优先固定，并自动把机会平均分配给总次数较少的人，不会再有一直抽不到 0 次的情况了！`);
 
     } catch (err) {
       console.error(err);
