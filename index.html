@@ -247,7 +247,7 @@
   function getMonthKey() {
     const year = document.getElementById('yearSelect').value;
     const month = document.getElementById('monthSelect').value;
-    return `${year}-${month}`;
+    return `${year}-${month.padStart(2, '0')}`;
   }
 
   function initLockedMap(forceReset = false) {
@@ -1055,8 +1055,8 @@
     container.innerHTML = html;
   }
 
-async function getAllHistoryMonthsData() {
-    let currentKey = getMonthKey(); // 当前选中的年月，例如 "2026-08"
+  async function getAllHistoryMonthsData() {
+    let currentKey = getMonthKey(); 
     let allMonthsData = {};
 
     try {
