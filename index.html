@@ -1609,18 +1609,26 @@ async function getAllHistoryMonthsData() {
           }
         });
 
-        // 填补当天剩下的空白格子
+       // 填补当天剩下的空白格子（严格受强度上限约束）
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
             let availableUnusedShifts = baseShifts.map(s => s.name).filter(sName => !assignedToday.includes(sName));
 
-            let chosenFallback = availableUnusedShifts.find(sName => isAssignmentValid(sIdx, dayIdx, sName, newSchedule)) 
-                                 || availableUnusedShifts[0] 
-                                 || baseShifts[0].name;
+            // 优先挑选不违背规则且不会让该员工强度超标的岗位
+            let chosenFallback = availableUnusedShifts.find(sName => {
+              let fS = baseShifts.find(s => s.name === sName);
+              let lvl = fS ? fS.level : '中';
+              let totalLvlCnt = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][lvl], 0);
+              let maxLvlAllowed = Math.ceil((totalLvlCnt / staffs.length) + 1);
+
+              return intensityCounts[sIdx][lvl] < maxLvlAllowed && isAssignmentValid(sIdx, dayIdx, sName, newSchedule);
+            }) || availableUnusedShifts.find(sName => isAssignmentValid(sIdx, dayIdx, sName, newSchedule)) 
+               || availableUnusedShifts[0] 
+               || baseShifts[0].name;
 
             newSchedule[sIdx][dayIdx] = chosenFallback;
-            shiftCounts[sIdx][chosenFallback] = (shiftCounts[sIdx][chosenFallback] || 0) + 1;
+            shiftCounts[sIdx][chosenFallback] = (shiftCounts[chosen][chosenFallback] || 0) + 1;
             let foundS = baseShifts.find(s => s.name === chosenFallback);
             if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) intensityCounts[sIdx][foundS.level]++;
           }
