@@ -937,7 +937,7 @@
       <thead>
         <tr style="background-color: #f8fafc; font-weight: bold;">
           <th style="padding: 8px; width: 30%;">人员姓名</th>
-          <th style="padding: 8px; width: 70%;">当月岗位强度汇总记录 (高目标: ${rangeHighMin}~${rangeHighMax}次、中目标: ${rangeMidMin}~${rangeMidMax}次、低目标: ${rangeLowMin}~${rangeLowMax}次)</th>
+          <th style="padding: 8px; width: 70%;">当月岗位强度汇总记录 (高目标: 6~8次、中目标: 7~9次、低目标: 4~6次)</th>
         </tr>
       </thead>
       <tbody>
@@ -974,11 +974,11 @@
 
     html += `
       <tr style="background-color: #e2e8f0; font-weight: bold;">
-        <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均与动态目标 (±1)</td>
+        <td style="padding: 8px; text-align: center; color: #1e293b;">每人平均与动态目标</td>
         <td style="padding: 8px; text-align: center; font-size: 13px; white-space: nowrap;">
-          <span style="color: #c62828;">高平均 ${avgHigh.toFixed(1)} (目标 ${rangeHighMin}~${rangeHighMax})</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #8c6b00;">中平均 ${avgMid.toFixed(1)} (目标 ${rangeMidMin}~${rangeMidMax})</span> &nbsp;&nbsp;&nbsp;&nbsp;
-          <span style="color: #1b5e20;">低平均 ${avgLow.toFixed(1)} (目标 ${rangeLowMin}~${rangeLowMax})</span>
+          <span style="color: #c62828;">高平均 ${avgHigh.toFixed(1)} (目标 6~8)</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #8c6b00;">中平均 ${avgMid.toFixed(1)} (目标 7~9)</span> &nbsp;&nbsp;&nbsp;&nbsp;
+          <span style="color: #1b5e20;">低平均 ${avgLow.toFixed(1)} (目标 4~6)</span>
         </td>
       </tr>
     `;
@@ -986,7 +986,6 @@
     html += `</tbody>`;
     container.innerHTML = html;
   }
-
   async function renderHighIntensityTable(scheduleData = null) {
     let container = document.getElementById('highIntensityTable');
     if (!container) return;
