@@ -995,6 +995,7 @@
     let allHistoryData = await getAllHistoryMonthsData();
     if (scheduleData) allHistoryData[currentKey] = scheduleData;
 
+    // 【修改点】：严格只筛选出 level 为 '高' 的岗位名称
     let highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
 
     let html = `
@@ -1022,12 +1023,14 @@
 
           if (mSched[rowIdx]) {
             let shift1 = mSched[rowIdx][0];
+            // 必须在高强度岗位列表中才统计
             if (shift1 && highShifts.includes(shift1)) {
               count1++;
               let clean = shift1.replace(/\n/g, ' ');
               allHistoryList.push(`<b>1号:</b> ${clean} (${mKey})`);
             }
             let shift16 = mSched[rowIdx][15];
+            // 必须在高强度岗位列表中才统计
             if (shift16 && highShifts.includes(shift16)) {
               count16++;
               let clean16 = shift16.replace(/\n/g, ' ');
@@ -1044,7 +1047,7 @@
         <tr>
           <td style="font-weight: bold; padding: 8px;">${staff.name}</td>
           <td style="padding: 8px; color: ${count1 > 0 ? '#1b5e20' : '#94a3b8'}; font-weight: bold;">${count1} 次</td>
-          <td style="padding: 8px; color: ${count16 > 0 ? '#1b5e20' : '#94a3b8'}; font-weight: bold;">${count16} 次</td>
+          <td style="padding: 8px; color: ${count16 > 0 ? '#1b5e20' : '#1b5e20'}; font-weight: bold;">${count16} 次</td>
           <td style="padding: 8px; text-align: left; padding-left: 10px; font-size: 11px; line-height: 1.5;">${historyStr}</td>
           <td style="padding: 8px; color: #c62828; font-weight: bold;">累计 ${totalCount} 次</td>
         </tr>
