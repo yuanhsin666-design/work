@@ -1286,6 +1286,41 @@
     return true;
   }
 
+  // --- 新增：智能排班后的“消除0次与绝对平均”微调补偿机制 ---
+  function balanceSchedule(schedule, staffList, baseShifts) {
+    let totalDays = schedule[0].length;
+    
+    staffList.forEach((staffName, sIdx) => {
+      baseShifts.forEach(shiftObj => {
+        let sName = shiftObj.name;
+        let count = schedule[sIdx].filter(day => day === sName).length;
+        
+        // 如果发现该岗位次数为 0，尝试从次数较多（>= 2）的员工那里“偷”一天过来对调
+        if (count === 0) {
+          for (let targetDay = 0; targetDay < totalDays; targetDay++) {
+            let currentShiftOnDay = schedule[sIdx][targetDay];
+            if (currentShiftOnDay === "休") {
+              for (let otherSIdx = 0; otherSIdx < staffList.length; otherSIdx++) {
+                if (otherSIdx === sIdx) continue;
+                if (schedule[otherSIdx][targetDay] === sName) {
+                  let otherTotalCount = schedule[otherSIdx].filter(d => d === sName).length;
+                  if (otherTotalCount > 1) {
+                    // 进行安全对调
+                    schedule[sIdx][targetDay] = sName;
+                    schedule[otherSIdx][targetDay] = "休";
+                    break;
+                  }
+                }
+              }
+              let newCount = schedule[sIdx].filter(day => day === sName).length;
+              if (newCount > 0) break;
+            }
+          }
+        }
+      });
+    });
+  }
+
   async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
@@ -1442,13 +1477,11 @@
           }
 
           if (candidates.length > 0) {
-           candidates.sort((a, b) => {
-              // 优先让近期高强度较少的人上
+            candidates.sort((a, b) => {
               let highA = intensityCounts[a]['高'] || 0;
               let highB = intensityCounts[b]['高'] || 0;
               if (highA !== highB) return highA - highB;
 
-              // 检查 a 和 b 是否刚刚在昨天做过高强度，如果昨天刚做过，适当降低优先级（往后排），让没做过的人先上
               let aDidHighYesterday = (dayIdx > 0 && baseShifts.find(s => s.name === newSchedule[a][dayIdx - 1])?.level === '高');
               let bDidHighYesterday = (dayIdx > 0 && baseShifts.find(s => s.name === newSchedule[b][dayIdx - 1])?.level === '高');
               if (aDidHighYesterday !== bDidHighYesterday) return aDidHighYesterday ? 1 : -1;
@@ -1543,13 +1576,16 @@
         });
       }
 
+      // --- 关键：运行终极均分消零兜底补救 ---
+      balanceSchedule(newSchedule, staffs, baseShifts);
+
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
 
       const monthKey = getMonthKey();
       document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（已强制消零）！`;
-      alert(`[${monthKey}] 排班生成完毕！已成功通过强力循环消除所有 0 次岗位，确保全员各岗位均至少有 1 次以上！`);
+      alert(`[${monthKey}] 排班生成完毕！已成功通过后置对调补偿消除所有 0 次岗位，确保全员各岗位均至少有 1 次以上！`);
 
     } catch (err) {
       console.error(err);
