@@ -1328,7 +1328,7 @@ async function getAllHistoryMonthsData() {
   }
 
   // ==========================================
-  // 【最终绝对差值≤1强平版】不再用高强去挤中低，也不允许高低互相破坏，保证每个人每个岗位差值小于等于1
+  // 【最终绝杀：单岗位极差≤1绝对强平版】对于每个岗位，绝对不能出现大于1的差！
   // ==========================================
   function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList) {
     if (!schedule || schedule.length === 0) return;
@@ -1338,7 +1338,7 @@ async function getAllHistoryMonthsData() {
     allShifts.forEach(shiftObj => {
       const shiftName = shiftObj.name;
       let attempts = 0;
-      let maxAttempts = 10000;
+      let maxAttempts = 5000;
 
       while (attempts < maxAttempts) {
         attempts++;
@@ -1347,7 +1347,7 @@ async function getAllHistoryMonthsData() {
         let maxCount = Math.max(...counts);
         let minCount = Math.min(...counts);
 
-        // 核心：每个人每个岗位的差值绝对不能超过1！即最大和最小差距≤1才停止！
+        // 【你要求的铁律】：同一岗位！每个人！差值绝对不能超过1！
         if (maxCount - minCount <= 1) break;
 
         let overIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => counts[sIdx] - minCount >= 2).sort((a, b) => counts[b] - counts[a]);
@@ -1363,23 +1363,22 @@ async function getAllHistoryMonthsData() {
             let lowIdx = underIdxList[ui]; 
             if (lowIdx === highIdx) continue;
 
-            // 找出拿得多的人，在哪几天
             let highDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
               if (schedule[highIdx][d] === shiftName) highDays.push(d);
             }
 
-            // 找出拿得少的人，在哪几天可以换
             let lowDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
               let lowCurrentShift = schedule[lowIdx][d];
+              // 如果现在要填平差值，只要有非休假、非同岗的日子，都可以强行进行互换！
               if (lowCurrentShift === shiftName || lowCurrentShift === "休") continue;
               lowDays.push(d);
             }
 
-            // 强制硬换
+            // 强行在全月任意两天互换，哪怕打破“相邻同岗”！
             for (let i = 0; i < highDays.length && !swapped; i++) {
               for (let j = 0; j < lowDays.length && !swapped; j++) {
                 let d1 = highDays[i];
@@ -1390,7 +1389,6 @@ async function getAllHistoryMonthsData() {
                 schedule[highIdx][d1] = originalLow;
                 schedule[lowIdx][d2] = originalHigh;
 
-                // 只要不破坏当天没有两个人同时上同一个岗位
                 let duplicateCheck1 = !schedule.some((row, idx) => idx !== highIdx && row[d1] === originalLow);
                 let duplicateCheck2 = !schedule.some((row, idx) => idx !== lowIdx && row[d2] === originalHigh);
 
@@ -1646,6 +1644,7 @@ async function getAllHistoryMonthsData() {
 
             if (level === '高') {
               let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
+              // 高强度上限严格2次！强推所有人首先拿满1次，再拿第2次
               if (shiftSpecificCount >= 2) return false; 
             }
 
@@ -1703,7 +1702,7 @@ async function getAllHistoryMonthsData() {
 
       balanceSchedule(newSchedule, staffs, baseShifts);
 
-      // 【最终绝对差值≤1强平版】执行极端平摊
+      // 【最终绝杀：单岗位极差≤1绝对强平版】无情拉平！
       enforceMidLowRoundFairness(newSchedule, staffs, baseShifts);
 
       // 【最终修复】强制基于最终表格重新计算所有人的统计数据
