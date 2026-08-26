@@ -111,13 +111,15 @@
     </div>
   </div>
 
-    <div class="toolbar">
+  <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
     <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
     <!-- 校验连排岗位按钮 -->
     <button class="warning-btn" onclick="validateAdjacentShifts()">⚠️ 校验连排岗位</button>
     <!-- 修复连排并保持平摊按钮 -->
     <button class="success" onclick="autoFixAdjacentShifts()">🛠️ 修复连排并保持平摊</button>
+    <!-- 新增修复重复岗位并保持平摊按钮 -->
+    <button class="success" onclick="autoFixDuplicateShifts()">🔧 修复重复岗位并保持平摊</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -957,6 +959,117 @@
       document.getElementById('status').innerText = `✅ 校验完毕：排班无岗位重复！`;
       alert(`校验完成！当月排班结构良好，没有在同一天发现重复的岗位。`);
     }
+      async function autoFixDuplicateShifts() {
+    if (!lastGeneratedSchedule) {
+      return alert("当前没有排班数据，请先执行排班！");
+    }
+
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+
+    // 克隆一份当前排班进行修改
+    let schedule = lastGeneratedSchedule.map(row => [...row]);
+
+    let fixedCount = 0;
+    let fixLogs = [];
+
+    // 遍历每一天
+    for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+      // 找出这一天有哪些岗位被重复分配了
+      let shiftOccurrences = {};
+      let duplicateShiftsToday = [];
+
+      staffs.forEach((staff, sIdx) => {
+        let shiftVal = schedule[sIdx][dayIdx];
+        if (shiftVal && shiftVal !== "休") {
+          if (!shiftOccurrences[shiftVal]) shiftOccurrences[shiftVal] = [];
+          shiftOccurrences[shiftVal].push(sIdx);
+        }
+      });
+
+      Object.keys(shiftOccurrences).forEach(shiftName => {
+        if (shiftOccurrences[shiftName].length > 1) {
+          duplicateShiftsToday.push(shiftName);
+        }
+      });
+
+      // 如果有重复岗位，尝试修复
+      duplicateShiftsToday.forEach(shiftName => {
+        let duplicatedStaffs = shiftOccurrences[shiftName];
+        
+        // 对于当天分到这个岗位的多人，保留一个，把其他人的这个岗位换出去
+        for (let i = 1; i < duplicatedStaffs.length; i++) {
+          let sIdx = duplicatedStaffs[i];
+          let swapped = false;
+
+          // 遍历其他所有的员工，寻找可以互换的人
+          for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
+            if (otherSIdx === sIdx || swapped) continue;
+            if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue; // 检查锁定
+            if (lockedMap[otherSIdx] && lockedMap[otherSIdx][dayIdx]) continue;
+
+            let shiftA = schedule[sIdx][dayIdx];      // 重复的岗位
+            let shiftB = schedule[otherSIdx][dayIdx]; // 别人当天的岗位
+
+            // 对方不能是休、空白、或者是同一个岗位
+            if (!shiftB || shiftB === "休" || shiftB === shiftA) continue;
+
+            // 核心：互换之后，检查是否会导致其他问题
+            // 1. 检查互换后，shiftB 会不会导致 sIdx 连排？
+            let aPrev = (dayIdx > 0) ? schedule[sIdx][dayIdx - 1] : "";
+            let aNext = (dayIdx < totalDays - 1) ? schedule[sIdx][dayIdx + 1] : "";
+            let sIdxNewAdj = (shiftB === aPrev || shiftB === aNext);
+            if (!sIdxNewAdj && getShiftCategory(shiftB) && (getShiftCategory(aPrev) === getShiftCategory(shiftB) || getShiftCategory(aNext) === getShiftCategory(shiftB))) {
+              sIdxNewAdj = true;
+            }
+
+            // 2. 检查互换后，shiftA 会不会导致 otherSIdx 连排？
+            let bPrev = (dayIdx > 0) ? schedule[otherSIdx][dayIdx - 1] : "";
+            let bNext = (dayIdx < totalDays - 1) ? schedule[otherSIdx][dayIdx + 1] : "";
+            let otherSIdxNewAdj = (shiftA === bPrev || shiftA === bNext);
+            if (!otherSIdxNewAdj && getShiftCategory(shiftA) && (getShiftCategory(bPrev) === getShiftCategory(shiftA) || getShiftCategory(bNext) === getShiftCategory(shiftA))) {
+              otherSIdxNewAdj = true;
+            }
+
+            // 3. 检查互换后，当天会不会出现新的重复（例如 shiftB 本来已经有人了）
+            let shiftBAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftB);
+            let shiftAAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftA);
+
+            // 如果互换后会导致任何一方产生新的连排，或者产生新的重复，则放弃
+            if (sIdxNewAdj || otherSIdxNewAdj || shiftBAlreadyExistsToday || shiftAAlreadyExistsToday) {
+              continue;
+            }
+
+            // 执行互换
+            schedule[sIdx][dayIdx] = shiftB;
+            schedule[otherSIdx][dayIdx] = shiftA;
+            swapped = true;
+            fixedCount++;
+            fixLogs.push(`📅 <b>第 ${dayIdx + 1} 天</b>：修复了 <b>${staffs[sIdx].name}</b> 的重复岗位 [${shiftA.replace(/\n/g,'')}]，与 <b>${staffs[otherSIdx].name}</b> 的 [${shiftB.replace(/\n/g,'')}] 进行了互换。`);
+          }
+        }
+      });
+    }
+
+    if (fixedCount > 0) {
+      // 更新数据并重新渲染
+      lastGeneratedSchedule = sanitizeSchedule(schedule);
+      renderAll();
+      saveDataToLocal();
+
+      // 显示日志
+      const warningBox = document.getElementById('warningLog');
+      warningBox.innerHTML = `<b>✅ 重复岗位修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
+      warningBox.style.display = 'block';
+      document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处重复岗位！`;
+      alert(`已完成修复！系统将重复岗位与其他员工进行了互换，总岗位次数依然保持平摊，且不会产生新的连排或重复。`);
+
+    } else {
+      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无重复岗位！`;
+      alert("排班非常完美！当前没有任何岗位重复的情况。");
+    }
+  }
   }
 
   function renderStatsTable(scheduleData = null) {
