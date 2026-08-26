@@ -1001,17 +1001,22 @@
     }
   }
 
-  function validateDuplicateShifts() {
+    function validateDuplicateShifts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
     const allCells = document.querySelectorAll('#scheduleTable td');
     allCells.forEach(td => td.classList.remove('shift-duplicate-error'));
+    
     let duplicateCount = 0;
     let duplicateLogs = [];
+    let missingShiftLogs = [];
+
     for (let day = 1; day <= totalDays; day++) {
       let dayIdx = day - 1;
       let shiftOccurrences = {}; 
+      
+      // 收集当天已有的岗位
       staffs.forEach((staff, sIdx) => {
         let shiftVal = "";
         if (isManualEditMode) {
@@ -1030,6 +1035,8 @@
           shiftOccurrences[shiftVal].push(sIdx);
         }
       });
+
+      // 1. 检查重复岗位
       Object.keys(shiftOccurrences).forEach(shiftName => {
         let staffIndices = shiftOccurrences[shiftName];
         if (staffIndices.length > 1) {
@@ -1043,13 +1050,32 @@
           });
         }
       });
+
+      // 2. 检查缺失岗位（如果有重复，才去寻找缺失的岗位，方便用户直接拿来填坑）
+      if (duplicateCount > 0) {
+        let missingShiftsToday = [];
+        baseShifts.forEach(shift => {
+          if (!shiftOccurrences[shift.name]) {
+            missingShiftsToday.push(`[<b>${shift.name.replace(/\n/g, ' ')}</b>]`);
+          }
+        });
+        
+        if (missingShiftsToday.length > 0) {
+          missingShiftLogs.push(`📅 第 <b>${day}</b> 天：缺少以下岗位 -> ${missingShiftsToday.join('、')}`);
+        }
+      }
     }
+
     const warningBox = document.getElementById('warningLog');
     if (duplicateCount > 0) {
-      warningBox.innerHTML = `<b>🚨 岗位重复校验提醒（共发现 ${duplicateCount } 处重复）：</b><br>` + duplicateLogs.join('<br>');
+      let fullLog = `<b>🚨 岗位重复校验提醒（共发现 ${duplicateCount} 处重复）：</b><br>` + duplicateLogs.join('<br>');
+      if (missingShiftLogs.length > 0) {
+        fullLog += `<br><br><b>💡 建议填补的空缺岗位：</b><br>` + missingShiftLogs.join('<br>');
+      }
+      warningBox.innerHTML = fullLog;
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${duplicateCount} 处岗位重复！`;
-      alert(`校验完成！发现有 ${duplicateCount} 天存在相同的岗位重复分配，相关格子已为您标红显示！`);
+      alert(`校验完成！发现有 ${duplicateCount} 天存在相同的岗位重复分配，且已列出当天可用的空缺岗位，相关格子已为您标红显示！`);
     } else {
       warningBox.style.display = 'none';
       document.getElementById('status').innerText = `✅ 校验完毕：排班无岗位重复！`;
