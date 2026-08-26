@@ -839,19 +839,42 @@
     }
   }
 
-  async function autoFixDuplicateShifts() {
+   async function autoFixDuplicateShifts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
     }
+
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
+
+    // 克隆一份当前排班进行修改
     let schedule = lastGeneratedSchedule.map(row => [...row]);
+
     let fixedCount = 0;
     let fixLogs = [];
+
+    // 辅助函数：检查某人在某天，当前岗位是否在同一天已经有人重复了
+    function hasSameShiftSameDay(s, d) {
+      let shiftVal = schedule[s][d];
+      if (!shiftVal || shiftVal === "休") return false;
+      
+      // 检查同一天是否有其他人也排了同一个岗位
+      for (let i = 0; i < staffs.length; i++) {
+        if (i !== s && schedule[i][d] === shiftVal) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // 遍历每一天
     for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+      
+      // 找出这一天有哪些岗位被重复分配了
       let shiftOccurrences = {};
       let duplicateShiftsToday = [];
+
       staffs.forEach((staff, sIdx) => {
         let shiftVal = schedule[sIdx][dayIdx];
         if (shiftVal && shiftVal !== "休") {
@@ -859,40 +882,45 @@
           shiftOccurrences[shiftVal].push(sIdx);
         }
       });
+
       Object.keys(shiftOccurrences).forEach(shiftName => {
         if (shiftOccurrences[shiftName].length > 1) {
           duplicateShiftsToday.push(shiftName);
         }
       });
+
+      // 如果有重复岗位，尝试修复
       duplicateShiftsToday.forEach(shiftName => {
         let duplicatedStaffs = shiftOccurrences[shiftName];
+        
+        // 对于当天分到这个岗位的多人，保留一个，把其他人的这个岗位换出去
         for (let i = 1; i < duplicatedStaffs.length; i++) {
           let sIdx = duplicatedStaffs[i];
           let swapped = false;
+
+          // 遍历其他所有的员工，寻找可以互换的人
           for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
             if (otherSIdx === sIdx || swapped) continue;
-            if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue;
+            if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue; // 检查锁定
             if (lockedMap[otherSIdx] && lockedMap[otherSIdx][dayIdx]) continue;
-            let shiftA = schedule[sIdx][dayIdx];
-            let shiftB = schedule[otherSIdx][dayIdx];
+
+            let shiftA = schedule[sIdx][dayIdx];      // 重复的岗位
+            let shiftB = schedule[otherSIdx][dayIdx]; // 别人当天的岗位
+
+            // 对方不能是休、空白、或者是同一个岗位
             if (!shiftB || shiftB === "休" || shiftB === shiftA) continue;
-            let aPrev = (dayIdx > 0) ? schedule[sIdx][dayIdx - 1] : "";
-            let aNext = (dayIdx < totalDays - 1) ? schedule[sIdx][dayIdx + 1] : "";
-            let sIdxNewAdj = (shiftB === aPrev || shiftB === aNext);
-            if (!sIdxNewAdj && getShiftCategory(shiftB) && (getShiftCategory(aPrev) === getShiftCategory(shiftB) || getShiftCategory(aNext) === getShiftCategory(shiftB))) {
-              sIdxNewAdj = true;
-            }
-            let bPrev = (dayIdx > 0) ? schedule[otherSIdx][dayIdx - 1] : "";
-            let bNext = (dayIdx < totalDays - 1) ? schedule[otherSIdx][dayIdx + 1] : "";
-            let otherSIdxNewAdj = (shiftA === bPrev || shiftA === bNext);
-            if (!otherSIdxNewAdj && getShiftCategory(shiftA) && (getShiftCategory(bPrev) === getShiftCategory(shiftA) || getShiftCategory(bNext) === getShiftCategory(shiftA))) {
-              otherSIdxNewAdj = true;
-            }
-            let shiftBAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftB);
-            let shiftAAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftA);
-            if (sIdxNewAdj || otherSIdxNewAdj || shiftBAlreadyExistsToday || shiftAAlreadyExistsToday) {
+
+            // 核心：判断互换后，双方当天还会不会有重复。
+            // (注意：如果互换后，B变成A，只要当天原本没有其他人是A，就没事；同理检查B)
+            let willCauseNewDuplicateForA = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftB);
+            let willCauseNewDuplicateForB = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftA);
+
+            // 如果互换后会导致任何一方产生新的重复，则放弃
+            if (willCauseNewDuplicateForA || willCauseNewDuplicateForB) {
               continue;
             }
+
+            // 执行互换
             schedule[sIdx][dayIdx] = shiftB;
             schedule[otherSIdx][dayIdx] = shiftA;
             swapped = true;
@@ -902,15 +930,20 @@
         }
       });
     }
+
     if (fixedCount > 0) {
+      // 更新数据并重新渲染
       lastGeneratedSchedule = sanitizeSchedule(schedule);
       renderAll();
       saveDataToLocal();
+
+      // 显示日志
       const warningBox = document.getElementById('warningLog');
       warningBox.innerHTML = `<b>✅ 重复岗位修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处重复岗位！`;
-      alert(`已完成修复！系统将重复岗位与其他员工进行了互换，总岗位次数依然保持平摊，且不会产生新的连排或重复。`);
+      alert(`已完成修复！系统修复了 ${fixedCount} 处岗位重复，总岗位次数依然保持平摊。`);
+
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无重复岗位！`;
       alert("排班非常完美！当前没有任何岗位重复的情况。");
