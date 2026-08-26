@@ -1570,12 +1570,18 @@ async function getAllHistoryMonthsData() {
           // 根据您更新后的目标区间设置严格的硬卡上限（高上限8，中上限9，低上限6）
           let hardMaxLimit = level === '高' ? 8 : (level === '中' ? 9 : 6);
 
-          let candidates = workingStaffs.filter(sIdx => {
+         let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
 
-            // 【核心更正规则】：中强度岗位与低强度岗位，必须每个人在该强度的总次数轮满 2次、4次等阶梯后，才能拿下一个阶梯的次数
+            // 1. 【单岗位硬卡控】：确保每一个具体的岗位也严格按阶梯轮流（不允许在别人没拿到前，自己提前拿到超前次数）
+            let currentShiftCount = shiftCounts[sIdx][shiftName] || 0;
+            let minShiftCountInAll = Math.min(...staffs.map((_, idx) => shiftCounts[idx][shiftName] || 0));
+            // 每一个独立岗位也限制在当前最小轮次 + 1 或 + 2 之内
+            let maxAllowedShiftCount = minShiftCountInAll <= 1 ? 2 : (minShiftCountInAll + 1);
+            if (currentShiftCount >= maxAllowedShiftCount) return false;
+
+            // 2. 【中、低强度总体阶梯限制】：中岗位与低岗位必须每人轮过两次后才能再拿第三次
             if (level === '中' || level === '低') {
-              // 计算该员工目前在该强度（中或低）上的总获得次数
               let currentLevelTotal = 0;
               baseShifts.forEach(bs => {
                 if (bs.level === level) {
@@ -1583,7 +1589,6 @@ async function getAllHistoryMonthsData() {
                 }
               });
 
-              // 计算当前所有员工在该强度上的最小总次数
               let minLevelTotalInAll = Math.min(...staffs.map((_, idx) => {
                 let sum = 0;
                 baseShifts.forEach(bs => {
@@ -1594,7 +1599,6 @@ async function getAllHistoryMonthsData() {
                 return sum;
               }));
 
-              // 阶梯上限计算：确保所有人把当前阶梯（如0~2次）走完，才能进入下一阶梯（如3~4次）
               let allowedMax = (minLevelTotalInAll % 2 === 0) ? (minLevelTotalInAll + 2) : (minLevelTotalInAll + 1);
               if (currentLevelTotal >= allowedMax) return false;
             }
