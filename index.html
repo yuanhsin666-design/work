@@ -1572,9 +1572,20 @@ async function getAllHistoryMonthsData() {
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-            
-            // 严格限制：当达到目标区间最大值时，绝对不再分配
-            if (intensityCounts[sIdx][level] >= hardMaxLimit) return false;
+
+            // 【核心新增规则】：中岗位与雨滴岗位必须每人轮满2次、4次等阶梯后，才能拿下一个阶梯
+            // 请根据您代码中对这两个岗位的命名（例如叫 '中'、'雨滴' 或对应的 shiftName 关键词），进行适配：
+            if (shiftName.includes('中') || shiftName.includes('雨滴') || shiftName === 'YD') {
+              let currentCount = shiftCounts[sIdx][shiftName] || 0;
+              
+              // 计算当前所有人在该岗位的最小分配次数
+              let minCountInAll = Math.min(...staffs.map((_, idx) => shiftCounts[idx][shiftName] || 0));
+              
+              // 如果某个人的次数已经达到了当前轮次的上限（例如最小是0，那上限就是2；若大家普遍2次了，最小是2，上限就是4），
+              // 则在所有人完成当前轮次之前，不允许拿超过当前轮次限制的次数！
+              let allowedMax = (minCountInAll % 2 === 0) ? (minCountInAll + 2) : (minCountInAll + 1);
+              if (currentCount >= allowedMax) return false;
+            }
 
             if (level === '高') {
               let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
