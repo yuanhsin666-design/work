@@ -102,10 +102,10 @@
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
-      <label>🌐 导入当前月份的云端假表：</label>
+      <label>🌐 导入当前月份的云端假表（强制锁定不可更改）：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 8px;">
         <input type="text" id="cloudUrlInput" placeholder="粘贴【当前选择月份】的 Google 试算表链接" style="flex: 1;">
-        <button class="success" onclick="fetchCloudRests()">🌐 抓取当月休假日并锁定</button>
+        <button class="success" onclick="fetchCloudRests()">🌐 抓取当月休假日并强制锁定</button>
         <button class="danger" onclick="clearCurrentMonthRests()">🗑️ 清空当月休假</button>
       </div>
     </div>
@@ -425,7 +425,7 @@
       const totalDays = getDaysInMonth(year, month);
 
       currentMonthRests = {};
-      initLockedMap(); // 确保锁定矩阵已初始化
+      initLockedMap();
 
       let dayColumnMap = {};
       let headerRowIndex = -1;
@@ -468,7 +468,7 @@
               let day = dayColumnMap[c] || c;
               if (day >= 1 && day <= totalDays) {
                 rests.push(day);
-                // 💡 新增：导入休假的同时，将该格子设为锁定状态，避免排班覆盖
+                // 🔒 强制锁定该休假格子，任何人不得更改或覆盖
                 lockedMap[sIdx][day - 1] = true;
               }
             }
@@ -479,8 +479,8 @@
 
       renderAll();
       await saveDataToLocal();
-      document.getElementById('status').innerText = `✅ [${monthKey}] 假表抓取成功并已锁定休假！匹配 ${updatedCount} 人。`;
-      alert(`[${monthKey}] 假表读取成功！已为 ${updatedCount} 位员工导入当月休假，并自动锁定了对应的休假格子。`);
+      document.getElementById('status').innerText = `✅ [${monthKey}] 假表抓取成功并已强制锁定！匹配 ${updatedCount} 人。`;
+      alert(`[${monthKey}] 假表读取成功！已为 ${updatedCount} 位员工导入当月休假，并【强制锁定了对应的休假格子】，任何排班或修改操作都无法覆盖！`);
     } catch (err) {
       alert("抓取失败：" + err.message);
       document.getElementById('status').innerText = "❌ 读取失败";
@@ -1310,10 +1310,16 @@
         
         if (count === 0) {
           for (let targetDay = 0; targetDay < totalDays; targetDay++) {
+            // 🔒 如果目标格子被锁定，绝对不参与平衡交换
+            if (lockedMap[sIdx] && lockedMap[sIdx][targetDay]) continue;
+
             let currentShiftOnDay = schedule[sIdx][targetDay];
             if (currentShiftOnDay === "休") {
               for (let otherSIdx = 0; otherSIdx < staffList.length; otherSIdx++) {
                 if (otherSIdx === sIdx) continue;
+                // 🔒 如果对方的格子被锁定，也绝不拿来换
+                if (lockedMap[otherSIdx] && lockedMap[otherSIdx][targetDay]) continue;
+
                 if (schedule[otherSIdx][targetDay] === sName) {
                   let otherTotalCount = schedule[otherSIdx].filter(d => d === sName).length;
                   if (otherTotalCount > 1) {
@@ -1461,29 +1467,37 @@
         }
       });
 
+      // 🔒 步骤 1：在执行排班前，优先强制加载并绝对锁定所有已被标记（包括从云端假表导入）的格子
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
           const staffRests = (currentMonthRests && currentMonthRests[sIdx]) ? currentMonthRests[sIdx] : [];
           const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
           let existingShift = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";
-          if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
+          if (existingShift === "休(预)" || existingShift === "休(PRE)") existingShift = "休";
 
-          if (isLocked && existingShift) {
-            newSchedule[sIdx][dayIdx] = existingShift;
-            if (existingShift !== "休") {
-              if (existingShift === supName) {
-                supportCountsThisMonth[sIdx]++;
-              } else {
-                shiftCounts[sIdx][existingShift] = (shiftCounts[existingShift] || 0) + 1;
-                let foundS = baseShifts.find(s => s.name === existingShift);
-                if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
-                  intensityCounts[sIdx][foundS.level]++;
+          // 如果该格被锁定，或者是假表中的休假，则强制写入并绝对保护
+          if (isLocked || staffRests.includes(day)) {
+            let forcedValue = existingShift;
+            if (!forcedValue && staffRests.includes(day)) {
+              forcedValue = "休";
+            }
+            if (forcedValue) {
+              newSchedule[sIdx][dayIdx] = forcedValue;
+              lockedMap[sIdx][dayIdx] = true; // 确保双重加固锁定
+
+              if (forcedValue !== "休") {
+                if (forcedValue === supName) {
+                  supportCountsThisMonth[sIdx]++;
+                } else {
+                  shiftCounts[sIdx][forcedValue] = (shiftCounts[sIdx][forcedValue] || 0) + 1;
+                  let foundS = baseShifts.find(s => s.name === forcedValue);
+                  if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
+                    intensityCounts[sIdx][foundS.level]++;
+                  }
                 }
               }
             }
-          } else if (staffRests.includes(day)) {
-            newSchedule[sIdx][dayIdx] = "休";
           }
         });
       }
@@ -1514,7 +1528,8 @@
         let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDay);
 
         let availableStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => {
-          return newSchedule[sIdx][dayIdx] !== "休" && !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
+          // 🔒 如果该格子已被锁定，严禁参与分红日重新分配
+          return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
         highShifts.forEach(shiftName => {
@@ -1559,6 +1574,7 @@
       });
 
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+        // 🔒 过滤：只有未锁定的上班人员才参与岗位分配
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
         let assignedSupportStaffIdx = null;
@@ -1595,6 +1611,7 @@
           let level = foundS ? foundS.level : '中';
 
           let candidates = workingStaffs.filter(sIdx => {
+            // 🔒 如果该格子已被锁定，绝对跳过，不得改变其原有内容
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
 
             let currentShiftCount = shiftCounts[sIdx][shiftName] || 0;
@@ -1643,7 +1660,7 @@
         });
 
         workingStaffs.forEach(sIdx => {
-          if (newSchedule[sIdx][dayIdx] === "") {
+          if (newSchedule[sIdx][dayIdx] === "" && !lockedMap[sIdx][dayIdx]) {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
             let availableUnusedShifts = baseShifts.map(s => s.name).filter(sName => !assignedToday.includes(sName));
 
@@ -1668,8 +1685,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（中低强度岗位已强制进行阶梯平衡）！`;
-      alert(`[${monthKey}] 排班生成完毕！系统已强制对所有中低强度岗位进行了阶梯合规平衡，彻底消除了次数断层（如 3 次和 1 次的差异）！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（已强制保护锁定假表与格子）！`;
+      alert(`[${monthKey}] 排班生成完毕！所有从假表导入的休假及已锁定的格子均受到强制保护，未被任何重新排班所改变。`);
 
     } catch (err) {
       console.error(err);
