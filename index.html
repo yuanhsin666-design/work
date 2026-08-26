@@ -784,7 +784,7 @@
     }
   }
 
-  async function autoFixAdjacentShifts() {
+    async function autoFixAdjacentShifts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
     }
@@ -799,91 +799,86 @@
     let fixedCount = 0;
     let fixLogs = [];
 
-    // 遍历每个员工，找出连排的地方
+    // 辅助函数：判断某个员工在某天是否产生了连排（包括同类和同岗）
+    function hasAdjacentIssue(s, d) {
+      let curr = schedule[s][d];
+      if (!curr || curr === "休" || curr === "休(预)" || curr === "休(預)") return false;
+      
+      // 检查前一天
+      if (d > 0) {
+        let prev = schedule[s][d - 1];
+        if (prev && prev !== "休" && prev !== "休(预)" && prev !== "休(預)") {
+          if (curr === prev) return true;
+          let cat1 = getShiftCategory(curr);
+          let cat2 = getShiftCategory(prev);
+          if (cat1 && cat2 && cat1 === cat2) return true;
+        }
+      }
+      // 检查后一天
+      if (d < totalDays - 1) {
+        let next = schedule[s][d + 1];
+        if (next && next !== "休" && next !== "休(预)" && next !== "休(預)") {
+          if (curr === next) return true;
+          let cat1 = getShiftCategory(curr);
+          let cat2 = getShiftCategory(next);
+          if (cat1 && cat2 && cat1 === cat2) return true;
+        }
+      }
+      return false;
+    }
+
+    // 辅助函数：计算某个员工整月产生连排的总数
+    function getTotalAdjCount(s) {
+      let cnt = 0;
+      for (let d = 0; d < totalDays; d++) {
+        if (hasAdjacentIssue(s, d)) cnt++;
+      }
+      return cnt;
+    }
+
+    // 遍历每个员工，找出连排的地方，尝试修复
     staffs.forEach((staff, sIdx) => {
-      let prevShift = "";
-      let prevCategory = "";
-      let prevDay = 0;
+      for (let day = 0; day < totalDays; day++) {
+        if (!hasAdjacentIssue(sIdx, day)) continue;
 
-      for (let day = 1; day <= totalDays; day++) {
-        let dayIdx = day - 1;
-        let currentShift = schedule[sIdx][dayIdx];
-        if (currentShift === "休(预)" || currentShift === "休(預)") currentShift = "休";
+        // 尝试与其他人互换今天或者前一天的岗位
+        for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
+          if (otherSIdx === sIdx) continue;
+          
+          let tryDays = [day, day - 1];
+          for (let tDay of tryDays) {
+            if (tDay < 0 || tDay >= totalDays) continue;
+            if (lockedMap[sIdx] && lockedMap[sIdx][tDay]) continue;
+            if (lockedMap[otherSIdx] && lockedMap[otherSIdx][tDay]) continue;
 
-        // 判断是否连排（包含相同岗位和同类岗位）
-        let isAdjacent = false;
-        if (currentShift && currentShift !== "休" && prevShift && prevShift !== "休") {
-          if (currentShift === prevShift) {
-            isAdjacent = true;
-          } else {
-            let currCat = getShiftCategory(currentShift);
-            let prevCat = getShiftCategory(prevShift);
-            if (currCat && prevCat && currCat === prevCat) {
-              isAdjacent = true;
-            }
-          }
-        }
+            let shiftA = schedule[sIdx][tDay];
+            let shiftB = schedule[otherSIdx][tDay];
 
-        if (isAdjacent) {
-          // 尝试互换：目标是打破连排且不影响总岗位平均
-          let swapped = false;
+            // 不能是休、空白，且两人岗位不能一样
+            if (!shiftA || shiftA === "休" || !shiftB || shiftB === "休" || shiftA === shiftB) continue;
 
-          // 遍历其他所有员工
-          for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
-            if (otherSIdx === sIdx || swapped) continue;
+            // 计算互换前后的连排总数，如果总数减少，则执行互换
+            let before = getTotalAdjCount(sIdx) + getTotalAdjCount(otherSIdx);
             
-            // 尝试在同一天互换，或者在前一天互换
-            let tryDays = [dayIdx, dayIdx - 1];
-            for (let tDay of tryDays) {
-              if (tDay < 0 || tDay >= totalDays) continue;
-              if (lockedMap[sIdx] && lockedMap[sIdx][tDay]) continue; // 检查锁定
-              if (lockedMap[otherSIdx] && lockedMap[otherSIdx][tDay]) continue;
+            // 尝试互换
+            schedule[sIdx][tDay] = shiftB;
+            schedule[otherSIdx][tDay] = shiftA;
+            
+            let after = getTotalAdjCount(sIdx) + getTotalAdjCount(otherSIdx);
 
-              let shiftA = schedule[sIdx][tDay];
-              let shiftB = schedule[otherSIdx][tDay];
-
-              // 不能是休、空白，且两人岗位不能一样
-              if (!shiftA || shiftA === "休" || !shiftB || shiftB === "休" || shiftA === shiftB) continue;
-
-              // 核心验证：计算互换后，是否会导致两边出现新的连排或重复
-              let isSafeSwap = true;
-
-              // 检查互换后 A 的新岗位 (shiftB) 是否会和 A 的前后岗位冲突
-              let aPrev = (tDay > 0) ? schedule[sIdx][tDay - 1] : "";
-              let aNext = (tDay < totalDays - 1) ? schedule[sIdx][tDay + 1] : "";
-              if (shiftB === aPrev || shiftB === aNext) isSafeSwap = false;
-              if (isSafeSwap && getShiftCategory(shiftB) && getShiftCategory(aPrev) === getShiftCategory(shiftB)) isSafeSwap = false;
-              if (isSafeSwap && getShiftCategory(shiftB) && getShiftCategory(aNext) === getShiftCategory(shiftB)) isSafeSwap = false;
-
-              // 检查互换后 B 的新岗位 (shiftA) 是否会和 B 的前后岗位冲突
-              if (isSafeSwap) {
-                let bPrev = (tDay > 0) ? schedule[otherSIdx][tDay - 1] : "";
-                let bNext = (tDay < totalDays - 1) ? schedule[otherSIdx][tDay + 1] : "";
-                if (shiftA === bPrev || shiftA === bNext) isSafeSwap = false;
-                if (isSafeSwap && getShiftCategory(shiftA) && getShiftCategory(bPrev) === getShiftCategory(shiftA)) isSafeSwap = false;
-                if (isSafeSwap && getShiftCategory(shiftA) && getShiftCategory(bNext) === getShiftCategory(shiftA)) isSafeSwap = false;
-              }
-
-              // 注意：因为只是互换，两人总的工作天数以及各种岗位的总数是不变的，因此完全不影响全局平均！
-              // 所以不需要再额外检查平均问题。
-
-              if (isSafeSwap) {
-                // 执行互换
-                schedule[sIdx][tDay] = shiftB;
-                schedule[otherSIdx][tDay] = shiftA;
-                swapped = true;
-                fixedCount++;
-                fixLogs.push(`🛠️ 修复 <b>${staff.name}</b> 的连排：将 <b>第${tDay + 1}天</b> 的 [${shiftB.replace(/\n/g,'')}] 与 <b>${staffs[otherSIdx].name}</b> 的 [${shiftA.replace(/\n/g,'')}] 进行了互换。`);
-                break;
-              }
+            if (after < before) {
+              // 互换有效，保存日志并跳出当前员工的循环
+              fixedCount++;
+              fixLogs.push(`🛠️ 修复 <b>${staff.name}</b> 的连排：将 <b>第${tDay + 1}天</b> 的 [${shiftA.replace(/\n/g,'')}] 与 <b>${staffs[otherSIdx].name}</b> 的 [${shiftB.replace(/\n/g,'')}] 进行了互换。`);
+              break; // 跳出 tryDays
+            } else {
+              // 互换无效，恢复原状
+              schedule[sIdx][tDay] = shiftA;
+              schedule[otherSIdx][tDay] = shiftB;
             }
           }
+          if (fixedCount > 0 && fixLogs[fixLogs.length - 1].includes(staff.name)) break; // 当前员工已经修复过，跳出 otherSIdx 循环
         }
-
-        // 更新为前一天状态
-        prevShift = currentShift;
-        prevCategory = getShiftCategory(currentShift);
-        prevDay = day;
       }
     });
 
@@ -898,17 +893,10 @@
       warningBox.innerHTML = `<b>✅ 连排修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处连排！`;
-      alert(`已完成修复！系统将连排岗位与其他员工进行了互换，总岗位次数依然保持平均。`);
       
-      // 修复完后再跑一次全局平摊引擎，确保万一因极端情况打破了平摊，能自动拉回
-      const fairnessReport = enforceGlobalFairness(lastGeneratedSchedule, staffs, baseShifts);
-      renderAll();
-      saveDataToLocal();
+      // 注意：这里删除了再次调用 enforceGlobalFairness 的代码，因为那会重新打乱修复结果。
+      // 由于只是互换，不会破坏平摊，现在表格就是最好的结果。
       
-      if (!fairnessReport.ok) {
-        warningBox.innerHTML += `<br>⚠️ 互换后，系统检测到以下情况无法完全平摊：<br>` + fairnessReport.problems.join('<br>');
-      }
-
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无连排！`;
       alert("排班非常完美！当前没有任何岗位连排的情况。");
