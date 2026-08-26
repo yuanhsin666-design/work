@@ -1573,18 +1573,30 @@ async function getAllHistoryMonthsData() {
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
 
-            // 【核心新增规则】：中岗位与雨滴岗位必须每人轮满2次、4次等阶梯后，才能拿下一个阶梯
-            // 请根据您代码中对这两个岗位的命名（例如叫 '中'、'雨滴' 或对应的 shiftName 关键词），进行适配：
-            if (shiftName.includes('中') || shiftName.includes('雨滴') || shiftName === 'YD') {
-              let currentCount = shiftCounts[sIdx][shiftName] || 0;
-              
-              // 计算当前所有人在该岗位的最小分配次数
-              let minCountInAll = Math.min(...staffs.map((_, idx) => shiftCounts[idx][shiftName] || 0));
-              
-              // 如果某个人的次数已经达到了当前轮次的上限（例如最小是0，那上限就是2；若大家普遍2次了，最小是2，上限就是4），
-              // 则在所有人完成当前轮次之前，不允许拿超过当前轮次限制的次数！
-              let allowedMax = (minCountInAll % 2 === 0) ? (minCountInAll + 2) : (minCountInAll + 1);
-              if (currentCount >= allowedMax) return false;
+            // 【核心更正规则】：中强度岗位与低强度岗位，必须每个人在该强度的总次数轮满 2次、4次等阶梯后，才能拿下一个阶梯的次数
+            if (level === '中' || level === '低') {
+              // 计算该员工目前在该强度（中或低）上的总获得次数
+              let currentLevelTotal = 0;
+              baseShifts.forEach(bs => {
+                if (bs.level === level) {
+                  currentLevelTotal += (shiftCounts[sIdx][bs.name] || 0);
+                }
+              });
+
+              // 计算当前所有员工在该强度上的最小总次数
+              let minLevelTotalInAll = Math.min(...staffs.map((_, idx) => {
+                let sum = 0;
+                baseShifts.forEach(bs => {
+                  if (bs.level === level) {
+                    sum += (shiftCounts[idx][bs.name] || 0);
+                  }
+                });
+                return sum;
+              }));
+
+              // 阶梯上限计算：确保所有人把当前阶梯（如0~2次）走完，才能进入下一阶梯（如3~4次）
+              let allowedMax = (minLevelTotalInAll % 2 === 0) ? (minLevelTotalInAll + 2) : (minLevelTotalInAll + 1);
+              if (currentLevelTotal >= allowedMax) return false;
             }
 
             if (level === '高') {
