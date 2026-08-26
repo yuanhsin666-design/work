@@ -1328,88 +1328,84 @@ async function getAllHistoryMonthsData() {
   }
 
   // ==========================================
-  // 【连环全月迭代调剂版】多次全月扫描，同时顾及高、中、低岗位，直到所有岗位极差均不超过1
+  // 【终极差1强平版】只要有3，必然对应1，只要有0，必然对应2；全局互相倒换直至平衡
   // ==========================================
   function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList) {
     if (!schedule || schedule.length === 0) return;
     let totalDays = schedule[0].length;
-    // 将全部岗位加入审核池
     let allShifts = baseShiftsList.filter(s => s.level === '高' || s.level === '中' || s.level === '低');
 
-    // 外层循环：如果有一处调不平，就从头再来，直到所有岗位都平衡
-    let globalClean = false;
-    let protectionCounter = 0;
+    allShifts.forEach(shiftObj => {
+      const shiftName = shiftObj.name;
+      let attempts = 0;
+      let maxAttempts = 10000;
 
-    while (!globalClean && protectionCounter < 10) {
-      globalClean = true;
-      protectionCounter++;
+      while (attempts < maxAttempts) {
+        attempts++;
 
-      allShifts.forEach(shiftObj => {
-        const shiftName = shiftObj.name;
         let counts = staffList.map((_, sIdx) => schedule[sIdx].filter(d => d === shiftName).length);
         let maxCount = Math.max(...counts);
         let minCount = Math.min(...counts);
 
-        // 如果这个岗位极差仍然大于1，则进行调配
-        if (maxCount - minCount > 1) {
-          globalClean = false; // 标记全局未达标，需重新从头校验所有岗位
-          
-          let overIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => counts[sIdx] - minCount >= 2).sort((a, b) => counts[b] - counts[a]);
-          let underIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => maxCount - counts[sIdx] >= 2).sort((a, b) => counts[a] - counts[b]);
+        // 核心：允许出现差1（比如2和3，1和2都是可以的）。出现差2（比如1和3，0和2）就马上调配。
+        if (maxCount - minCount <= 1) break;
 
-          let swapped = false;
+        let overIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => counts[sIdx] - minCount >= 2).sort((a, b) => counts[b] - counts[a]);
+        let underIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => maxCount - counts[sIdx] >= 2).sort((a, b) => counts[a] - counts[b]);
 
-          pairLoop:
-          for (let oi = 0; oi < overIdxList.length; oi++) {
-            let highIdx = overIdxList[oi]; 
+        let swapped = false;
 
-            for (let ui = 0; ui < underIdxList.length; ui++) {
-              let lowIdx = underIdxList[ui]; 
-              if (lowIdx === highIdx) continue;
+        pairLoop:
+        for (let oi = 0; oi < overIdxList.length; oi++) {
+          let highIdx = overIdxList[oi]; 
 
-              let highDays = [];
-              for (let d = 0; d < totalDays; d++) {
-                if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
-                if (schedule[highIdx][d] === shiftName) highDays.push(d);
-              }
+          for (let ui = 0; ui < underIdxList.length; ui++) {
+            let lowIdx = underIdxList[ui]; 
+            if (lowIdx === highIdx) continue;
 
-              let lowDays = [];
-              for (let d = 0; d < totalDays; d++) {
-                if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
-                let lowCurrentShift = schedule[lowIdx][d];
-                if (lowCurrentShift === shiftName || lowCurrentShift === "休") continue;
-                // 任何可调配的岗位都允许（包含高强），后面会立刻校验高强是否也被破坏
-                lowDays.push(d);
-              }
+            let highDays = [];
+            for (let d = 0; d < totalDays; d++) {
+              if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
+              if (schedule[highIdx][d] === shiftName) highDays.push(d);
+            }
 
-              for (let i = 0; i < highDays.length && !swapped; i++) {
-                for (let j = 0; j < lowDays.length && !swapped; j++) {
-                  let d1 = highDays[i];
-                  let d2 = lowDays[j];
-                  let originalHigh = schedule[highIdx][d1];
-                  let originalLow = schedule[lowIdx][d2];
+            let lowDays = [];
+            for (let d = 0; d < totalDays; d++) {
+              if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
+              let lowCurrentShift = schedule[lowIdx][d];
+              if (lowCurrentShift === shiftName || lowCurrentShift === "休") continue;
+              lowDays.push(d);
+            }
 
-                  schedule[highIdx][d1] = originalLow;
-                  schedule[lowIdx][d2] = originalHigh;
+            for (let i = 0; i < highDays.length && !swapped; i++) {
+              for (let j = 0; j < lowDays.length && !swapped; j++) {
+                let d1 = highDays[i];
+                let d2 = lowDays[j];
+                let originalHigh = schedule[highIdx][d1];
+                let originalLow = schedule[lowIdx][d2];
 
-                  let duplicateCheck1 = !schedule.some((row, idx) => idx !== highIdx && row[d1] === originalLow);
-                  let duplicateCheck2 = !schedule.some((row, idx) => idx !== lowIdx && row[d2] === originalHigh);
+                schedule[highIdx][d1] = originalLow;
+                schedule[lowIdx][d2] = originalHigh;
 
-                  if (duplicateCheck1 && duplicateCheck2) {
-                    swapped = true; 
-                  } else {
-                    schedule[highIdx][d1] = originalHigh;
-                    schedule[lowIdx][d2] = originalLow;
-                  }
+                let duplicateCheck1 = !schedule.some((row, idx) => idx !== highIdx && row[d1] === originalLow);
+                let duplicateCheck2 = !schedule.some((row, idx) => idx !== lowIdx && row[d2] === originalHigh);
+
+                if (duplicateCheck1 && duplicateCheck2) {
+                  swapped = true; 
+                } else {
+                  schedule[highIdx][d1] = originalHigh;
+                  schedule[lowIdx][d2] = originalLow;
                 }
               }
-
-              if (swapped) break pairLoop;
             }
+
+            if (swapped) break pairLoop;
           }
         }
-      });
-    }
+
+        if (!swapped) break; 
+      }
+    });
   }
 
   function getSortedDividendRounds(allHistoryData, currentKey) {
@@ -1703,7 +1699,7 @@ async function getAllHistoryMonthsData() {
 
       balanceSchedule(newSchedule, staffs, baseShifts);
 
-      // 【连环全月迭代调剂版】循环校验所有岗位，直到全员极差不超过1
+      // 【终极差1强平版】强力执行，只要极差超过1就硬平！
       enforceMidLowRoundFairness(newSchedule, staffs, baseShifts);
 
       // 【最终修复】强制基于最终表格重新计算所有人的统计数据
