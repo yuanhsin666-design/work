@@ -114,11 +114,8 @@
   <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
     <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
-    <!-- 校验连排岗位按钮 -->
     <button class="warning-btn" onclick="validateAdjacentShifts()">⚠️ 校验连排岗位</button>
-    <!-- 修复连排并保持平摊按钮 -->
     <button class="success" onclick="autoFixAdjacentShifts()">🛠️ 修复连排并保持平摊</button>
-    <!-- 新增修复重复岗位并保持平摊按钮 -->
     <button class="success" onclick="autoFixDuplicateShifts()">🔧 修复重复岗位并保持平摊</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
@@ -331,14 +328,8 @@
    async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
     if (confirm(`确定要重置 [${monthKey}] 月份的工作岗位吗？\n（注意：将清空排班，但保留所有休假日期和云端链接）`)) {
-      // 1. 保留休假日期 (currentMonthRests 不动)
-      // 2. 保留云端链接 (不修改 cloudUrlInput 的 value)
-      // 3. 只清空排班表中的岗位数据
       lastGeneratedSchedule = null;
-      // 4. 保留之前的锁定状态吗？为了防止重置后手滑改了以前锁定的数据，建议全部解锁，让系统重新排
-      // 这里选择清空锁定状态，允许重新排班。如果您想保留锁定状态，可以将这行注释掉。
       initLockedMap(true); 
-      // 5. 将新数据保存到本地和云端
       await saveDataToLocal();
       renderAll();
       document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 的工作岗位（保留休假）！`;
@@ -701,24 +692,17 @@
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
-    
-    // 清除所有旧的标红
     const allCells = document.querySelectorAll('#scheduleTable td');
     allCells.forEach(td => td.classList.remove('shift-duplicate-error'));
-    
     let adjacentCount = 0;
     let adjacentLogs = [];
-
     staffs.forEach((staff, sIdx) => {
       let prevShift = "";
       let prevCategory = "";
       let prevDay = 0;
-
       for (let day = 1; day <= totalDays; day++) {
         let dayIdx = day - 1;
         let currentShift = "";
-
-        // 获取当前格子的排班（区分手动模式和普通模式）
         if (isManualEditMode) {
           const selectElem = document.querySelector(`#cell_${sIdx}_${dayIdx} select`);
           if (selectElem) currentShift = selectElem.value;
@@ -730,49 +714,34 @@
             currentShift = "休";
           }
         }
-        
-        // 清理可能存在的“休(预)”
         if (currentShift === "休(预)" || currentShift === "休(預)") currentShift = "休";
-
         let currentCategory = getShiftCategory(currentShift);
-        
-        // 如果当前是实际岗位（非休假，非空白）
         if (currentShift && currentShift !== "休") {
-          
-          // 判断1：完全相同的岗位是否连着排（例如 TD 5001以上 连着排）
           if (currentShift === prevShift && prevShift !== "") {
             adjacentCount++;
             let cleanName = getDisplayShiftName(currentShift).replace(/\n/g, ' ');
             adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 和 <b>第 ${day} 天</b> 连排了相同岗位 [<b>${cleanName}</b>]`);
-            
-            // 标红当前格子和前一个格子
             const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
             const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
             if (prevCell) prevCell.classList.add('shift-duplicate-error');
             if (currCell) currCell.classList.add('shift-duplicate-error');
           }
-          
-          // 判断2：同一类别的岗位是否连着排（例如 ND中大 和 ND2500 连着排）
           else if (currentCategory && prevCategory && currentCategory === prevCategory && currentShift !== prevShift) {
             adjacentCount++;
             let cleanName1 = getDisplayShiftName(prevShift).replace(/\n/g, ' ');
             let cleanName2 = getDisplayShiftName(currentShift).replace(/\n/g, ' ');
             adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 的 [<b>${cleanName1}</b>] 和 <b>第 ${day} 天</b> 的 [<b>${cleanName2}</b>] 属于同类岗位连排`);
-            
             const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
             const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
             if (prevCell) prevCell.classList.add('shift-duplicate-error');
             if (currCell) currCell.classList.add('shift-duplicate-error');
           }
         }
-        
-        // 更新前一天的数据状态
         prevShift = currentShift;
         prevCategory = currentCategory;
         prevDay = day;
       }
     });
-
     const warningBox = document.getElementById('warningLog');
     if (adjacentCount > 0) {
       warningBox.innerHTML = `<b>🚨 岗位连排校验提醒（共发现 ${adjacentCount} 处连排）：</b><br>` + adjacentLogs.join('<br>');
@@ -786,27 +755,19 @@
     }
   }
 
-    async function autoFixAdjacentShifts() {
+  async function autoFixAdjacentShifts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
     }
-
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
-    
-    // 克隆一份当前排班进行修改
     let schedule = lastGeneratedSchedule.map(row => [...row]);
-    
     let fixedCount = 0;
     let fixLogs = [];
-
-    // 辅助函数：判断某个员工在某天是否产生了连排（包括同类和同岗）
     function hasAdjacentIssue(s, d) {
       let curr = schedule[s][d];
       if (!curr || curr === "休" || curr === "休(预)" || curr === "休(預)") return false;
-      
-      // 检查前一天
       if (d > 0) {
         let prev = schedule[s][d - 1];
         if (prev && prev !== "休" && prev !== "休(预)" && prev !== "休(預)") {
@@ -816,7 +777,6 @@
           if (cat1 && cat2 && cat1 === cat2) return true;
         }
       }
-      // 检查后一天
       if (d < totalDays - 1) {
         let next = schedule[s][d + 1];
         if (next && next !== "休" && next !== "休(预)" && next !== "休(預)") {
@@ -828,8 +788,6 @@
       }
       return false;
     }
-
-    // 辅助函数：计算某个员工整月产生连排的总数
     function getTotalAdjCount(s) {
       let cnt = 0;
       for (let d = 0; d < totalDays; d++) {
@@ -837,94 +795,63 @@
       }
       return cnt;
     }
-
-    // 遍历每个员工，找出连排的地方，尝试修复
     staffs.forEach((staff, sIdx) => {
       for (let day = 0; day < totalDays; day++) {
         if (!hasAdjacentIssue(sIdx, day)) continue;
-
-        // 尝试与其他人互换今天或者前一天的岗位
         for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
           if (otherSIdx === sIdx) continue;
-          
           let tryDays = [day, day - 1];
           for (let tDay of tryDays) {
             if (tDay < 0 || tDay >= totalDays) continue;
             if (lockedMap[sIdx] && lockedMap[sIdx][tDay]) continue;
             if (lockedMap[otherSIdx] && lockedMap[otherSIdx][tDay]) continue;
-
             let shiftA = schedule[sIdx][tDay];
             let shiftB = schedule[otherSIdx][tDay];
-
-            // 不能是休、空白，且两人岗位不能一样
             if (!shiftA || shiftA === "休" || !shiftB || shiftB === "休" || shiftA === shiftB) continue;
-
-            // 计算互换前后的连排总数，如果总数减少，则执行互换
             let before = getTotalAdjCount(sIdx) + getTotalAdjCount(otherSIdx);
-            
-            // 尝试互换
             schedule[sIdx][tDay] = shiftB;
             schedule[otherSIdx][tDay] = shiftA;
-            
             let after = getTotalAdjCount(sIdx) + getTotalAdjCount(otherSIdx);
-
             if (after < before) {
-              // 互换有效，保存日志并跳出当前员工的循环
               fixedCount++;
               fixLogs.push(`🛠️ 修复 <b>${staff.name}</b> 的连排：将 <b>第${tDay + 1}天</b> 的 [${shiftA.replace(/\n/g,'')}] 与 <b>${staffs[otherSIdx].name}</b> 的 [${shiftB.replace(/\n/g,'')}] 进行了互换。`);
-              break; // 跳出 tryDays
+              break;
             } else {
-              // 互换无效，恢复原状
               schedule[sIdx][tDay] = shiftA;
               schedule[otherSIdx][tDay] = shiftB;
             }
           }
-          if (fixedCount > 0 && fixLogs[fixLogs.length - 1].includes(staff.name)) break; // 当前员工已经修复过，跳出 otherSIdx 循环
+          if (fixedCount > 0 && fixLogs[fixLogs.length - 1].includes(staff.name)) break;
         }
       }
     });
-
     if (fixedCount > 0) {
-      // 更新数据并重新渲染
       lastGeneratedSchedule = sanitizeSchedule(schedule);
       renderAll();
       saveDataToLocal();
-      
-      // 显示日志
       const warningBox = document.getElementById('warningLog');
       warningBox.innerHTML = `<b>✅ 连排修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处连排！`;
-      
-      // 注意：这里删除了再次调用 enforceGlobalFairness 的代码，因为那会重新打乱修复结果。
-      // 由于只是互换，不会破坏平摊，现在表格就是最好的结果。
-      
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无连排！`;
       alert("排班非常完美！当前没有任何岗位连排的情况。");
     }
   }
+
   async function autoFixDuplicateShifts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
     }
-
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
-
-    // 克隆一份当前排班进行修改
     let schedule = lastGeneratedSchedule.map(row => [...row]);
-
     let fixedCount = 0;
     let fixLogs = [];
-
-    // 遍历每一天
     for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-      // 找出这一天有哪些岗位被重复分配了
       let shiftOccurrences = {};
       let duplicateShiftsToday = [];
-
       staffs.forEach((staff, sIdx) => {
         let shiftVal = schedule[sIdx][dayIdx];
         if (shiftVal && shiftVal !== "休") {
@@ -932,61 +859,40 @@
           shiftOccurrences[shiftVal].push(sIdx);
         }
       });
-
       Object.keys(shiftOccurrences).forEach(shiftName => {
         if (shiftOccurrences[shiftName].length > 1) {
           duplicateShiftsToday.push(shiftName);
         }
       });
-
-      // 如果有重复岗位，尝试修复
       duplicateShiftsToday.forEach(shiftName => {
         let duplicatedStaffs = shiftOccurrences[shiftName];
-        
-        // 对于当天分到这个岗位的多人，保留一个，把其他人的这个岗位换出去
         for (let i = 1; i < duplicatedStaffs.length; i++) {
           let sIdx = duplicatedStaffs[i];
           let swapped = false;
-
-          // 遍历其他所有的员工，寻找可以互换的人
           for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
             if (otherSIdx === sIdx || swapped) continue;
-            if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue; // 检查锁定
+            if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue;
             if (lockedMap[otherSIdx] && lockedMap[otherSIdx][dayIdx]) continue;
-
-            let shiftA = schedule[sIdx][dayIdx];      // 重复的岗位
-            let shiftB = schedule[otherSIdx][dayIdx]; // 别人当天的岗位
-
-            // 对方不能是休、空白、或者是同一个岗位
+            let shiftA = schedule[sIdx][dayIdx];
+            let shiftB = schedule[otherSIdx][dayIdx];
             if (!shiftB || shiftB === "休" || shiftB === shiftA) continue;
-
-            // 核心：互换之后，检查是否会导致其他问题
-            // 1. 检查互换后，shiftB 会不会导致 sIdx 连排？
             let aPrev = (dayIdx > 0) ? schedule[sIdx][dayIdx - 1] : "";
             let aNext = (dayIdx < totalDays - 1) ? schedule[sIdx][dayIdx + 1] : "";
             let sIdxNewAdj = (shiftB === aPrev || shiftB === aNext);
             if (!sIdxNewAdj && getShiftCategory(shiftB) && (getShiftCategory(aPrev) === getShiftCategory(shiftB) || getShiftCategory(aNext) === getShiftCategory(shiftB))) {
               sIdxNewAdj = true;
             }
-
-            // 2. 检查互换后，shiftA 会不会导致 otherSIdx 连排？
             let bPrev = (dayIdx > 0) ? schedule[otherSIdx][dayIdx - 1] : "";
             let bNext = (dayIdx < totalDays - 1) ? schedule[otherSIdx][dayIdx + 1] : "";
             let otherSIdxNewAdj = (shiftA === bPrev || shiftA === bNext);
             if (!otherSIdxNewAdj && getShiftCategory(shiftA) && (getShiftCategory(bPrev) === getShiftCategory(shiftA) || getShiftCategory(bNext) === getShiftCategory(shiftA))) {
               otherSIdxNewAdj = true;
             }
-
-            // 3. 检查互换后，当天会不会出现新的重复（例如 shiftB 本来已经有人了）
             let shiftBAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftB);
             let shiftAAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftA);
-
-            // 如果互换后会导致任何一方产生新的连排，或者产生新的重复，则放弃
             if (sIdxNewAdj || otherSIdxNewAdj || shiftBAlreadyExistsToday || shiftAAlreadyExistsToday) {
               continue;
             }
-
-            // 执行互换
             schedule[sIdx][dayIdx] = shiftB;
             schedule[otherSIdx][dayIdx] = shiftA;
             swapped = true;
@@ -996,20 +902,15 @@
         }
       });
     }
-
     if (fixedCount > 0) {
-      // 更新数据并重新渲染
       lastGeneratedSchedule = sanitizeSchedule(schedule);
       renderAll();
       saveDataToLocal();
-
-      // 显示日志
       const warningBox = document.getElementById('warningLog');
       warningBox.innerHTML = `<b>✅ 重复岗位修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处重复岗位！`;
       alert(`已完成修复！系统将重复岗位与其他员工进行了互换，总岗位次数依然保持平摊，且不会产生新的连排或重复。`);
-
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无重复岗位！`;
       alert("排班非常完美！当前没有任何岗位重复的情况。");
@@ -1070,117 +971,6 @@
       document.getElementById('status').innerText = `✅ 校验完毕：排班无岗位重复！`;
       alert(`校验完成！当月排班结构良好，没有在同一天发现重复的岗位。`);
     }
-      async function autoFixDuplicateShifts() {
-    if (!lastGeneratedSchedule) {
-      return alert("当前没有排班数据，请先执行排班！");
-    }
-
-    const year = parseInt(document.getElementById('yearSelect').value);
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const totalDays = getDaysInMonth(year, month);
-
-    // 克隆一份当前排班进行修改
-    let schedule = lastGeneratedSchedule.map(row => [...row]);
-
-    let fixedCount = 0;
-    let fixLogs = [];
-
-    // 遍历每一天
-    for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-      // 找出这一天有哪些岗位被重复分配了
-      let shiftOccurrences = {};
-      let duplicateShiftsToday = [];
-
-      staffs.forEach((staff, sIdx) => {
-        let shiftVal = schedule[sIdx][dayIdx];
-        if (shiftVal && shiftVal !== "休") {
-          if (!shiftOccurrences[shiftVal]) shiftOccurrences[shiftVal] = [];
-          shiftOccurrences[shiftVal].push(sIdx);
-        }
-      });
-
-      Object.keys(shiftOccurrences).forEach(shiftName => {
-        if (shiftOccurrences[shiftName].length > 1) {
-          duplicateShiftsToday.push(shiftName);
-        }
-      });
-
-      // 如果有重复岗位，尝试修复
-      duplicateShiftsToday.forEach(shiftName => {
-        let duplicatedStaffs = shiftOccurrences[shiftName];
-        
-        // 对于当天分到这个岗位的多人，保留一个，把其他人的这个岗位换出去
-        for (let i = 1; i < duplicatedStaffs.length; i++) {
-          let sIdx = duplicatedStaffs[i];
-          let swapped = false;
-
-          // 遍历其他所有的员工，寻找可以互换的人
-          for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
-            if (otherSIdx === sIdx || swapped) continue;
-            if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue; // 检查锁定
-            if (lockedMap[otherSIdx] && lockedMap[otherSIdx][dayIdx]) continue;
-
-            let shiftA = schedule[sIdx][dayIdx];      // 重复的岗位
-            let shiftB = schedule[otherSIdx][dayIdx]; // 别人当天的岗位
-
-            // 对方不能是休、空白、或者是同一个岗位
-            if (!shiftB || shiftB === "休" || shiftB === shiftA) continue;
-
-            // 核心：互换之后，检查是否会导致其他问题
-            // 1. 检查互换后，shiftB 会不会导致 sIdx 连排？
-            let aPrev = (dayIdx > 0) ? schedule[sIdx][dayIdx - 1] : "";
-            let aNext = (dayIdx < totalDays - 1) ? schedule[sIdx][dayIdx + 1] : "";
-            let sIdxNewAdj = (shiftB === aPrev || shiftB === aNext);
-            if (!sIdxNewAdj && getShiftCategory(shiftB) && (getShiftCategory(aPrev) === getShiftCategory(shiftB) || getShiftCategory(aNext) === getShiftCategory(shiftB))) {
-              sIdxNewAdj = true;
-            }
-
-            // 2. 检查互换后，shiftA 会不会导致 otherSIdx 连排？
-            let bPrev = (dayIdx > 0) ? schedule[otherSIdx][dayIdx - 1] : "";
-            let bNext = (dayIdx < totalDays - 1) ? schedule[otherSIdx][dayIdx + 1] : "";
-            let otherSIdxNewAdj = (shiftA === bPrev || shiftA === bNext);
-            if (!otherSIdxNewAdj && getShiftCategory(shiftA) && (getShiftCategory(bPrev) === getShiftCategory(shiftA) || getShiftCategory(bNext) === getShiftCategory(shiftA))) {
-              otherSIdxNewAdj = true;
-            }
-
-            // 3. 检查互换后，当天会不会出现新的重复（例如 shiftB 本来已经有人了）
-            let shiftBAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftB);
-            let shiftAAlreadyExistsToday = schedule.some((row, idx) => idx !== sIdx && idx !== otherSIdx && row[dayIdx] === shiftA);
-
-            // 如果互换后会导致任何一方产生新的连排，或者产生新的重复，则放弃
-            if (sIdxNewAdj || otherSIdxNewAdj || shiftBAlreadyExistsToday || shiftAAlreadyExistsToday) {
-              continue;
-            }
-
-            // 执行互换
-            schedule[sIdx][dayIdx] = shiftB;
-            schedule[otherSIdx][dayIdx] = shiftA;
-            swapped = true;
-            fixedCount++;
-            fixLogs.push(`📅 <b>第 ${dayIdx + 1} 天</b>：修复了 <b>${staffs[sIdx].name}</b> 的重复岗位 [${shiftA.replace(/\n/g,'')}]，与 <b>${staffs[otherSIdx].name}</b> 的 [${shiftB.replace(/\n/g,'')}] 进行了互换。`);
-          }
-        }
-      });
-    }
-
-    if (fixedCount > 0) {
-      // 更新数据并重新渲染
-      lastGeneratedSchedule = sanitizeSchedule(schedule);
-      renderAll();
-      saveDataToLocal();
-
-      // 显示日志
-      const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 重复岗位修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
-      warningBox.style.display = 'block';
-      document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处重复岗位！`;
-      alert(`已完成修复！系统将重复岗位与其他员工进行了互换，总岗位次数依然保持平摊，且不会产生新的连排或重复。`);
-
-    } else {
-      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无重复岗位！`;
-      alert("排班非常完美！当前没有任何岗位重复的情况。");
-    }
-  }
   }
 
   function renderStatsTable(scheduleData = null) {
@@ -1559,12 +1349,9 @@ async function getAllHistoryMonthsData() {
     return true;
   }
 
-  // =====================================================================
-  // 【同日互换 · 全局强制平摊引擎】  取代旧的 balanceSchedule / enforceMidLowRoundFairness
-  // =====================================================================
-  const FAIR_W_SHIFT = 1000;   // 单一岗位次数越界的惩罚（最重）
-  const FAIR_W_LEVEL = 40;     // 强度总次数越界的惩罚
-  const FAIR_W_ADJ   = 3;      // 连排 / 连续高强度 的软性惩罚（最轻）
+  const FAIR_W_SHIFT = 1000;   
+  const FAIR_W_LEVEL = 40;     
+  const FAIR_W_ADJ   = 3;      
 
   function enforceGlobalFairness(schedule, staffList, baseShiftsList) {
     const n = staffList.length;
@@ -1575,8 +1362,6 @@ async function getAllHistoryMonthsData() {
     const levelOf = {};
     baseShiftsList.forEach(s => { levelOf[s.name] = s.level; });
     const levels = ['高', '中', '低'];
-
-    // ---------- 现况统计 ----------
     const counts = Array.from({ length: n }, () => { const o = {}; names.forEach(nm => o[nm] = 0); return o; });
     const lvlCounts = Array.from({ length: n }, () => ({ 高: 0, 中: 0, 低: 0 }));
     for (let s = 0; s < n; s++) {
@@ -1585,8 +1370,6 @@ async function getAllHistoryMonthsData() {
         if (nameSet.has(v)) { counts[s][v]++; lvlCounts[s][levelOf[v]]++; }
       }
     }
-
-    // ---------- 目标区间：floor/ceil 平均值，天生保证极差 <= 1 ----------
     const shiftBand = {};
     names.forEach(nm => {
       let tot = 0; for (let s = 0; s < n; s++) tot += counts[s][nm];
@@ -1608,15 +1391,12 @@ async function getAllHistoryMonthsData() {
         levelBandOf[s][L] = { lo: Math.floor(share), hi: Math.ceil(share) };
       });
     }
-
     const cellLocked = (s, d) => !!(lockedMap[s] && lockedMap[s][d]);
-    let protectDividend = true;   // 阶段1 先保护分红日(1号/16号)的高强度岗位安排
+    let protectDividend = true;   
     const isProtected = (s, d) => protectDividend && (d === 0 || d === 15) && levelOf[schedule[s][d]] === '高';
     const swappable = (s, d) => nameSet.has(schedule[s][d]) && !cellLocked(s, d) && !isProtected(s, d);
-
     let W_ADJ = FAIR_W_ADJ;
     let W_LVL = FAIR_W_LEVEL;
-
     const costShift = (nm, c) => {
       const b = shiftBand[nm];
       if (c > b.hi) return (c - b.hi) * FAIR_W_SHIFT;
@@ -1631,8 +1411,6 @@ async function getAllHistoryMonthsData() {
       if (c < b.lo) return (b.lo - c) * W_LVL;
       return 0;
     };
-
-    // 只算「第 s 人第 d 天」这一格造成的连排惩罚（同日互换只改这一格，算差值就够）
     function adjPenalty(s, d) {
       if (!W_ADJ) return 0;
       const row = schedule[s], cur = row[d];
@@ -1651,8 +1429,6 @@ async function getAllHistoryMonthsData() {
       }
       return p * W_ADJ;
     }
-
-    // 同日互换（自己就是自己的反操作，再呼叫一次即可还原）
     function applySwap(a, b, d) {
       const X = schedule[a][d], Y = schedule[b][d];
       schedule[a][d] = Y; schedule[b][d] = X;
@@ -1663,7 +1439,6 @@ async function getAllHistoryMonthsData() {
         lvlCounts[b][LY]--; lvlCounts[b][LX]++;
       }
     }
-
     function pairCost(a, b, d, X, Y) {
       const LX = levelOf[X], LY = levelOf[Y];
       let c = 0;
@@ -1677,8 +1452,6 @@ async function getAllHistoryMonthsData() {
       }
       return c;
     }
-
-    // 全域爬山：每天扫过所有两人配对，只要总成本下降就换
     function hillClimb(maxSweeps) {
       for (let sweep = 0; sweep < maxSweeps; sweep++) {
         let improved = false;
@@ -1693,27 +1466,23 @@ async function getAllHistoryMonthsData() {
               applySwap(a, b, d);
               const after = pairCost(a, b, d, X, Y);
               if (after < before) improved = true;
-              else applySwap(a, b, d);   // 还原
+              else applySwap(a, b, d);
             }
           }
         }
         if (!improved) break;
       }
     }
-
     function spreadOf(nm) {
       let mx = -Infinity, mn = Infinity;
       for (let s = 0; s < n; s++) { const c = counts[s][nm]; if (c > mx) mx = c; if (c < mn) mn = c; }
       return { max: mx, min: mn, spread: mx - mn };
     }
-
     function outOfBand() {
       const bad = [];
       names.forEach(nm => { const r = spreadOf(nm); if (r.spread > 1) bad.push({ name: nm, max: r.max, min: r.min }); });
       return bad;
     }
-
-    // 强行拉平：多的人直接把这个岗位「同日换」给最少的人，不管连排规则
     function directedFix(nm) {
       for (let guard = 0; guard < 3000; guard++) {
         const r = spreadOf(nm);
@@ -1730,8 +1499,8 @@ async function getAllHistoryMonthsData() {
             const dn = donors[i], rc = receivers[j];
             if (dn === rc) continue;
             for (let d = 0; d < totalDays; d++) {
-              if (schedule[dn][d] !== nm) continue;          // 多的人当天要正好是这个岗
-              if (schedule[rc][d] === nm) continue;          // 少的人当天不能已经是这个岗
+              if (schedule[dn][d] !== nm) continue;
+              if (schedule[rc][d] === nm) continue;
               if (!swappable(dn, d) || !swappable(rc, d)) continue;
               applySwap(dn, rc, d);
               moved = true;
@@ -1739,16 +1508,14 @@ async function getAllHistoryMonthsData() {
             }
           }
         }
-        if (!moved) return false;   // 全被锁定 / 没有可换的日子
+        if (!moved) return false;
       }
       return false;
     }
-
-    // ---------- 执行顺序 ----------
-    hillClimb(80);                      // 阶段1：保护分红日 + 兼顾连排规则
+    hillClimb(80);
     protectDividend = false;
-    hillClimb(80);                      // 阶段2：放开分红日保护，继续拉平
-    for (let round = 0; round < 40; round++) {   // 阶段3：还没平就「强行拉平」（可牺牲连排规则）
+    hillClimb(80);
+    for (let round = 0; round < 40; round++) {
       const bad = outOfBand();
       if (!bad.length) break;
       const sAdj = W_ADJ, sLvl = W_LVL;
@@ -1757,9 +1524,7 @@ async function getAllHistoryMonthsData() {
       hillClimb(40);
       W_ADJ = sAdj; W_LVL = sLvl;
     }
-    hillClimb(80);                      // 阶段4：在「已经平了」的前提下，把连排 / 强度总数再修回来
-
-    // ---------- 阶段4.5：强度总数「定向搬移」----------
+    hillClimb(80);
     function directedLevelFix() {
       let movedAny = false;
       levels.forEach(L => {
@@ -1804,8 +1569,6 @@ async function getAllHistoryMonthsData() {
       if (!directedLevelFix()) break;
       hillClimb(40);
     }
-
-    // ---------- 阶段5：跳坑重试（basin hopping）----------
     function fullCost() {
       let c = 0;
       names.forEach(nm => { for (let s = 0; s < n; s++) c += costShift(nm, counts[s][nm]); });
@@ -1871,8 +1634,6 @@ async function getAllHistoryMonthsData() {
       else restore(bestSnap);
     }
     restore(bestSnap);
-
-    // ---------- 产出体检报告 ----------
     const clean = s => String(s).replace(/\n/g, '');
     const problems = [];
     outOfBand().forEach(b => problems.push(`岗位「${clean(b.name)}」次数仍不平均：最多 ${b.max} 次 / 最少 ${b.min} 次`));
@@ -1999,7 +1760,6 @@ async function getAllHistoryMonthsData() {
           });
         }
       });
-      // 1. 先读取用户锁定的单元格与请假表
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -2056,7 +1816,6 @@ async function getAllHistoryMonthsData() {
         });
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
-      // 2. 优先固定分红日高强度岗位，且同一岗位严格 2 轮冷却！
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2097,7 +1856,6 @@ async function getAllHistoryMonthsData() {
           }
         });
       });
-      // 3. 接着处理常规日期的排班与剩余岗位的填补
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
@@ -2167,7 +1925,6 @@ async function getAllHistoryMonthsData() {
             if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
           }
         });
-               // 填补当天剩下的空白格子
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
             let todayCount = {};
@@ -2187,16 +1944,11 @@ async function getAllHistoryMonthsData() {
             let chosenFallback = null, bestScore = Infinity;
             baseShifts.forEach(s => {
               const nm = s.name;
-              
-              // ========== 硬性禁止相同岗位连排 ==========
               let prevShift = (dayIdx > 0) ? newSchedule[sIdx][dayIdx - 1] : "";
               let nextShift = (dayIdx < totalDays - 1) ? newSchedule[sIdx][dayIdx + 1] : "";
               if (nm === prevShift || nm === nextShift) {
                 return; 
               }
-              // ========================================
-
-              // ========== 防止高强度连排，让排班更平军 ==========
               if (s.level === '高') {
                 let prevLevel = "";
                 if (dayIdx > 0) {
@@ -2207,22 +1959,16 @@ async function getAllHistoryMonthsData() {
                    return;
                 }
               }
-              // ================================================
-
-              let score = todayCount[nm] * 100000;                    // 1. 尽量别跟当天别人撞岗
-              score += (shiftCounts[sIdx][nm] || 0) * 1000;           // 2. 本人这岗位做最少的优先
+              let score = todayCount[nm] * 100000;
+              score += (shiftCounts[sIdx][nm] || 0) * 1000;
               if (!isAssignmentValid(sIdx, dayIdx, nm, newSchedule)) score += 300;  
               score += (monthTotal[nm] || 0) * 10;                    
-              score += (intensityCounts[sIdx][s.level] || 0);         // 5. 强度总数少的优先
-
-              // ========== 强度平军：如果这个人高强度排得最多，大幅度加分（让它排不到） ==========
+              score += (intensityCounts[sIdx][s.level] || 0);
               let maxHighCount = Math.max(...staffs.map((_, idx) => intensityCounts[idx]['高'] || 0));
               let currentHighCount = intensityCounts[sIdx]['高'] || 0;
               if (s.level === '高' && currentHighCount >= maxHighCount) {
-                score += 50000; // 大幅度抬高分数，让系统优先把高强度岗位分给高强度排得少的人
+                score += 50000; 
               }
-              // =============================================================================
-
               if (score < bestScore) { bestScore = score; chosenFallback = nm; }
             });
 
@@ -2237,9 +1983,7 @@ async function getAllHistoryMonthsData() {
           }
         });
       }
-      // 【同日互换 · 全局强制平摊】把每人每岗位的次数拉到极差 <= 1
       const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
-      // 【最终修复】强制基于最终表格重新计算所有人的统计数据
       shiftCounts = Array.from({ length: staffs.length }, () => ({}));
       intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
