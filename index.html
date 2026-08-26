@@ -1638,7 +1638,7 @@ async function getAllHistoryMonthsData() {
                                    || baseShifts[0].name;
 
               newSchedule[sIdx][dayIdx] = chosenFallback;
-              shiftCounts[sIdx][chosenFallback] = (shiftCounts[chosen][chosenFallback] || 0) + 1;
+              shiftCounts[sIdx][chosenFallback] = (shiftCounts[sIdx][chosenFallback] || 0) + 1;
               let foundS = baseShifts.find(s => s.name === chosenFallback);
               if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) intensityCounts[sIdx][foundS.level]++;
             }
