@@ -1334,7 +1334,8 @@ async function getAllHistoryMonthsData() {
   //     都拿满 3 次，才允许有人拿到第 4 次，以此类推。
   //   - 低强度的某个具体岗位：规则同上。
   //   - 一旦发现有人「超前」拿到了下一轮次数，而还有人「落后」没拿满上一轮，
-  //     就在【中岗位】与【低岗位】之间寻找同一天可互换的排班，进行调配，
+  //     就在【中岗位】与【低岗位】之间寻找可互换的排班进行调配，
+  //     不要求一定要同一天，只要各自能找到一天互换、且互换后双方排班仍然合法即可，
   //     直到该岗位符合「拿满上一轮才能进入下一轮」的条件为止。
   // ==========================================
   function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList) {
@@ -1361,37 +1362,51 @@ async function getAllHistoryMonthsData() {
         let highIdx = counts.indexOf(maxCount);
         let lowIdx = counts.indexOf(minCount);
 
-        // 寻找某一天：次数最多者当天正好排到该岗位，且次数最少者当天排的是「另一个中/低强度岗位」，
-        // 两人互换排班后仍然合法（不重复、不违反相邻同类别限制），且当天都未被锁定
-        let swapped = false;
+        // 找出「次数最多者」拥有该岗位、且未被锁定、可以被调走的所有天数
+        let highDays = [];
         for (let d = 0; d < totalDays; d++) {
           if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
+          if (schedule[highIdx][d] === shiftName) highDays.push(d);
+        }
+
+        // 找出「次数最少者」拥有「另一个中/低强度岗位」、且未被锁定、可以被换出的所有天数
+        let lowDays = [];
+        for (let d = 0; d < totalDays; d++) {
           if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
-
-          if (schedule[highIdx][d] !== shiftName) continue;
-
           let lowCurrentShift = schedule[lowIdx][d];
           if (lowCurrentShift === shiftName) continue;
-
           let lowShiftObj = baseShiftsList.find(s => s.name === lowCurrentShift);
           if (!lowShiftObj || (lowShiftObj.level !== '中' && lowShiftObj.level !== '低')) continue;
+          lowDays.push(d);
+        }
 
-          let originalHigh = schedule[highIdx][d];
-          let originalLow = schedule[lowIdx][d];
+        // 【不要求同一天】依次尝试「次数最多者的某一天」与「次数最少者的某一天」进行互换：
+        // 把 highIdx 在 d1 天的该岗位，与 lowIdx 在 d2 天的另一个中/低强度岗位互换，
+        // d1 与 d2 可以相同也可以不同，只要互换后双方各自当天的排班仍然合法即可
+        let swapped = false;
+        outerSwapLoop:
+        for (let i = 0; i < highDays.length; i++) {
+          for (let j = 0; j < lowDays.length; j++) {
+            let d1 = highDays[i];
+            let d2 = lowDays[j];
 
-          // 先互换，再校验互换后是否仍然合法，不合法则还原
-          schedule[highIdx][d] = originalLow;
-          schedule[lowIdx][d] = originalHigh;
+            let originalHigh = schedule[highIdx][d1];
+            let originalLow = schedule[lowIdx][d2];
 
-          let validHigh = isAssignmentValid(highIdx, d, schedule[highIdx][d], schedule);
-          let validLow = isAssignmentValid(lowIdx, d, schedule[lowIdx][d], schedule);
+            // 先互换，再校验互换后是否仍然合法，不合法则还原
+            schedule[highIdx][d1] = originalLow;
+            schedule[lowIdx][d2] = originalHigh;
 
-          if (validHigh && validLow) {
-            swapped = true;
-            break;
-          } else {
-            schedule[highIdx][d] = originalHigh;
-            schedule[lowIdx][d] = originalLow;
+            let validHigh = isAssignmentValid(highIdx, d1, schedule[highIdx][d1], schedule);
+            let validLow = isAssignmentValid(lowIdx, d2, schedule[lowIdx][d2], schedule);
+
+            if (validHigh && validLow) {
+              swapped = true;
+              break outerSwapLoop;
+            } else {
+              schedule[highIdx][d1] = originalHigh;
+              schedule[lowIdx][d2] = originalLow;
+            }
           }
         }
 
