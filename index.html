@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (分红日高强度两轮冷却完整版)</title>
+  <title>智能动态排班工作表 (分红日高强度两轮冷却与中低岗位阶梯互换完整版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度两轮冷却完整版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度两轮冷却 & 中低岗位阶梯互换版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -1048,10 +1048,10 @@
     container.innerHTML = html;
   }
 
-async function getAllHistoryMonthsData() {
-    let currentKey = getMonthKey(); // 例如当前是 "2026-08"
+  async function getAllHistoryMonthsData() {
+    let currentKey = getMonthKey(); 
     let [curYear, curMonth] = currentKey.split('-').map(Number);
-    let curTotalMonths = curYear * 12 + curMonth; // 换算成总月份数来做精准数字比较
+    let curTotalMonths = curYear * 12 + curMonth; 
 
     let allMonthsData = {};
 
@@ -1066,7 +1066,6 @@ async function getAllHistoryMonthsData() {
               let rMonth = Number(parts[1]);
               let rTotalMonths = rYear * 12 + rMonth;
 
-              // 【核心修复】：用纯数字大小比较，绝对禁止未来的月份（如9月、10月）混入当前月份（如8月）！
               if (rTotalMonths <= curTotalMonths) {
                 allMonthsData[row.month_key] = row.data.lastGeneratedSchedule;
               }
@@ -1358,7 +1357,95 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
- async function generateSchedule() {
+  // 【新增辅助函数】：计算中岗位与低岗位的阶梯分配情况，并在不符合时进行中低岗位互换调配
+  function enforceMidLowTierStepping(schedule, intensityCounts, shiftCounts) {
+    let midShifts = baseShifts.filter(s => s.level === '中').map(s => s.name);
+    let lowShifts = baseShifts.filter(s => s.level === '低').map(s => s.name);
+    let totalDays = schedule[0].length;
+
+    // 检查并调整中岗位阶梯：每个人必须拿满2次才能拿第3次，拿满第3次才能拿第4次...
+    let maxIter = 10;
+    while (maxIter-- > 0) {
+      let midCounts = staffs.map((_, sIdx) => intensityCounts[sIdx]['中'] || 0);
+      let minMid = Math.min(...midCounts);
+      let maxMid = Math.max(...midCounts);
+
+      // 如果跨度超过 1（例如有人 1 次，有人 3 次，中间差了 2），说明违背了阶梯（没拿满 2 次就有人拿到 3 次）
+      if (maxMid - minMid > 1) {
+        let overloadedIdx = midCounts.findIndex(c => c === maxMid);
+        let underloadedIdx = midCounts.findIndex(c => c === minMid);
+
+        // 寻找 overloadedIdx 在某天持有的中岗位，尝试将其与 underloadedIdx 的低岗位进行互换
+        let swapped = false;
+        for (let d = 0; d < totalDays; d++) {
+          let shiftOver = schedule[overloadedIdx][d];
+          let shiftUnder = schedule[underloadedIdx][d];
+
+          if (midShifts.includes(shiftOver) && lowShifts.includes(shiftUnder)) {
+            // 校验互换后是否符合不冲突原则
+            if (isAssignmentValid(underloadedIdx, d, shiftOver, schedule) && isAssignmentValid(overloadedIdx, d, shiftUnder, schedule)) {
+              schedule[underloadedIdx][d] = shiftOver;
+              schedule[overloadedIdx][d] = shiftUnder;
+
+              intensityCounts[overloadedIdx]['中']--;
+              intensityCounts[overloadedIdx]['低']++;
+              intensityCounts[underloadedIdx]['中']++;
+              intensityCounts[underloadedIdx]['低']--;
+
+              shiftCounts[overloadedIdx][shiftOver] = Math.max(0, (shiftCounts[overloadedIdx][shiftOver] || 1) - 1);
+              shiftCounts[underloadedIdx][shiftOver] = (shiftCounts[underloadedIdx][shiftOver] || 0) + 1;
+              swapped = true;
+              break;
+            }
+          }
+        }
+        if (!swapped) break;
+      } else {
+        break;
+      }
+    }
+
+    // 检查并调整低岗位阶梯：同理，低岗位也必须拿满 2 次才能拿第 3 次...
+    maxIter = 10;
+    while (maxIter-- > 0) {
+      let lowCounts = staffs.map((_, sIdx) => intensityCounts[sIdx]['低'] || 0);
+      let minLow = Math.min(...lowCounts);
+      let maxLow = Math.max(...lowCounts);
+
+      if (maxLow - minLow > 1) {
+        let overloadedIdx = lowCounts.findIndex(c => c === maxLow);
+        let underloadedIdx = lowCounts.findIndex(c => c === minLow);
+
+        let swapped = false;
+        for (let d = 0; d < totalDays; d++) {
+          let shiftOver = schedule[overloadedIdx][d];
+          let shiftUnder = schedule[underloadedIdx][d];
+
+          if (lowShifts.includes(shiftOver) && midShifts.includes(shiftUnder)) {
+            if (isAssignmentValid(underloadedIdx, d, shiftOver, schedule) && isAssignmentValid(overloadedIdx, d, shiftUnder, schedule)) {
+              schedule[underloadedIdx][d] = shiftOver;
+              schedule[overloadedIdx][d] = shiftUnder;
+
+              intensityCounts[overloadedIdx]['低']--;
+              intensityCounts[overloadedIdx]['中']++;
+              intensityCounts[underloadedIdx]['低']++;
+              intensityCounts[underloadedIdx]['中']--;
+
+              shiftCounts[overloadedIdx][shiftOver] = Math.max(0, (shiftCounts[overloadedIdx][shiftOver] || 1) - 1);
+              shiftCounts[underloadedIdx][shiftOver] = (shiftCounts[underloadedIdx][shiftOver] || 0) + 1;
+              swapped = true;
+              break;
+            }
+          }
+        }
+        if (!swapped) break;
+      } else {
+        break;
+      }
+    }
+  }
+
+  async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1378,11 +1465,9 @@ async function getAllHistoryMonthsData() {
       let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
 
-     let allHistoryData = await getAllHistoryMonthsData();
+      let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
 
-      // 【核心关键修复】：把当前正在排班的 newSchedule 直接塞进当前月份的历史池中，
-      // 这样在排班逻辑和统计时，就能立刻实时识别当月已经分出去的高强度岗位！
       allHistoryData[currentKey] = newSchedule;
 
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
@@ -1404,7 +1489,6 @@ async function getAllHistoryMonthsData() {
               }
               [1, 16].forEach(day => {
                 let shiftOnDiv = mSched[rowIdx][day - 1];
-                // 只要是高强度岗位，全部计入跨月总次数统计
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
                   dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
                 }
@@ -1414,7 +1498,6 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 1. 先读取用户锁定的单元格与请假表
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1462,45 +1545,34 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
-      // ==========================================
-      // 2. 【核心优化】：像支援岗位一样，优先强制固定分红日（1号和16号）的高强度岗位！
-      // ==========================================
-      // ==========================================
-      // 2. 【核心优化+2轮冷却限制】：优先固定分红日高强度岗位，且同一岗位严格 2 轮冷却！
-      // ==========================================
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
         let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDay);
 
-        // 获取当天可以上班且未被锁定的员工
         let availableStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => {
           return newSchedule[sIdx][dayIdx] !== "休" && !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
-        // 针对当天的每一个高强度岗位，强制进行优先指派
         highShifts.forEach(shiftName => {
           let alreadyHas = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
           if (alreadyHas || availableStaffs.length === 0) return;
 
-          // 【核心拦截】：第一层筛选：严格满足“同一岗位 2 轮冷却”
           let candidates = availableStaffs.filter(sIdx => {
             let userMap = userLastAssignedDividendRound[sIdx] || {};
             let lastIdx = userMap[shiftName];
             if (lastIdx !== undefined) {
               let roundsPassed = currentActiveRoundIndex - lastIdx;
-              if (roundsPassed < 2) return false; // 冷却期未满（例如 8/1拿了，8/16和9/1都不能拿）
+              if (roundsPassed < 2) return false; 
             }
             return true;
           });
 
-          // 【安全垫】：如果所有人都在该岗位的冷却期中，为了不让岗位开天窗，退一步允许从“非当前岗位冷却”的人里选
           if (candidates.length === 0) {
             candidates = [...availableStaffs];
           }
 
           if (candidates.length > 0) {
-            // 按照“历史分红高强度总次数最少”的人优先排序
             candidates.sort((a, b) => {
               let histA = dividendHighHistory[a] || 0;
               let histB = dividendHighHistory[b] || 0;
@@ -1513,7 +1585,6 @@ async function getAllHistoryMonthsData() {
             
             availableStaffs = availableStaffs.filter(s => s !== chosen);
 
-            // 更新统计与该岗位的最后拿取轮次记录
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
             intensityCounts[chosen]['High' in intensityCounts[chosen] ? 'High' : '高']++;
             dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
@@ -1524,12 +1595,9 @@ async function getAllHistoryMonthsData() {
         });
       });
 
-      // 3. 接着处理常规日期的排班与剩余岗位的填补
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-        let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
-        // 处理支援岗位
         let assignedSupportStaffIdx = null;
         if (workingStaffs.length >= 13) {
           let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
@@ -1563,17 +1631,11 @@ async function getAllHistoryMonthsData() {
           let foundS = baseShifts.find(s => s.name === shiftName);
           let level = foundS ? foundS.level : '中';
 
-// 计算当前该强度的平均值与允许的绝对上限（以目标区间的最大值为死线）
-          let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
-          let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
-          
-          // 根据您更新后的目标区间设置严格的硬卡上限（高上限8，中上限9，低上限6）
           let hardMaxLimit = level === '高' ? 8 : (level === '中' ? 9 : 6);
 
           let candidates = workingStaffs.filter(sIdx => {
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
             
-            // 严格限制：当达到目标区间最大值时，绝对不再分配
             if (intensityCounts[sIdx][level] >= hardMaxLimit) return false;
 
             if (level === '高') {
@@ -1584,7 +1646,6 @@ async function getAllHistoryMonthsData() {
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
           });
 
-          // 【安全垫】：如果因为卡得太紧导致候选人为空，自动放宽一次限制，从当前该强度最少的人里挑
           if (candidates.length === 0) {
             candidates = workingStaffs.filter(sIdx => {
               if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
@@ -1592,19 +1653,16 @@ async function getAllHistoryMonthsData() {
             });
           }
 
-         if (candidates.length > 0) {
+          if (candidates.length > 0) {
             candidates.sort((a, b) => {
-              // 1. 【核心优化】优先选择当前分到【这个具体岗位】次数最少的人，实现单个岗位绝对平均！
               let countA_shift = shiftCounts[a][shiftName] || 0;
               let countB_shift = shiftCounts[b][shiftName] || 0;
               if (countA_shift !== countB_shift) return countA_shift - countB_shift;
 
-              // 2. 其次选择当前该强度（高/中/低）次数最少的人
               let countA_level = intensityCounts[a][level] || 0;
               let countB_level = intensityCounts[b][level] || 0;
               if (countA_level !== countB_level) return countA_level - countB_level;
 
-              // 3. 其次均衡高强度
               let highA = intensityCounts[a]['高'] || 0;
               let highB = intensityCounts[b]['高'] || 0;
               if (highA !== highB) return highA - highB;
@@ -1619,7 +1677,6 @@ async function getAllHistoryMonthsData() {
           }
         });
 
-        // 填补当天剩下的空白格子
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
@@ -1637,6 +1694,9 @@ async function getAllHistoryMonthsData() {
         });
       }
 
+      // 【新增调用】：在排班基本生成后，执行中低岗位阶梯分配及互换调配
+      enforceMidLowTierStepping(newSchedule, intensityCounts, shiftCounts);
+
       balanceSchedule(newSchedule, staffs, baseShifts);
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
@@ -1644,8 +1704,8 @@ async function getAllHistoryMonthsData() {
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（分红日高强度岗位已优先强制固定分配）！`;
-      alert(`[${monthKey}] 排班生成完毕！分红日（1号与16号）的高强度岗位现在已像支援岗位一样被优先固定，并自动把机会平均分配给总次数较少的人，不会再有一直抽不到 0 次的情况了！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（已应用中低岗位阶梯分配与互换规则）！`;
+      alert(`[${monthKey}] 排班生成完毕！中低岗位已强制执行“每个人拿满2次才能拿第3次（以此类推）”的阶梯规则，并在不符合时自动通过中低岗位互换调配完成优化！`);
 
     } catch (err) {
       console.error(err);
