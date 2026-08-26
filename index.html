@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (分红日高强度两轮冷却完整版)</title>
+  <title>智能动态排班工作表 (中低强度阶梯轮换完整版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度两轮冷却完整版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 中低强度阶梯轮换版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -1550,21 +1550,15 @@
             let minShiftCountInAll = Math.min(...staffs.map((_, idx) => shiftCounts[idx][shiftName] || 0));
 
             // ==========================================
-            // 💡【核心新增：中强度岗位阶梯限制】
+            // 💡【核心升级：中、低强度岗位阶梯限制】
             // 规则：每个人必须拿过 2 次才能拿第 3 次；拿过 3 次才能拿第 4 次，以此类推。
-            // 即：当前员工的该岗位次数，不能超过全员当前该岗位最小次数 + 1 
-            // （也就是必须等大家都升到当前阶梯，才能进入下一个阶梯）
             // ==========================================
-            if (level === '中') {
+            if (level === '中' || level === '低') {
               let maxAllowedShiftCount = minShiftCountInAll <= 1 ? 2 : (minShiftCountInAll + 1);
               if (currentShiftCount >= maxAllowedShiftCount) return false;
             } else if (level === '高') {
-              // 高强度保持原有独立逻辑
               let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
               if (shiftSpecificCount >= 2) return false; 
-            } else if (level === '低') {
-              let maxAllowedLowCount = minShiftCountInAll <= 1 ? 2 : (minShiftCountInAll + 1);
-              if (currentShiftCount >= maxAllowedLowCount) return false;
             }
 
             return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
@@ -1625,8 +1619,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（中强度岗位已启用阶梯轮换限制）！`;
-      alert(`[${monthKey}] 排班生成完毕！中强度岗位现已严格执行“必须拿满当前阶梯次数（如2次->3次->4次）才能继续往下分配”的均衡轮换规则，高强度及其他规则保持不变！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（中、低强度岗位均已启用阶梯轮换限制）！`;
+      alert(`[${monthKey}] 排班生成完毕！中、低强度岗位现已全面执行“必须拿满当前阶梯次数（如2次->3次->4次）才能继续往下分配”的均衡轮换规则！`);
 
     } catch (err) {
       console.error(err);
