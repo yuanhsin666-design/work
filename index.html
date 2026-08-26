@@ -1499,27 +1499,41 @@ async function getAllHistoryMonthsData() {
             candidates = [...availableStaffs];
           }
 
-          if (candidates.length > 0) {
-            // 按照“历史分红高强度总次数最少”的人优先排序
+         if (candidates.length > 0) {
             candidates.sort((a, b) => {
-              let histA = dividendHighHistory[a] || 0;
-              let histB = dividendHighHistory[b] || 0;
-              if (histA !== histB) return histA - histB;
+              // 【核心防超标惩罚机制】：如果某人该具体岗位的次数已经偏高，给予极高的负分权重，强行让其排在后面！
+              let countA_shift = shiftCounts[a][shiftName] || 0;
+              let countB_shift = shiftCounts[b][shiftName] || 0;
+              
+              // 设定阈值：如果次数 >= 3，惩罚权重翻倍，让算法绝对优先选择次数少的人
+              let penaltyA = countA_shift >= 3 ? countA_shift * 100 : countA_shift;
+              let penaltyB = countB_shift >= 3 ? countB_shift * 100 : countB_shift;
+              if (penaltyA !== penaltyB) return penaltyA - penaltyB;
+
+              // 其次，对中强度和低强度的总体次数也加上防超标惩罚
+              let levelTotalA = 0, levelTotalB = 0;
+              baseShifts.forEach(bs => {
+                if (bs.level === level) {
+                  levelTotalA += (shiftCounts[a][bs.name] || 0);
+                  levelTotalB += (shiftCounts[b][bs.name] || 0);
+                }
+              });
+              let levelPenaltyA = levelTotalA >= 8 ? levelTotalA * 50 : levelTotalA;
+              let levelPenaltyB = levelTotalB >= 8 ? levelTotalB * 50 : levelTotalB;
+              if (levelPenaltyA !== levelPenaltyB) return levelPenaltyA - levelPenaltyB;
+
+              // 基础平衡权重
+              let highA = intensityCounts[a]['高'] || 0;
+              let highB = intensityCounts[b]['高'] || 0;
+              if (highA !== highB) return highA - highB;
+              
               return Math.random() - 0.5;
             });
 
             let chosen = candidates[0];
             newSchedule[chosen][dayIdx] = shiftName;
-            
-            availableStaffs = availableStaffs.filter(s => s !== chosen);
-
-            // 更新统计与该岗位的最后拿取轮次记录
             shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
-            intensityCounts[chosen]['High' in intensityCounts[chosen] ? 'High' : '高']++;
-            dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
-            
-            if (!userLastAssignedDividendRound[chosen]) userLastAssignedDividendRound[chosen] = {};
-            userLastAssignedDividendRound[chosen][shiftName] = currentActiveRoundIndex;
+            if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
           }
         });
       });
