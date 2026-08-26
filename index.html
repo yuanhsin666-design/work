@@ -1328,8 +1328,7 @@ async function getAllHistoryMonthsData() {
   }
 
   // ==========================================
-  // 【终极爆破版】中/低强度岗位「必须拿满上一轮次数，才能进入下一轮次数」公平性校验与自动调配
-  // 规则：强拉平，不再受“邻接重复”限制，只为消除 0 和 3
+  // 【终极强杀版】排除0次和3次
   // ==========================================
   function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList) {
     if (!schedule || schedule.length === 0) return;
@@ -1348,7 +1347,7 @@ async function getAllHistoryMonthsData() {
         let maxCount = Math.max(...counts);
         let minCount = Math.min(...counts);
 
-        if (maxCount - minCount < 2) break; // 达标
+        if (maxCount - minCount < 2) break;
 
         let overIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => counts[sIdx] - minCount >= 2).sort((a, b) => counts[b] - counts[a]);
         let underIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => maxCount - counts[sIdx] >= 2).sort((a, b) => counts[a] - counts[b]);
@@ -1364,14 +1363,12 @@ async function getAllHistoryMonthsData() {
             if (lowIdx === highIdx) continue;
             if (counts[highIdx] - counts[lowIdx] < 2) continue;
 
-            // 找高的人可换的天
             let highDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
               if (schedule[highIdx][d] === shiftName) highDays.push(d);
             }
 
-            // 找低的人可换的天（必须是非休、非支援、非同岗位的中低岗位）
             let lowDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
@@ -1382,7 +1379,6 @@ async function getAllHistoryMonthsData() {
               lowDays.push(d);
             }
 
-            // 尝试互换：【终极爆破】不再校验 isAssignmentValid 的重复限制！
             for (let i = 0; i < highDays.length && !swapped; i++) {
               for (let j = 0; j < lowDays.length && !swapped; j++) {
                 let d1 = highDays[i];
@@ -1393,7 +1389,6 @@ async function getAllHistoryMonthsData() {
                 schedule[highIdx][d1] = originalLow;
                 schedule[lowIdx][d2] = originalHigh;
 
-                // 只要当天没有重复的岗位（避免同岗双人），就换！
                 let duplicateCheck1 = !schedule.some((row, idx) => idx !== highIdx && row[d1] === originalLow);
                 let duplicateCheck2 = !schedule.some((row, idx) => idx !== lowIdx && row[d2] === originalHigh);
 
@@ -1706,7 +1701,7 @@ async function getAllHistoryMonthsData() {
 
       balanceSchedule(newSchedule, staffs, baseShifts);
 
-      // 【终极爆破】执行纯表格互换，不再受邻接重复限制，消除 0 和 3
+      // 【终极强杀】执行纯表格互换，强制拉平 0 和 3
       enforceMidLowRoundFairness(newSchedule, staffs, baseShifts);
 
       // 【最终修复】强制基于最终表格重新计算所有人的统计数据
