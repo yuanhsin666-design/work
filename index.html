@@ -323,18 +323,26 @@
     return true;
   }
 
-  async function resetCurrentMonthData() {
+   async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
-    if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？`)) {
-      currentMonthRests = {};
+    if (confirm(`确定要重置 [${monthKey}] 月份的工作岗位吗？\n（注意：将清空排班，但保留所有休假日期和云端链接）`)) {
+      
+      // 1. 保留休假日期 (currentMonthRests 不动)
+      // 2. 保留云端链接 (不修改 cloudUrlInput 的 value)
+      // 3. 只清空排班表中的岗位数据
       lastGeneratedSchedule = null;
-      initLockedMap(true);
-      document.getElementById('cloudUrlInput').value = "";
-      localStorage.removeItem(`auto_schedule_month_${monthKey}`);
-      try { await supabaseClient.from('schedules').delete().eq('month_key', monthKey); } catch (err) {}
+
+      // 4. 保留之前的锁定状态吗？为了防止重置后手滑改了以前锁定的数据，建议全部解锁，让系统重新排
+      // 这里选择清空锁定状态，允许重新排班。如果您想保留锁定状态，可以将这行注释掉。
+      initLockedMap(true); 
+
+      // 5. 将新数据保存到本地和云端
+      // 由于 currentMonthRests 和 cloudUrlInput 都没有被清空，saveDataToLocal 会保存完整的数据
+      await saveDataToLocal();
+      
       renderAll();
-      document.getElementById('status').innerText = `🗑️ 已重置 [${monthKey}] 的数据！`;
-      alert(`[${monthKey}] 月份数据已成功重置！`);
+      document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 的工作岗位（保留休假）！`;
+      alert(`[${monthKey}] 月份的工作岗位已成功重置！\n\n【保留的数据】\n• 所有员工的休假日\n• 云端链接\n\n【已清空的数据】\n• 所有人的排班工作岗位`);
     }
   }
 
