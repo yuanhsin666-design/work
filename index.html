@@ -1327,17 +1327,93 @@ async function getAllHistoryMonthsData() {
     });
   }
 
-    // ==========================================
-  // 【修正版】中/低强度岗位「必须拿满上一轮次数，才能进入下一轮次数」公平性校验与自动调配
-  // 规则说明：
-  //   - 中/低强度的某个具体岗位：必须所有人都拿满 N 次，才允许有人拿到 N+1 次。
-  //   - 一旦发现有人「超前」（如3次），而还有人「落后」（如1次），自动在【中岗位】与【低岗位】之间寻找可互换的排班。
-  //   - 【核心修复】：交换时强制校验双方的“岗位总数不变”，不能破坏“休”和“支援”！
-  // ==========================================
-   // ==========================================
-  // 【最终修复版】中/低强度岗位「必须拿满上一轮次数，才能进入下一轮次数」公平性校验与自动调配
+     // ==========================================
+  // 【终极爆破版】中/低强度岗位「必须拿满上一轮次数，才能进入下一轮次数」公平性校验与自动调配
+  // 规则：强拉平，不再受“邻接重复”限制，只为消除 0 和 3
   // ==========================================
   function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList) {
+    if (!schedule || schedule.length === 0) return;
+    let totalDays = schedule[0].length;
+    let midLowShifts = baseShiftsList.filter(s => s.level === '中' || s.level === '低');
+
+    midLowShifts.forEach(shiftObj => {
+      const shiftName = shiftObj.name;
+      let attempts = 0;
+      let maxAttempts = 2000;
+
+      while (attempts < maxAttempts) {
+        attempts++;
+
+        let counts = staffList.map((_, sIdx) => schedule[sIdx].filter(d => d === shiftName).length);
+        let maxCount = Math.max(...counts);
+        let minCount = Math.min(...counts);
+
+        if (maxCount - minCount < 2) break; // 达标
+
+        let overIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => counts[sIdx] - minCount >= 2).sort((a, b) => counts[b] - counts[a]);
+        let underIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => maxCount - counts[sIdx] >= 2).sort((a, b) => counts[a] - counts[b]);
+
+        let swapped = false;
+
+        pairLoop:
+        for (let oi = 0; oi < overIdxList.length; oi++) {
+          let highIdx = overIdxList[oi]; 
+
+          for (let ui = 0; ui < underIdxList.length; ui++) {
+            let lowIdx = underIdxList[ui]; 
+            if (lowIdx === highIdx) continue;
+            if (counts[highIdx] - counts[lowIdx] < 2) continue;
+
+            // 找高的人可换的天
+            let highDays = [];
+            for (let d = 0; d < totalDays; d++) {
+              if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
+              if (schedule[highIdx][d] === shiftName) highDays.push(d);
+            }
+
+            // 找低的人可换的天（必须是非休、非支援、非同岗位的中低岗位）
+            let lowDays = [];
+            for (let d = 0; d < totalDays; d++) {
+              if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
+              let lowCurrentShift = schedule[lowIdx][d];
+              if (lowCurrentShift === shiftName || lowCurrentShift === "休" || lowCurrentShift === supportShift.name) continue;
+              let lowShiftObj = baseShiftsList.find(s => s.name === lowCurrentShift);
+              if (!lowShiftObj || (lowShiftObj.level !== '中' && lowShiftObj.level !== '低')) continue;
+              lowDays.push(d);
+            }
+
+            // 尝试互换：【终极爆破】不再校验 isAssignmentValid 的重复限制！
+            for (let i = 0; i < highDays.length && !swapped; i++) {
+              for (let j = 0; j < lowDays.length && !swapped; j++) {
+                let d1 = highDays[i];
+                let d2 = lowDays[j];
+                let originalHigh = schedule[highIdx][d1];
+                let originalLow = schedule[lowIdx][d2];
+
+                schedule[highIdx][d1] = originalLow;
+                schedule[lowIdx][d2] = originalHigh;
+
+                // 只要当天没有重复的岗位（避免同岗双人），就换！
+                let duplicateCheck1 = !schedule.some((row, idx) => idx !== highIdx && row[d1] === originalLow);
+                let duplicateCheck2 = !schedule.some((row, idx) => idx !== lowIdx && row[d2] === originalHigh);
+
+                if (duplicateCheck1 && duplicateCheck2) {
+                  swapped = true; 
+                } else {
+                  schedule[highIdx][d1] = originalHigh;
+                  schedule[lowIdx][d2] = originalLow;
+                }
+              }
+            }
+
+            if (swapped) break pairLoop;
+          }
+        }
+
+        if (!swapped) break; 
+      }
+    });
+  }
     if (!schedule || schedule.length === 0) return;
     let totalDays = schedule[0].length;
     let midLowShifts = baseShiftsList.filter(s => s.level === '中' || s.level === '低');
@@ -1752,7 +1828,7 @@ async function getAllHistoryMonthsData() {
       }
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
-      lastGeneratedSchedule = sanitizeSchedule(newSchedule);
+    
       renderAll();
       saveDataToLocal();
 
