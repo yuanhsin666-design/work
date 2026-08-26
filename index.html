@@ -1774,19 +1774,15 @@ async function getAllHistoryMonthsData() {
             if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
           }
         });
-           // 填补当天剩下的空白格子
+               // 填补当天剩下的空白格子
         workingStaffs.forEach(sIdx => {
           if (newSchedule[sIdx][dayIdx] === "") {
-            // 【修正】原本「当天岗位都排过了」就一律塞 baseShifts[0]，
-            //        造成第一个岗位次数暴增、其他岗位有人 0 次。
-            //        改为：优先挑今天出现最少 → 本人做最少 → 不违反连排规则的岗位。
             let todayCount = {};
             baseShifts.forEach(s => { todayCount[s.name] = 0; });
             for (let k = 0; k < newSchedule.length; k++) {
               let v = newSchedule[k][dayIdx];
               if (todayCount[v] !== undefined) todayCount[v]++;
             }
-            // 各岗位「当月累计已排班次」——要一起拉平，否则各岗位的目标区间宽窄不一，最後注定有人 1 次有人 3 次
             let monthTotal = {};
             baseShifts.forEach(s => { monthTotal[s.name] = 0; });
             for (let k = 0; k < newSchedule.length; k++) {
@@ -1799,25 +1795,47 @@ async function getAllHistoryMonthsData() {
             baseShifts.forEach(s => {
               const nm = s.name;
               
-              // ========== 【新增修复代码：硬性禁止相同岗位连排】 ==========
-              // 如果这个员工前一天或后一天已经排了完全一样的岗位，直接跳过，绝对不选
+              // ========== 硬性禁止相同岗位连排 ==========
               let prevShift = (dayIdx > 0) ? newSchedule[sIdx][dayIdx - 1] : "";
               let nextShift = (dayIdx < totalDays - 1) ? newSchedule[sIdx][dayIdx + 1] : "";
               if (nm === prevShift || nm === nextShift) {
-                return; // 跳过该岗位，绝对不允许相同岗位相邻
+                return; 
               }
-              // ========================================================
+              // ========================================
+
+              // ========== 防止高强度连排，让排班更平军 ==========
+              // 如果今天要排的是高强度岗位，且前一天已经是高强度，则直接跳过
+              if (s.level === '高') {
+                let prevLevel = "";
+                if (dayIdx > 0) {
+                   let prevS = baseShifts.find(bs => bs.name === newSchedule[sIdx][dayIdx - 1]);
+                   if (prevS) prevLevel = prevS.level;
+                }
+                // 严格要求：不连续两天排高强度。
+                // 如果想允许最多连续两天，可以改为 (prevLevel === '高' && 再往前一天也是高)
+                if (prevLevel === '高') {
+                   return;
+                }
+              }
+              // ================================================
 
               let score = todayCount[nm] * 100000;                    // 1. 尽量别跟当天别人撞岗
               score += (shiftCounts[sIdx][nm] || 0) * 1000;           // 2. 本人这岗位做最少的优先
-              if (!isAssignmentValid(sIdx, dayIdx, nm, newSchedule)) score += 300;  // 3. 连排规则当软性扣分
-              score += (monthTotal[nm] || 0) * 10;                    // 4. 当月总班次少的岗位优先
+              if (!isAssignmentValid(sIdx, dayIdx, nm, newSchedule)) score += 300;  
+              score += (monthTotal[nm] || 0) * 10;                    
               score += (intensityCounts[sIdx][s.level] || 0);         // 5. 强度总数少的优先
+
+              // ========== 强度平军：如果这个人高强度排得最多，大幅度加分（让它排不到） ==========
+              let maxHighCount = Math.max(...staffs.map((_, idx) => intensityCounts[idx]['高'] || 0));
+              let currentHighCount = intensityCounts[sIdx]['高'] || 0;
+              if (s.level === '高' && currentHighCount >= maxHighCount) {
+                score += 50000; // 大幅度抬高分数，让系统优先把高强度岗位分给高强度排得少的人
+              }
+              // =============================================================================
 
               if (score < bestScore) { bestScore = score; chosenFallback = nm; }
             });
 
-            // 如果所有岗位都因为连排限制被跳过了，只能随便挑一个（兜底，防止死循环）
             if (!chosenFallback) {
                chosenFallback = baseShifts[0].name;
             }
