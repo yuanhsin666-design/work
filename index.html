@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 中低强度阶梯轮换严格校验版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 中低强度阶梯轮换版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -1326,59 +1326,57 @@
     });
   }
 
-  // 💡【新增：中强度岗位阶梯条件严格检查与重新调配校验函数】
-  function enforceMidShiftLadderRules(schedule, lockedMap) {
-    let totalDays = schedule[0].length;
-    let midShifts = baseShifts.filter(s => s.level === '中').map(s => s.name);
-    if (midShifts.length === 0) return;
+  // ==========================================
+  // 💡【新增：低强度岗位阶梯合规性检查与重新调配机制】
+  // ==========================================
+  function checkAndRebalanceLowShifts(schedule, lockedMap) {
+    let lowShifts = baseShifts.filter(s => s.level === '低').map(s => s.name);
+    if (lowShifts.length === 0) return;
 
-    // 最多尝试调配 5 轮以确保满足阶梯
-    for (let iteration = 0; iteration < 5; iteration++) {
-      let hasViolation = false;
+    const totalDays = schedule[0].length;
+    let maxIterations = 15; // 最多迭代调整 15 次以确保收敛
 
-      // 统计每个人每个中强度岗位的分配次数
-      let staffMidCounts = staffs.map((_, sIdx) => {
-        let counts = {};
-        midShifts.forEach(sName => {
-          counts[sName] = schedule[sIdx].filter(d => d === sName).length;
+    for (let iter = 0; iter < maxIterations; iter++) {
+      let violationFound = false;
+
+      lowShifts.forEach(shiftName => {
+        // 计算当前所有员工在此低强度岗位上的分配次数
+        let counts = staffs.map((_, sIdx) => {
+          return schedule[sIdx].filter(d => d === shiftName).length;
         });
-        return counts;
-      });
 
-      midShifts.forEach(sName => {
-        let allCounts = staffs.map((_, sIdx) => staffMidCounts[sIdx][sName]);
-        let minCount = Math.min(...allCounts);
-        let maxAllowed = minCount <= 1 ? 2 : (minCount + 1);
+        let minCount = Math.min(...counts);
+        let maxCount = Math.max(...counts);
 
-        // 检查是否有人的次数超过了当前阶梯限制（即违背了“必须拿满当前阶梯才能拿更高阶梯”的条件）
-        staffs.forEach((_, sIdx) => {
-          if (staffMidCounts[sIdx][sName] > maxAllowed) {
-            hasViolation = true;
-            // 尝试将超额的人的其中一次该岗位调配给拿得最少且未锁定的员工
+        // 如果最大值与最小值差值大于 1，说明违反了阶梯轮换（即有人还没拿满当前阶梯，就有其他人拿了更高的次数）
+        if (maxCount - minCount > 1) {
+          violationFound = true;
+
+          // 找出拿得最多的人（超标者）和拿得最少的人（欠缺者）
+          let overStaffs = staffs.map((_, idx) => idx).filter(idx => counts[idx] > minCount + 1);
+          let underStaffs = staffs.map((_, idx) => idx).filter(idx => counts[idx] === minCount);
+
+          if (overStaffs.length > 0 && underStaffs.length > 0) {
+            let overIdx = overStaffs[0];
+            let underIdx = underStaffs[0];
+
+            // 尝试在排班表中寻找一天，让超标者和欠缺者对调该低强度岗位（前提是未锁定且合法）
             for (let d = 0; d < totalDays; d++) {
-              if (schedule[sIdx][d] === sName && !lockedMap[sIdx][d]) {
-                // 寻找一个拿得少于 maxAllowed 且该天不上班或休假、未锁定的候选人
-                let targetSIdx = staffs.findIndex((__, targetIdx) => {
-                  return targetIdx !== sIdx &&
-                         staffMidCounts[targetIdx][sName] < minCount + 1 &&
-                         schedule[targetIdx][d] === "休" &&
-                         !lockedMap[targetIdx][d];
-                });
-
-                if (targetSIdx !== -1) {
-                  schedule[sIdx][d] = "休";
-                  schedule[targetSIdx][d] = sName;
-                  staffMidCounts[sIdx][sName]--;
-                  staffMidCounts[targetSIdx][sName]++;
+              if (schedule[overIdx][d] === shiftName && !lockedMap[overIdx][d]) {
+                // 检查欠缺者在这一天是否可以安排该岗位（未上班休假、未锁定、且符合其他冲突限制）
+                if (schedule[underIdx][d] === "休" && !lockedMap[underIdx][d]) {
+                  // 尝试对调：把超标者的这一天变休，欠缺者这一天改成该岗位
+                  schedule[overIdx][d] = "休";
+                  schedule[underIdx][d] = shiftName;
                   break;
                 }
               }
             }
           }
-        });
+        }
       });
 
-      if (!hasViolation) break;
+      if (!violationFound) break; // 如果检查没有发现违规，直接跳出
     }
   }
 
@@ -1605,9 +1603,7 @@
             let currentShiftCount = shiftCounts[sIdx][shiftName] || 0;
             let minShiftCountInAll = Math.min(...staffs.map((_, idx) => shiftCounts[idx][shiftName] || 0));
 
-            // ==========================================
-            // 💡【阶梯轮换限制：拿满当前阶梯才能拿下一个】
-            // ==========================================
+            // 💡【阶梯轮换限制】
             if (level === '中' || level === '低') {
               let maxAllowedShiftCount = minShiftCountInAll <= 1 ? 2 : (minShiftCountInAll + 1);
               if (currentShiftCount >= maxAllowedShiftCount) return false;
@@ -1667,8 +1663,8 @@
         });
       }
 
-      // 💡 执行中强度岗位的阶梯规则检查与重新调配直至符合
-      enforceMidShiftLadderRules(newSchedule, lockedMap);
+      // 💡【执行新增的低强度岗位合规性检查与重新调配】
+      checkAndRebalanceLowShifts(newSchedule, lockedMap);
 
       balanceSchedule(newSchedule, staffs, baseShifts);
 
@@ -1677,8 +1673,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（中强度岗位阶梯条件已检查并调配符合）！`;
-      alert(`[${monthKey}] 排班生成完毕！中强度岗位已完成阶梯条件检查，并已自动重新调配至符合“拿满前置次数才能拿下一阶梯”的规则！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（低强度岗位已执行阶梯合规性检查与重新调配）！`;
+      alert(`[${monthKey}] 排班生成完毕！系统已自动对低强度岗位进行了阶梯合规性检查，若未满足“必须拿满当前阶梯次数才能晋级”已完成重新调配！`);
 
     } catch (err) {
       console.error(err);
