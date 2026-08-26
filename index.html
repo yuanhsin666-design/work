@@ -1748,11 +1748,12 @@ async function getAllHistoryMonthsData() {
         });
       }
 
-      balanceSchedule(newSchedule, staffs, baseShifts);
+           balanceSchedule(newSchedule, staffs, baseShifts);
 
       // 【新增】中/低强度岗位「拿满上一轮才能进入下一轮」公平性校验与自动互换调配
-      enforceMidLowRoundFairness(newSchedule, staffs, baseShifts);
-
+      // 【核心修复】：传递 shiftCounts 和 intensityCounts 以便同步更新，杜绝后续出现 1 次和 3 次不均的现象
+      enforceMidLowRoundFairness(newSchedule, staffs, baseShifts, shiftCounts, intensityCounts);
+      
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
