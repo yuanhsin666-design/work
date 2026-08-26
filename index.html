@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (分红日高强度两轮冷却与中低岗位阶梯互换完整版)</title>
+  <title>智能动态排班工作表 (锁定休假保护 & 中低岗位阶梯互换完整版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 分红日高强度两轮冷却 & 中低岗位阶梯互换版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 锁定休假保护 & 中低岗位阶梯互换版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -898,7 +898,7 @@
     document.getElementById('statsTable').innerHTML = html;
   }
 
- function renderIntensitySummaryTable(scheduleData = null) {
+  function renderIntensitySummaryTable(scheduleData = null) {
     let container = document.getElementById('intensitySummaryTable');
     if (!container) return;
 
@@ -1304,13 +1304,18 @@
         
         if (count === 0) {
           for (let targetDay = 0; targetDay < totalDays; targetDay++) {
+            // 【保护逻辑】：如果当前格子被锁定或休假，绝对不通过平衡调整去覆盖它
+            if (lockedMap[sIdx][targetDay]) continue;
             let currentShiftOnDay = schedule[sIdx][targetDay];
-            if (currentShiftOnDay === "休") {
+            let staffRests = currentMonthRests[sIdx] || [];
+            if (currentShiftOnDay === "休" || staffRests.includes(targetDay + 1)) continue;
+
+            if (currentShiftOnDay === "" || currentShiftOnDay === "休") {
               for (let otherSIdx = 0; otherSIdx < staffList.length; otherSIdx++) {
                 if (otherSIdx === sIdx) continue;
                 if (schedule[otherSIdx][targetDay] === sName) {
                   let otherTotalCount = schedule[otherSIdx].filter(d => d === sName).length;
-                  if (otherTotalCount > 1) {
+                  if (otherTotalCount > 1 && !lockedMap[otherSIdx][targetDay]) {
                     schedule[sIdx][targetDay] = sName;
                     schedule[otherSIdx][targetDay] = "休";
                     break;
@@ -1357,32 +1362,30 @@
     return uniqueRounds;
   }
 
-  // 【新增辅助函数】：计算中岗位与低岗位的阶梯分配情况，并在不符合时进行中低岗位互换调配
+  // 【新增函数】：中低岗位阶梯分配与岗位互换调配
   function enforceMidLowTierStepping(schedule, intensityCounts, shiftCounts) {
     let midShifts = baseShifts.filter(s => s.level === '中').map(s => s.name);
     let lowShifts = baseShifts.filter(s => s.level === '低').map(s => s.name);
     let totalDays = schedule[0].length;
 
-    // 检查并调整中岗位阶梯：每个人必须拿满2次才能拿第3次，拿满第3次才能拿第4次...
+    // 检查中岗位阶梯分配
     let maxIter = 10;
     while (maxIter-- > 0) {
       let midCounts = staffs.map((_, sIdx) => intensityCounts[sIdx]['中'] || 0);
       let minMid = Math.min(...midCounts);
       let maxMid = Math.max(...midCounts);
 
-      // 如果跨度超过 1（例如有人 1 次，有人 3 次，中间差了 2），说明违背了阶梯（没拿满 2 次就有人拿到 3 次）
       if (maxMid - minMid > 1) {
         let overloadedIdx = midCounts.findIndex(c => c === maxMid);
         let underloadedIdx = midCounts.findIndex(c => c === minMid);
 
-        // 寻找 overloadedIdx 在某天持有的中岗位，尝试将其与 underloadedIdx 的低岗位进行互换
         let swapped = false;
         for (let d = 0; d < totalDays; d++) {
+          if (lockedMap[overloadedIdx][d] || lockedMap[underloadedIdx][d]) continue;
           let shiftOver = schedule[overloadedIdx][d];
           let shiftUnder = schedule[underloadedIdx][d];
 
           if (midShifts.includes(shiftOver) && lowShifts.includes(shiftUnder)) {
-            // 校验互换后是否符合不冲突原则
             if (isAssignmentValid(underloadedIdx, d, shiftOver, schedule) && isAssignmentValid(overloadedIdx, d, shiftUnder, schedule)) {
               schedule[underloadedIdx][d] = shiftOver;
               schedule[overloadedIdx][d] = shiftUnder;
@@ -1405,7 +1408,7 @@
       }
     }
 
-    // 检查并调整低岗位阶梯：同理，低岗位也必须拿满 2 次才能拿第 3 次...
+    // 检查低岗位阶梯分配
     maxIter = 10;
     while (maxIter-- > 0) {
       let lowCounts = staffs.map((_, sIdx) => intensityCounts[sIdx]['低'] || 0);
@@ -1418,6 +1421,7 @@
 
         let swapped = false;
         for (let d = 0; d < totalDays; d++) {
+          if (lockedMap[overloadedIdx][d] || lockedMap[underloadedIdx][d]) continue;
           let shiftOver = schedule[overloadedIdx][d];
           let shiftUnder = schedule[underloadedIdx][d];
 
@@ -1498,6 +1502,7 @@
         }
       });
 
+      // 【休假保护核心逻辑】：确保已锁定或云端导入的休假不会被覆盖
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1512,7 +1517,7 @@
               if (existingShift === supName) {
                 supportCountsThisMonth[sIdx]++;
               } else {
-                shiftCounts[sIdx][existingShift] = (shiftCounts[existingShift] || 0) + 1;
+                shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
                 let foundS = baseShifts.find(s => s.name === existingShift);
                 if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
                   intensityCounts[sIdx][foundS.level]++;
@@ -1521,6 +1526,7 @@
             }
           } else if (staffRests.includes(day)) {
             newSchedule[sIdx][dayIdx] = "休";
+            lockedMap[sIdx][dayIdx] = true; // 自动锁定导入的休假，防止被排班覆盖
           }
         });
       }
@@ -1678,7 +1684,7 @@
         });
 
         workingStaffs.forEach(sIdx => {
-          if (newSchedule[sIdx][dayIdx] === "") {
+          if (newSchedule[sIdx][dayIdx] === "" && !lockedMap[sIdx][dayIdx]) {
             let assignedToday = newSchedule.map(row => row[dayIdx]);
             let availableUnusedShifts = baseShifts.map(s => s.name).filter(sName => !assignedToday.includes(sName));
 
@@ -1694,7 +1700,7 @@
         });
       }
 
-      // 【新增调用】：在排班基本生成后，执行中低岗位阶梯分配及互换调配
+      // 执行中低岗位阶梯分配及互换调配
       enforceMidLowTierStepping(newSchedule, intensityCounts, shiftCounts);
 
       balanceSchedule(newSchedule, staffs, baseShifts);
@@ -1704,8 +1710,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（已应用中低岗位阶梯分配与互换规则）！`;
-      alert(`[${monthKey}] 排班生成完毕！中低岗位已强制执行“每个人拿满2次才能拿第3次（以此类推）”的阶梯规则，并在不符合时自动通过中低岗位互换调配完成优化！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（休假已严格锁定保护）！`;
+      alert(`[${monthKey}] 排班生成完毕！云端假表与已锁定休假已受到严格保护，未被覆盖。中低岗位阶梯互换规则已生效！`);
 
     } catch (err) {
       console.error(err);
