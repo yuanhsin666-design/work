@@ -1328,29 +1328,34 @@ async function getAllHistoryMonthsData() {
   }
 
   // ==========================================
-  // 【差值≤1严格封顶版】回到上一版的逻辑，主循环直接加入“差值不能超过1”的限制！
+  // 【整月全局回溯校验版】先排完，再统览全局，将“多的人”和“少的人”强行互换。
+  // 不再限制必须同天或同类别！保证全局差距不超过1！
   // ==========================================
   function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList) {
     if (!schedule || schedule.length === 0) return;
     let totalDays = schedule[0].length;
-    let midLowShifts = baseShiftsList.filter(s => s.level === '中' || s.level === '低');
+    // 将所有岗位全部纳入调配池（包括高强度岗位）
+    let allShifts = baseShiftsList.filter(s => s.level === '高' || s.level === '中' || s.level === '低');
 
-    midLowShifts.forEach(shiftObj => {
+    allShifts.forEach(shiftObj => {
       const shiftName = shiftObj.name;
       let attempts = 0;
-      let maxAttempts = 2000;
+      let maxAttempts = 5000;
 
       while (attempts < maxAttempts) {
         attempts++;
 
+        // 统计全月每个员工在这个岗位上的次数
         let counts = staffList.map((_, sIdx) => schedule[sIdx].filter(d => d === shiftName).length);
         let maxCount = Math.max(...counts);
         let minCount = Math.min(...counts);
 
-        // 【核心修改】：只要极差不超过1，立刻停止，绝不出现3和1并存！
+        // 目标：极差不超过 1
         if (maxCount - minCount <= 1) break;
 
+        // 找拿得多的人（如2次和0次，或3次和1次）
         let overIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => counts[sIdx] - minCount >= 2).sort((a, b) => counts[b] - counts[a]);
+        // 找拿得少的人
         let underIdxList = staffList.map((_, sIdx) => sIdx).filter(sIdx => maxCount - counts[sIdx] >= 2).sort((a, b) => counts[a] - counts[b]);
 
         let swapped = false;
@@ -1362,24 +1367,25 @@ async function getAllHistoryMonthsData() {
           for (let ui = 0; ui < underIdxList.length; ui++) {
             let lowIdx = underIdxList[ui]; 
             if (lowIdx === highIdx) continue;
-            if (counts[highIdx] - counts[lowIdx] < 2) continue;
 
+            // 找出拿得多的人，在全月哪几天是这个岗位
             let highDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
               if (schedule[highIdx][d] === shiftName) highDays.push(d);
             }
 
+            // 找出拿得少的人，在全月哪几天是“可替换”的（任何非休、非同岗的班次均可，无类别限制！）
             let lowDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
               let lowCurrentShift = schedule[lowIdx][d];
-              if (lowCurrentShift === shiftName || lowCurrentShift === "休" || lowCurrentShift === supportShift.name) continue;
-              let lowShiftObj = baseShiftsList.find(s => s.name === lowCurrentShift);
-              if (!lowShiftObj || (lowShiftObj.level !== '中' && lowShiftObj.level !== '低')) continue;
+              if (lowCurrentShift === shiftName || lowCurrentShift === "休") continue;
+              // 这里允许匹配高强度岗位，只要不强碰同一天出现两个同样的岗位即可
               lowDays.push(d);
             }
 
+            // 尝试全月任意两天互换
             for (let i = 0; i < highDays.length && !swapped; i++) {
               for (let j = 0; j < lowDays.length && !swapped; j++) {
                 let d1 = highDays[i];
@@ -1390,6 +1396,7 @@ async function getAllHistoryMonthsData() {
                 schedule[highIdx][d1] = originalLow;
                 schedule[lowIdx][d2] = originalHigh;
 
+                // 只校验同一天内不要出现重复岗位，否则还原
                 let duplicateCheck1 = !schedule.some((row, idx) => idx !== highIdx && row[d1] === originalLow);
                 let duplicateCheck2 = !schedule.some((row, idx) => idx !== lowIdx && row[d2] === originalHigh);
 
@@ -1702,7 +1709,7 @@ async function getAllHistoryMonthsData() {
 
       balanceSchedule(newSchedule, staffs, baseShifts);
 
-      // 【差值≤1严格封顶版】执行纯表格互换，强制拉平，且绝不允许极差超过1！
+      // 【整月全局回溯校验版】不再寻找相邻日期，直接在全月范围内抓取极差进行强制匹配
       enforceMidLowRoundFairness(newSchedule, staffs, baseShifts);
 
       // 【最终修复】强制基于最终表格重新计算所有人的统计数据
