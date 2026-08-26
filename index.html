@@ -758,8 +758,13 @@ function toggleCellLock(sIdx, dayIdx) {
         }
 
         let cellClass = getShiftClass(cellContent);
-        if (isLocked) cellClass += " cell-locked manual-edited";
-
+        
+        // 如果是休假格子，即使被鎖定也不顯示右上角的小鎖頭與橙色框線
+        let staffRests = currentMonthRests[sIdx] || [];
+        let isRestDay = staffRests.includes(day);
+        if (isLocked && cellContent !== "休" && !isRestDay) {
+          cellClass += " cell-locked manual-edited";
+        }
         let cellId = `cell_${sIdx}_${day - 1}`;
 
         if (isManualEditMode) {
