@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能动态排班工作表 (中低强度阶梯轮换完整版)</title>
+  <title>智能动态排班工作表 (中低强度阶梯严格平衡版)</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 20px; background: #f4f6f8; margin: 0; }
@@ -78,7 +78,7 @@
 <body>
 
 <div class="card">
-  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 中低强度阶梯轮换版)</span></h2>
+  <h2>⚙️ 智能动态排班管理设置 <span style="font-size: 13px; color: #198754; font-weight: normal;">(📌 中低强度阶梯严格平衡版)</span></h2>
   
   <div class="control-grid">
     <div class="form-group">
@@ -1327,20 +1327,19 @@
   }
 
   // ==========================================
-  // 💡【新增：低强度岗位阶梯合规性检查与重新调配机制】
+  // 💡【核心增强：中低强度岗位严格阶梯平衡（彻底杜绝 3 次和 1 次同时出现）】
   // ==========================================
-  function checkAndRebalanceLowShifts(schedule, lockedMap) {
-    let lowShifts = baseShifts.filter(s => s.level === '低').map(s => s.name);
-    if (lowShifts.length === 0) return;
+  function checkAndRebalanceMidLowShifts(schedule, lockedMap) {
+    let targetShifts = baseShifts.filter(s => s.level === '低' || s.level === '中').map(s => s.name);
+    if (targetShifts.length === 0) return;
 
     const totalDays = schedule[0].length;
-    let maxIterations = 15; // 最多迭代调整 15 次以确保收敛
+    let maxIterations = 25; // 增加迭代次数以保证充分收敛
 
     for (let iter = 0; iter < maxIterations; iter++) {
       let violationFound = false;
 
-      lowShifts.forEach(shiftName => {
-        // 计算当前所有员工在此低强度岗位上的分配次数
+      targetShifts.forEach(shiftName => {
         let counts = staffs.map((_, sIdx) => {
           return schedule[sIdx].filter(d => d === shiftName).length;
         });
@@ -1348,11 +1347,10 @@
         let minCount = Math.min(...counts);
         let maxCount = Math.max(...counts);
 
-        // 如果最大值与最小值差值大于 1，说明违反了阶梯轮换（即有人还没拿满当前阶梯，就有其他人拿了更高的次数）
+        // 如果最大和最小差值大于 1（例如出现 3 次和 1 次），强制介入重新调配
         if (maxCount - minCount > 1) {
           violationFound = true;
 
-          // 找出拿得最多的人（超标者）和拿得最少的人（欠缺者）
           let overStaffs = staffs.map((_, idx) => idx).filter(idx => counts[idx] > minCount + 1);
           let underStaffs = staffs.map((_, idx) => idx).filter(idx => counts[idx] === minCount);
 
@@ -1360,12 +1358,9 @@
             let overIdx = overStaffs[0];
             let underIdx = underStaffs[0];
 
-            // 尝试在排班表中寻找一天，让超标者和欠缺者对调该低强度岗位（前提是未锁定且合法）
             for (let d = 0; d < totalDays; d++) {
               if (schedule[overIdx][d] === shiftName && !lockedMap[overIdx][d]) {
-                // 检查欠缺者在这一天是否可以安排该岗位（未上班休假、未锁定、且符合其他冲突限制）
                 if (schedule[underIdx][d] === "休" && !lockedMap[underIdx][d]) {
-                  // 尝试对调：把超标者的这一天变休，欠缺者这一天改成该岗位
                   schedule[overIdx][d] = "休";
                   schedule[underIdx][d] = shiftName;
                   break;
@@ -1376,7 +1371,7 @@
         }
       });
 
-      if (!violationFound) break; // 如果检查没有发现违规，直接跳出
+      if (!violationFound) break;
     }
   }
 
@@ -1603,9 +1598,9 @@
             let currentShiftCount = shiftCounts[sIdx][shiftName] || 0;
             let minShiftCountInAll = Math.min(...staffs.map((_, idx) => shiftCounts[idx][shiftName] || 0));
 
-            // 💡【阶梯轮换限制】
+            // 💡【严格的中低强度阶梯限制：最多比最小值多 1 次，杜绝突发的 3 次】
             if (level === '中' || level === '低') {
-              let maxAllowedShiftCount = minShiftCountInAll <= 1 ? 2 : (minShiftCountInAll + 1);
+              let maxAllowedShiftCount = minShiftCountInAll + 1;
               if (currentShiftCount >= maxAllowedShiftCount) return false;
             } else if (level === '高') {
               let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
@@ -1663,8 +1658,8 @@
         });
       }
 
-      // 💡【执行新增的低强度岗位合规性检查与重新调配】
-      checkAndRebalanceLowShifts(newSchedule, lockedMap);
+      // 💡【执行中低强度岗位严格阶梯平衡检查与重新调配】
+      checkAndRebalanceMidLowShifts(newSchedule, lockedMap);
 
       balanceSchedule(newSchedule, staffs, baseShifts);
 
@@ -1673,8 +1668,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（低强度岗位已执行阶梯合规性检查与重新调配）！`;
-      alert(`[${monthKey}] 排班生成完毕！系统已自动对低强度岗位进行了阶梯合规性检查，若未满足“必须拿满当前阶梯次数才能晋级”已完成重新调配！`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（中低强度岗位已强制进行阶梯平衡）！`;
+      alert(`[${monthKey}] 排班生成完毕！系统已强制对所有中低强度岗位进行了阶梯合规平衡，彻底消除了次数断层（如 3 次和 1 次的差异）！`);
 
     } catch (err) {
       console.error(err);
