@@ -112,9 +112,11 @@
     </div>
   </div>
 
-  <div class="toolbar">
+    <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
     <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
+    <!-- 新增的连排校验按钮 -->
+    <button class="warning-btn" onclick="validateAdjacentShifts()">⚠️ 校验连排岗位</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -697,6 +699,94 @@
     document.getElementById('scheduleTable').innerHTML = html;
   }
 
+    function validateAdjacentShifts() {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    
+    // 清除所有旧的标红
+    const allCells = document.querySelectorAll('#scheduleTable td');
+    allCells.forEach(td => td.classList.remove('shift-duplicate-error'));
+    
+    let adjacentCount = 0;
+    let adjacentLogs = [];
+
+    staffs.forEach((staff, sIdx) => {
+      let prevShift = "";
+      let prevCategory = "";
+      let prevDay = 0;
+
+      for (let day = 1; day <= totalDays; day++) {
+        let dayIdx = day - 1;
+        let currentShift = "";
+
+        // 获取当前格子的排班（区分手动模式和普通模式）
+        if (isManualEditMode) {
+          const selectElem = document.querySelector(`#cell_${sIdx}_${dayIdx} select`);
+          if (selectElem) currentShift = selectElem.value;
+        } else {
+          if (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) {
+            currentShift = lastGeneratedSchedule[sIdx][dayIdx];
+          }
+          if (!currentShift && currentMonthRests[sIdx] && currentMonthRests[sIdx].includes(day)) {
+            currentShift = "休";
+          }
+        }
+        
+        // 清理可能存在的“休(预)”
+        if (currentShift === "休(预)" || currentShift === "休(預)") currentShift = "休";
+
+        let currentCategory = getShiftCategory(currentShift);
+        
+        // 如果当前是实际岗位（非休假，非空白）
+        if (currentShift && currentShift !== "休") {
+          
+          // 判断1：完全相同的岗位是否连着排（例如 TD 5001以上 连着排）
+          if (currentShift === prevShift && prevShift !== "") {
+            adjacentCount++;
+            let cleanName = getDisplayShiftName(currentShift).replace(/\n/g, ' ');
+            adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 和 <b>第 ${day} 天</b> 连排了相同岗位 [<b>${cleanName}</b>]`);
+            
+            // 标红当前格子和前一个格子
+            const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
+            const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
+            if (prevCell) prevCell.classList.add('shift-duplicate-error');
+            if (currCell) currCell.classList.add('shift-duplicate-error');
+          }
+          
+          // 判断2：同一类别的岗位是否连着排（例如 ND中大 和 ND2500 连着排）
+          else if (currentCategory && prevCategory && currentCategory === prevCategory && currentShift !== prevShift) {
+            adjacentCount++;
+            let cleanName1 = getDisplayShiftName(prevShift).replace(/\n/g, ' ');
+            let cleanName2 = getDisplayShiftName(currentShift).replace(/\n/g, ' ');
+            adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 的 [<b>${cleanName1}</b>] 和 <b>第 ${day} 天</b> 的 [<b>${cleanName2}</b>] 属于同类岗位连排`);
+            
+            const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
+            const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
+            if (prevCell) prevCell.classList.add('shift-duplicate-error');
+            if (currCell) currCell.classList.add('shift-duplicate-error');
+          }
+        }
+        
+        // 更新前一天的数据状态
+        prevShift = currentShift;
+        prevCategory = currentCategory;
+        prevDay = day;
+      }
+    });
+
+    const warningBox = document.getElementById('warningLog');
+    if (adjacentCount > 0) {
+      warningBox.innerHTML = `<b>🚨 岗位连排校验提醒（共发现 ${adjacentCount} 处连排）：</b><br>` + adjacentLogs.join('<br>');
+      warningBox.style.display = 'block';
+      document.getElementById('status').innerText = `⚠️ 连排校验完毕：发现 ${adjacentCount} 处岗位连排！`;
+      alert(`校验完成！发现有 ${adjacentCount} 处岗位连排，相关格子已为您标红显示！`);
+    } else {
+      warningBox.style.display = 'none';
+      document.getElementById('status').innerText = `✅ 连排校验完毕：排班无同类或同岗连排！`;
+      alert(`校验完成！当月没有发现任何岗位连排现象。`);
+    }
+  }
   function validateDuplicateShifts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
