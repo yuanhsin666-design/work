@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -115,9 +114,9 @@
     <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
     <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
-    <!-- 新增的连排校验按钮 -->
+    <!-- 校验连排岗位按钮 -->
     <button class="warning-btn" onclick="validateAdjacentShifts()">⚠️ 校验连排岗位</button>
-    <!-- 新增修复按钮（确保名字是 autoFixAdjacentShifts） -->
+    <!-- 修复连排并保持平摊按钮 -->
     <button class="success" onclick="autoFixAdjacentShifts()">🛠️ 修复连排并保持平摊</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
@@ -330,20 +329,15 @@
    async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
     if (confirm(`确定要重置 [${monthKey}] 月份的工作岗位吗？\n（注意：将清空排班，但保留所有休假日期和云端链接）`)) {
-      
       // 1. 保留休假日期 (currentMonthRests 不动)
       // 2. 保留云端链接 (不修改 cloudUrlInput 的 value)
       // 3. 只清空排班表中的岗位数据
       lastGeneratedSchedule = null;
-
       // 4. 保留之前的锁定状态吗？为了防止重置后手滑改了以前锁定的数据，建议全部解锁，让系统重新排
       // 这里选择清空锁定状态，允许重新排班。如果您想保留锁定状态，可以将这行注释掉。
       initLockedMap(true); 
-
       // 5. 将新数据保存到本地和云端
-      // 由于 currentMonthRests 和 cloudUrlInput 都没有被清空，saveDataToLocal 会保存完整的数据
       await saveDataToLocal();
-      
       renderAll();
       document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 的工作岗位（保留休假）！`;
       alert(`[${monthKey}] 月份的工作岗位已成功重置！\n\n【保留的数据】\n• 所有员工的休假日\n• 云端链接\n\n【已清空的数据】\n• 所有人的排班工作岗位`);
@@ -920,46 +914,7 @@
       alert("排班非常完美！当前没有任何岗位连排的情况。");
     }
   }
-            // 标红当前格子和前一个格子
-            const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
-            const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
-            if (prevCell) prevCell.classList.add('shift-duplicate-error');
-            if (currCell) currCell.classList.add('shift-duplicate-error');
-          }
-          
-          // 判断2：同一类别的岗位是否连着排（例如 ND中大 和 ND2500 连着排）
-          else if (currentCategory && prevCategory && currentCategory === prevCategory && currentShift !== prevShift) {
-            adjacentCount++;
-            let cleanName1 = getDisplayShiftName(prevShift).replace(/\n/g, ' ');
-            let cleanName2 = getDisplayShiftName(currentShift).replace(/\n/g, ' ');
-            adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 的 [<b>${cleanName1}</b>] 和 <b>第 ${day} 天</b> 的 [<b>${cleanName2}</b>] 属于同类岗位连排`);
-            
-            const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
-            const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
-            if (prevCell) prevCell.classList.add('shift-duplicate-error');
-            if (currCell) currCell.classList.add('shift-duplicate-error');
-          }
-        }
-        
-        // 更新前一天的数据状态
-        prevShift = currentShift;
-        prevCategory = currentCategory;
-        prevDay = day;
-      }
-    });
 
-    const warningBox = document.getElementById('warningLog');
-    if (adjacentCount > 0) {
-      warningBox.innerHTML = `<b>🚨 岗位连排校验提醒（共发现 ${adjacentCount} 处连排）：</b><br>` + adjacentLogs.join('<br>');
-      warningBox.style.display = 'block';
-      document.getElementById('status').innerText = `⚠️ 连排校验完毕：发现 ${adjacentCount} 处岗位连排！`;
-      alert(`校验完成！发现有 ${adjacentCount} 处岗位连排，相关格子已为您标红显示！`);
-    } else {
-      warningBox.style.display = 'none';
-      document.getElementById('status').innerText = `✅ 连排校验完毕：排班无同类或同岗连排！`;
-      alert(`校验完成！当月没有发现任何岗位连排现象。`);
-    }
-  }
   function validateDuplicateShifts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -1394,22 +1349,6 @@ async function getAllHistoryMonthsData() {
 
   // =====================================================================
   // 【同日互换 · 全局强制平摊引擎】  取代旧的 balanceSchedule / enforceMidLowRoundFairness
-  //
-  //  旧版两个致命问题：
-  //   (a) balanceSchedule 会把别人的班改成「休」-> 无中生有的假休假，上班总天数被改掉。
-  //   (b) enforceMidLowRoundFairness 是「跨日互换」(A的第3天 换 B的第18天)，
-  //       等于把某一天的岗位搬去另一天 -> 那天少一个岗、这天多一个岗，结构被打烂；
-  //       而且岗位是一个一个依序拉平的，拉平第 5 个岗位时会把第 1~4 个岗位重新弄歪，
-  //       从头到尾没有再回头检查 -> 所以永远会剩下 1次 / 3次 的人。
-  //
-  //  新版只允许「同一天、两位员工之间」互换岗位：
-  //   -> 当天的岗位组合（含支援、休假、重复岗）完全不变，只有个人整月次数会变，
-  //      所以怎么换都不会破坏排班结构，可以放心一直换到完全平为止。
-  //
-  //  目标优先序：
-  //   1) 每人每岗位次数 极差 <= 1（等同「轮完一次才轮第二次」；不得为 0）<- 最高，必要时强行拉平
-  //   2) 每人 高/中/低 强度总次数 落在 平均值 ±1
-  //   3) 尽量不违反「同类型岗位不连排」「连续高强度不超过 2 天」（依需求，必要时可牺牲）
   // =====================================================================
   const FAIR_W_SHIFT = 1000;   // 单一岗位次数越界的惩罚（最重）
   const FAIR_W_LEVEL = 40;     // 强度总次数越界的惩罚
@@ -1441,8 +1380,6 @@ async function getAllHistoryMonthsData() {
       let tot = 0; for (let s = 0; s < n; s++) tot += counts[s][nm];
       shiftBand[nm] = { lo: Math.floor(tot / n), hi: Math.ceil(tot / n), total: tot };
     });
-    // 强度目标：按「各人实际上班天数」等比分摊。
-    // （若直接用全员平均，休 6 天的人跟休 10 天的人天生就差 4 班，永远拉不平）
     const workDays = [];
     for (let s = 0; s < n; s++) {
       let w = 0;
@@ -1609,11 +1546,8 @@ async function getAllHistoryMonthsData() {
       W_ADJ = sAdj; W_LVL = sLvl;
     }
     hillClimb(80);                      // 阶段4：在「已经平了」的前提下，把连排 / 强度总数再修回来
-                                        //        （岗位权重 1000 远大于其他项，不会为了修连排把岗位次数弄歪）
 
     // ---------- 阶段4.5：强度总数「定向搬移」----------
-    // 找出某强度排太多的人 A 与排太少的人 B，在同一天把 A 的该强度岗位跟 B 的其他强度岗位对调。
-    // 只接受「完全不影响每人每岗位次数」的对调（shiftOnlyDelta === 0），所以绝不会破坏已经拉平的岗位。
     function directedLevelFix() {
       let movedAny = false;
       levels.forEach(L => {
@@ -1625,7 +1559,6 @@ async function getAllHistoryMonthsData() {
             if (b.lo - c > worstUnder) { worstUnder = b.lo - c; under = s; }
           }
           if (over === -1 && under === -1) break;
-          // 只有「某人太多」时：找一个再多接一次也还在区间内的人来接
           if (under === -1) {
             let mn = Infinity;
             for (let s = 0; s < n; s++) {
@@ -1633,7 +1566,6 @@ async function getAllHistoryMonthsData() {
               if (s !== over && c + 1 <= b.hi && c < mn) { mn = c; under = s; }
             }
           }
-          // 只有「某人太少」时：找一个少一次也还在区间内的人来给
           if (over === -1) {
             let mx = -Infinity;
             for (let s = 0; s < n; s++) {
@@ -1647,7 +1579,7 @@ async function getAllHistoryMonthsData() {
             if (!swappable(over, d) || !swappable(under, d)) continue;
             const X = schedule[over][d], Y = schedule[under][d];
             if (levelOf[X] !== L || levelOf[Y] === L) continue;
-            if (shiftOnlyDelta(over, under, d) !== 0) continue;   // 不准动到岗位平衡
+            if (shiftOnlyDelta(over, under, d) !== 0) continue;
             applySwap(over, under, d);
             done = true; movedAny = true;
           }
@@ -1662,8 +1594,6 @@ async function getAllHistoryMonthsData() {
     }
 
     // ---------- 阶段5：跳坑重试（basin hopping）----------
-    // 爬山有时会卡在「单换一次都变不好、但换两次就会更好」的死角，
-    // 导致高/中/低 强度总次数还差 2。这里做小幅随机扰动後再爬一次，只留更好的结果。
     function fullCost() {
       let c = 0;
       names.forEach(nm => { for (let s = 0; s < n; s++) c += costShift(nm, counts[s][nm]); });
@@ -1671,7 +1601,7 @@ async function getAllHistoryMonthsData() {
       for (let s = 0; s < n; s++) for (let d = 0; d < totalDays; d++) c += adjPenalty(s, d);
       return c;
     }
-    function hardCost() {   // 只算「岗位次数 + 强度总数」两项硬指标
+    function hardCost() {
       let c = 0;
       names.forEach(nm => { for (let s = 0; s < n; s++) c += costShift(nm, counts[s][nm]); });
       levels.forEach(L => { for (let s = 0; s < n; s++) c += costLevel(s, L, lvlCounts[s][L]); });
@@ -1686,7 +1616,6 @@ async function getAllHistoryMonthsData() {
         if (nameSet.has(v)) { counts[s][v]++; lvlCounts[s][levelOf[v]]++; }
       }
     }
-    // 这次互换会不会破坏「每人每岗位极差 <= 1」？0 = 完全不影响
     function shiftOnlyDelta(a, b, d) {
       const X = schedule[a][d], Y = schedule[b][d];
       const f = () => costShift(X, counts[a][X]) + costShift(Y, counts[a][Y])
@@ -1697,7 +1626,6 @@ async function getAllHistoryMonthsData() {
       applySwap(a, b, d);
       return aft - bef;
     }
-    // 谁的强度总数还没落在目标区间？扰动优先挑他们，命中率远高於纯随机
     function offBandStaff() {
       const list = [];
       for (let s = 0; s < n; s++) {
@@ -1716,13 +1644,12 @@ async function getAllHistoryMonthsData() {
       while (done < strength && tries < 900) {
         tries++;
         const d = Math.floor(Math.random() * totalDays);
-        // 一半机率强制拉到「还没达标的人」身上，另一半纯随机以维持多样性
         const a = (focus.length && (tries % 2 === 0)) ? focus[Math.floor(Math.random() * focus.length)]
                                                      : Math.floor(Math.random() * n);
         const b = Math.floor(Math.random() * n);
         if (a === b || !swappable(a, d) || !swappable(b, d)) continue;
         if (schedule[a][d] === schedule[b][d]) continue;
-        if (shiftOnlyDelta(a, b, d) !== 0) continue;   // 绝不为了扰动而破坏岗位平衡
+        if (shiftOnlyDelta(a, b, d) !== 0) continue;
         applySwap(a, b, d); done++;
       }
       for (let r = 0; r < 5; r++) { if (!directedLevelFix()) break; }
@@ -1749,8 +1676,6 @@ async function getAllHistoryMonthsData() {
     });
     const maxWork = Math.max.apply(null, workDays);
     const minWork = Math.min.apply(null, workDays);
-    // 结构性可行域：一个人整月的岗位格数，必须落在 Σ各岗位下限 ~ Σ各岗位上限 之间，
-    // 否则「每人每岗位极差 <= 1」在数学上就不可能成立（例如 12 个岗位、每岗位最多 2 次 -> 最多只能上 24 天）
     let sumLo = 0, sumHi = 0;
     names.forEach(nm => { sumLo += shiftBand[nm].lo; sumHi += shiftBand[nm].hi; });
     const tooMany = [], tooFew = [];
@@ -1758,20 +1683,15 @@ async function getAllHistoryMonthsData() {
       if (workDays[s] > sumHi) tooMany.push(`${staffList[s].name}(${workDays[s]}天)`);
       if (workDays[s] < sumLo) tooFew.push(`${staffList[s].name}(${workDays[s]}天)`);
     }
-    if (tooMany.length) problems.push(`【结构性限制】${tooMany.join('、')} 的上班天数超过 ${sumHi} 天。`
-      + `目前共 ${names.length} 个岗位、每个岗位每人最多 ${Math.max.apply(null, names.map(nm => shiftBand[nm].hi))} 次，`
-      + `一个人最多只能排到 ${sumHi} 天班；超过的部分一定会让某个岗位变成 3 次。请增加岗位数、或让这些人多休一天。`);
-    if (tooFew.length) problems.push(`【结构性限制】${tooFew.join('、')} 的上班天数不足 ${sumLo} 天，`
-      + `不够把 ${names.length} 个岗位每个都轮到 ${Math.min.apply(null, names.map(nm => shiftBand[nm].lo))} 次，一定会有岗位次数偏少。`);
+    if (tooMany.length) problems.push(`【结构性限制】${tooMany.join('、')} 的上班天数超过 ${sumHi} 天。`);
+    if (tooFew.length) problems.push(`【结构性限制】${tooFew.join('、')} 的上班天数不足 ${sumLo} 天，`);
     names.forEach(nm => {
       if (levelOf[nm] !== '高') return;
       const over = [];
       for (let s = 0; s < n; s++) if (counts[s][nm] > 2) over.push(`${staffList[s].name}(${counts[s][nm]})`);
       if (!over.length) return;
       if (shiftBand[nm].total > n * 2) {
-        problems.push(`高强度岗位「${clean(nm)}」有人排到 3 次：${over.join('、')}。`
-          + `原因是这个岗位全月共要排 ${shiftBand[nm].total} 班，但 ${n} 人 × 每人上限 2 次 = 只能容纳 ${n * 2} 班，人数不够分。`
-          + `要守住「每人最多 2 次」，每人当月上班天数需 <= ${names.length * 2} 天（目前最多的人上 ${maxWork} 天）。`);
+        problems.push(`高强度岗位「${clean(nm)}」有人排到 3 次：${over.join('、')}。`);
       } else {
         problems.push(`高强度岗位「${clean(nm)}」超过每人 2 次上限：${over.join('、')}`);
       }
@@ -1781,8 +1701,7 @@ async function getAllHistoryMonthsData() {
       for (let s = 0; s < n; s++) { const c = lvlCounts[s][L]; if (c > mx) mx = c; if (c < mn) mn = c; }
       if (mx - mn <= 1) return;
       if (maxWork - minWork >= 2) {
-        problems.push(`${L}强度总次数极差 ${mx - mn}（最多 ${mx} / 最少 ${mn}）—— 这是因为大家上班天数本来就差 ${maxWork - minWork} 天`
-          + `（最多 ${maxWork} 天 / 最少 ${minWork} 天），上班多的人一定会多排几班。系统已按各人上班天数「等比例」分摊，属正常。`);
+        problems.push(`${L}强度总次数极差 ${mx - mn}（最多 ${mx} / 最少 ${mn}）—— 这是因为大家上班天数本来就差 ${maxWork - minWork} 天`);
       } else {
         problems.push(`${L}强度总次数极差 ${mx - mn}（最多 ${mx} / 最少 ${mn}）`);
       }
@@ -1894,7 +1813,6 @@ async function getAllHistoryMonthsData() {
           }
         });
       }
-      // 【新增】依当月实际上班天数，动态推算每个强度的软性上限（原本写死 8/9/6，会把人挤去走 fallback）
       let totalWorkCells = 0;
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) if (newSchedule[s][d] !== "休") totalWorkCells++;
@@ -2067,15 +1985,12 @@ async function getAllHistoryMonthsData() {
               // ========================================
 
               // ========== 防止高强度连排，让排班更平军 ==========
-              // 如果今天要排的是高强度岗位，且前一天已经是高强度，则直接跳过
               if (s.level === '高') {
                 let prevLevel = "";
                 if (dayIdx > 0) {
                    let prevS = baseShifts.find(bs => bs.name === newSchedule[sIdx][dayIdx - 1]);
                    if (prevS) prevLevel = prevS.level;
                 }
-                // 严格要求：不连续两天排高强度。
-                // 如果想允许最多连续两天，可以改为 (prevLevel === '高' && 再往前一天也是高)
                 if (prevLevel === '高') {
                    return;
                 }
