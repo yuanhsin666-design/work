@@ -1730,10 +1730,28 @@ async function getAllHistoryMonthsData() {
 
            balanceSchedule(newSchedule, staffs, baseShifts);
 
-      // 【新增】中/低强度岗位「拿满上一轮才能进入下一轮」公平性校验与自动互换调配
-      // 【核心修复】：传递 shiftCounts 和 intensityCounts 以便同步更新，杜绝后续出现 1 次和 3 次不均的现象
-      enforceMidLowRoundFairness(newSchedule, staffs, baseShifts, shiftCounts, intensityCounts);
+           // 【新增】中/低强度岗位「拿满上一轮才能进入下一轮」公平性校验与自动互换调配
+      // 【最终修复】：执行纯表格互换，并且不传额外参数，避免破坏排班权重
+      enforceMidLowRoundFairness(newSchedule, staffs, baseShifts);
+
+            // 【最终修复】强制基于最终表格重新计算所有人的统计数据，防止出现0次和3次严重不均！
+      shiftCounts = Array.from({ length: staffs.length }, () => ({}));
+      intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       
+      for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
+        for (let d = 0; d < newSchedule[sIdx].length; d++) {
+          let shift = newSchedule[sIdx][d];
+          if (shift && shift !== "休") {
+            shiftCounts[sIdx][shift] = (shiftCounts[sIdx][shift] || 0) + 1;
+            let fS = baseShifts.find(s => s.name === shift);
+            if (fS && intensityCounts[sIdx][fS.level] !== undefined) {
+               intensityCounts[sIdx][fS.level]++;
+            }
+          }
+        }
+      }
+
+      lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
