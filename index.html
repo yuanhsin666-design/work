@@ -40,7 +40,7 @@
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
     th, td { border: 1px solid #ccc; padding: 4px; min-width: 60px; white-space: pre-line; vertical-align: middle; position: relative; }
     .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
-    .header-day { background: #f0f0f0; cursor: pointer; }
+    .header-day { background: #f0f0f0; }
     .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
     .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 80px; }
 
@@ -57,18 +57,6 @@
     .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; position: sticky; bottom: 0; z-index: 4; }
     .row-daily-total .staff-name { background-color: #cbd5e1; color: #0f172a; position: sticky; left: 0; z-index: 6; }
 
-    .cell-clickable { cursor: pointer; user-select: none; }
-    .cell-locked::after {
-      content: "🔒";
-      position: absolute;
-      top: 1px;
-      right: 1px;
-      font-size: 9px;
-      opacity: 0.8;
-      pointer-events: none;
-    }
-    
-    .locked-header { background-color: #cbd5e1 !important; color: #334155; }
     .stat-total { background-color: #d97706; color: white; font-weight: bold; }
     .lock-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #f1f5f9; padding: 10px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
     
@@ -146,7 +134,7 @@
     <button class="secondary" onclick="unlockAllCells()">🔓 一键解锁当月</button>
     <button class="secondary" onclick="lockPastDays()">🗓️ 锁定历史日期</button>
     <button id="toggleEditBtn" class="edit-btn" onclick="toggleManualEditMode()">✏️ 开启手动修改模式</button>
-    <span style="font-size: 12px; color: #666;">💡 提示：非修改模式下，点击表格任意單格可直接切换「單格鎖定」狀態。</span>
+    <span style="font-size: 12px; color: #666;">💡 提示：开启「手动修改模式」后，可直接在表格中下拉修改或锁定班次。</span>
   </div>
 
   <div class="table-container">
@@ -258,14 +246,6 @@
     if (forceReset || !lockedMap || lockedMap.length !== staffs.length || (lockedMap[0] && lockedMap[0].length !== totalDays)) {
       lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
     }
-  }
-
-  function toggleCellLock(sIdx, dayIdx) {
-    if (isManualEditMode) return; 
-    initLockedMap();
-    lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];
-    renderAll();
-    saveDataToLocal();
   }
 
   function saveGlobalConfig() {
@@ -468,7 +448,7 @@
               let day = dayColumnMap[c] || c;
               if (day >= 1 && day <= totalDays) {
                 rests.push(day);
-                // 🔒 强制锁定该休假格子，任何人不得更改或覆盖
+                // 🔒 强制锁定该休假格子
                 lockedMap[sIdx][day - 1] = true;
               }
             }
@@ -622,26 +602,6 @@
     saveDataToLocal();
   }
 
-  function toggleColumnLock(dayIdx) {
-    initLockedMap();
-    let allLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][dayIdx]);
-    staffs.forEach((_, sIdx) => { lockedMap[sIdx][dayIdx] = !allLocked; });
-    renderAll();
-    saveDataToLocal();
-  }
-
-  function toggleRowLock(sIdx) {
-    initLockedMap();
-    const year = parseInt(document.getElementById('yearSelect').value);
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const totalDays = getDaysInMonth(year, month);
-    let allLocked = true;
-    for (let d = 0; d < totalDays; d++) { if (!lockedMap[sIdx][d]) { allLocked = false; break; } }
-    for (let d = 0; d < totalDays; d++) { lockedMap[sIdx][d] = !allLocked; }
-    renderAll();
-    saveDataToLocal();
-  }
-
   function lockAllCells() {
     initLockedMap();
     staffs.forEach((_, sIdx) => { for (let d = 0; d < lockedMap[sIdx].length; d++) lockedMap[sIdx][d] = true; });
@@ -705,8 +665,7 @@
 
     let html = `<thead><tr><th rowspan="2" class="header-month">${month}月</th>`;
     for(let i=1; i<=totalDays; i++) {
-      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
-      html += `<th class="header-day ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${i} ${isColLocked ? '🔒' : ''}</th>`;
+      html += `<th class="header-day">${i}</th>`;
     }
     html += `<th rowspan="2" class="stat-total" style="min-width: 80px;">計數總休假日</th>`;
 
@@ -715,8 +674,7 @@
       let dateObj = new Date(year, month - 1, i);
       let dayOfWeek = dateObj.getDay();
       let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-      let isColLocked = staffs.every((_, sIdx) => lockedMap[sIdx] && lockedMap[sIdx][i - 1]);
-      html += `<th class="header-day ${isWeekend ? 'weekend' : ''} ${isColLocked ? 'locked-header' : ''}" onclick="toggleColumnLock(${i - 1})">${weekDays[dayOfWeek]}</th>`;
+      html += `<th class="header-day ${isWeekend ? 'weekend' : ''}">${weekDays[dayOfWeek]}</th>`;
     }
     html += `</tr></thead><tbody>`;
 
@@ -724,10 +682,9 @@
     let dailyRestTotals = Array(totalDays).fill(0);
 
     staffs.forEach((staff, sIdx) => {
-      let isRowLocked = lockedMap[sIdx] && lockedMap[sIdx].every(v => v);
       let staffRests = currentMonthRests[sIdx] || [];
       
-      html += `<tr><td class="staff-name cell-clickable ${isRowLocked ? 'locked-header' : ''}" onclick="toggleRowLock(${sIdx})">${staff.name} ${isRowLocked ? '🔒' : ''}</td>`;
+      html += `<tr><td class="staff-name">${staff.name}</td>`;
       for(let day=1; day<=totalDays; day++) {
         let cellContent = "";
         let isLocked = lockedMap[sIdx] && lockedMap[sIdx][day - 1];
@@ -747,7 +704,7 @@
         }
 
         let cellClass = getShiftClass(cellContent);
-        if (isLocked) cellClass += " cell-locked manual-edited";
+        if (isLocked) cellClass += " manual-edited";
 
         let cellId = `cell_${sIdx}_${day - 1}`;
 
@@ -767,7 +724,7 @@
         } else {
           let cleanContent = getDisplayShiftName(cellContent);
           let displayTxt = cleanContent.replace(/\n/g, '<br>');
-          html += `<td id="${cellId}" class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
+          html += `<td id="${cellId}" class="${cellClass}">${displayTxt}</td>`;
         }
       }
 
@@ -904,7 +861,7 @@
     document.getElementById('statsTable').innerHTML = html;
   }
 
- function renderIntensitySummaryTable(scheduleData = null) {
+  function renderIntensitySummaryTable(scheduleData = null) {
     let container = document.getElementById('intensitySummaryTable');
     if (!container) return;
 
@@ -1225,7 +1182,7 @@
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
       
-      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
+      let cellText = (cloneCell.innerText || cloneCell.textContent).trim();
       cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
     });
 
@@ -1310,14 +1267,12 @@
         
         if (count === 0) {
           for (let targetDay = 0; targetDay < totalDays; targetDay++) {
-            // 🔒 如果目标格子被锁定，绝对不参与平衡交换
             if (lockedMap[sIdx] && lockedMap[sIdx][targetDay]) continue;
 
             let currentShiftOnDay = schedule[sIdx][targetDay];
             if (currentShiftOnDay === "休") {
               for (let otherSIdx = 0; otherSIdx < staffList.length; otherSIdx++) {
                 if (otherSIdx === sIdx) continue;
-                // 🔒 如果对方的格子被锁定，也绝不拿来换
                 if (lockedMap[otherSIdx] && lockedMap[otherSIdx][targetDay]) continue;
 
                 if (schedule[otherSIdx][targetDay] === sName) {
@@ -1467,7 +1422,6 @@
         }
       });
 
-      // 🔒 步骤 1：在执行排班前，优先强制加载并绝对锁定所有已被标记（包括从云端假表导入）的格子
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1476,7 +1430,6 @@
           let existingShift = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";
           if (existingShift === "休(预)" || existingShift === "休(PRE)") existingShift = "休";
 
-          // 如果该格被锁定，或者是假表中的休假，则强制写入并绝对保护
           if (isLocked || staffRests.includes(day)) {
             let forcedValue = existingShift;
             if (!forcedValue && staffRests.includes(day)) {
@@ -1484,7 +1437,7 @@
             }
             if (forcedValue) {
               newSchedule[sIdx][dayIdx] = forcedValue;
-              lockedMap[sIdx][dayIdx] = true; // 确保双重加固锁定
+              lockedMap[sIdx][dayIdx] = true;
 
               if (forcedValue !== "休") {
                 if (forcedValue === supName) {
@@ -1528,7 +1481,6 @@
         let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDay);
 
         let availableStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => {
-          // 🔒 如果该格子已被锁定，严禁参与分红日重新分配
           return !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
 
@@ -1574,7 +1526,6 @@
       });
 
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-        // 🔒 过滤：只有未锁定的上班人员才参与岗位分配
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
 
         let assignedSupportStaffIdx = null;
@@ -1611,7 +1562,6 @@
           let level = foundS ? foundS.level : '中';
 
           let candidates = workingStaffs.filter(sIdx => {
-            // 🔒 如果该格子已被锁定，绝对跳过，不得改变其原有内容
             if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
 
             let currentShiftCount = shiftCounts[sIdx][shiftName] || 0;
@@ -1685,8 +1635,8 @@
       saveDataToLocal();
 
       const monthKey = getMonthKey();
-      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成（已强制保护锁定假表与格子）！`;
-      alert(`[${monthKey}] 排班生成完毕！所有从假表导入的休假及已锁定的格子均受到强制保护，未被任何重新排班所改变。`);
+      document.getElementById('status').innerText = `✨ [${monthKey}] 智能排班完成！`;
+      alert(`[${monthKey}] 排班生成完毕！所有从假表导入的休假及已锁定的格子均受到强制保护。`);
 
     } catch (err) {
       console.error(err);
