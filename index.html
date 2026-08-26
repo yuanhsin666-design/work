@@ -1327,30 +1327,21 @@ async function getAllHistoryMonthsData() {
     });
   }
 
-  // ==========================================
-  // 【新增】中/低强度岗位「必须拿满上一轮次数，才能进入下一轮次数」公平性校验与自动调配
+    // ==========================================
+  // 【修正版】中/低强度岗位「必须拿满上一轮次数，才能进入下一轮次数」公平性校验与自动调配
   // 规则说明：
-  //   - 中强度的某个具体岗位：必须所有人都拿满 2 次，才允许有人拿到第 3 次；
-  //     都拿满 3 次，才允许有人拿到第 4 次，以此类推。
-  //   - 低强度的某个具体岗位：规则同上。
-  //   - 一旦发现有人「超前」拿到了下一轮次数，而还有人「落后」没拿满上一轮，
-  //     就在【中岗位】与【低岗位】之间寻找可互换的排班进行调配，
-  //     不要求一定要同一天，只要各自能找到一天互换、且互换后双方排班仍然合法即可，
-  //     直到该岗位符合「拿满上一轮才能进入下一轮」的条件为止。
-  //   - 【加强】不再只锁定次数「最多」与「最少」的单独一对人来尝试互换；
-  //     而是把所有「超前」的人与所有「落后」的人两两组合都尝试一遍，
-  //     只要有任何一对能调配成功就调配，避免因为某一对刚好调不成就直接放弃，
-  //     导致明明还能调配好，却仍然出现分配不均的情况。
+  //   - 中/低强度的某个具体岗位：必须所有人都拿满 N 次，才允许有人拿到 N+1 次。
+  //   - 一旦发现有人「超前」（如3次），而还有人「落后」（如1次），自动在【中岗位】与【低岗位】之间寻找可互换的排班。
+  //   - 【核心修复】：交换时强制校验双方的“岗位总数不变”，不能破坏“休”和“支援”！
   // ==========================================
-  function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList) {
+  function enforceMidLowRoundFairness(schedule, staffList, baseShiftsList, shiftCounts, intensityCounts) {
     if (!schedule || schedule.length === 0) return;
     let totalDays = schedule[0].length;
     let midLowShifts = baseShiftsList.filter(s => s.level === '中' || s.level === '低');
 
     midLowShifts.forEach(shiftObj => {
       const shiftName = shiftObj.name;
-      // 放宽尝试次数上限，确保有足够的回合把「所有超前/落后组合」都试过
-      const MAX_ATTEMPTS = staffList.length * staffList.length * totalDays;
+      const MAX_ATTEMPTS = staffList.length * staffList.length * totalDays * 5; // 增加尝试次数防止漏网之鱼
       let attempts = 0;
 
       while (attempts < MAX_ATTEMPTS) {
@@ -1361,49 +1352,51 @@ async function getAllHistoryMonthsData() {
         let maxCount = Math.max(...counts);
         let minCount = Math.min(...counts);
 
-        // 差距小于 2，代表已符合「拿满上一轮才能进入下一轮」的规则，不需要再调整
+        // 差距小于 2，代表已符合「拿满上一轮才能进入下一轮」的规则
         if (maxCount - minCount < 2) break;
 
-        // 找出所有「超前」的人（次数比全场最少者高出至少 2 次），依次数由多到少排序
+        // 找出「超前」的人（次数比最少者高出至少2次，如3次和1次）
         let overIdxList = staffList.map((_, sIdx) => sIdx)
           .filter(sIdx => counts[sIdx] - minCount >= 2)
-          .sort((a, b) => counts[b] - counts[a]);
-        // 找出所有「落后」的人（次数比全场最多者低至少 2 次），依次数由少到多排序
+          .sort((a, b) => counts[b] - counts[a]); // 次数多的优先处理
+
+        // 找出「落后」的人（次数比最多者低至少2次）
         let underIdxList = staffList.map((_, sIdx) => sIdx)
           .filter(sIdx => maxCount - counts[sIdx] >= 2)
-          .sort((a, b) => counts[a] - counts[b]);
+          .sort((a, b) => counts[a] - counts[b]); // 次数少的优先处理
 
         let swapped = false;
 
         pairLoop:
         for (let oi = 0; oi < overIdxList.length; oi++) {
-          let highIdx = overIdxList[oi];
+          let highIdx = overIdxList[oi]; // 拿多了的人
 
           for (let ui = 0; ui < underIdxList.length; ui++) {
-            let lowIdx = underIdxList[ui];
+            let lowIdx = underIdxList[ui]; // 拿少了的人
             if (lowIdx === highIdx) continue;
-            if (counts[highIdx] - counts[lowIdx] < 2) continue; // 这一对之间差距不足2，跳过
+            if (counts[highIdx] - counts[lowIdx] < 2) continue;
 
-            // 找出「次数较多者」拥有该岗位、且未被锁定、可以被调走的所有天数
+            // 找出「拿多了的人」拥有该岗位、且未被锁定、可以被调走的所有天数
             let highDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[highIdx] && lockedMap[highIdx][d]) continue;
               if (schedule[highIdx][d] === shiftName) highDays.push(d);
             }
 
-            // 找出「次数较少者」拥有「另一个中/低强度岗位」、且未被锁定、可以被换出的所有天数
+            // 找出「拿少了的人」拥有「另一个中/低强度岗位」、且未被锁定、且不是休/支援的所有天数
             let lowDays = [];
             for (let d = 0; d < totalDays; d++) {
               if (lockedMap[lowIdx] && lockedMap[lowIdx][d]) continue;
               let lowCurrentShift = schedule[lowIdx][d];
-              if (lowCurrentShift === shiftName) continue;
+              // 核心修复：不能换掉休、不能换掉支援！
+              if (lowCurrentShift === shiftName || lowCurrentShift === "休" || lowCurrentShift === supportShift.name) continue;
               let lowShiftObj = baseShiftsList.find(s => s.name === lowCurrentShift);
+              // 必须换成另一个中/低强度的岗位
               if (!lowShiftObj || (lowShiftObj.level !== '中' && lowShiftObj.level !== '低')) continue;
               lowDays.push(d);
             }
 
-            // 【不要求同一天】依次尝试「次数较多者的某一天」与「次数较少者的某一天」进行互换：
-            // d1 与 d2 可以相同也可以不同，只要互换后双方各自当天的排班仍然合法即可
+            // 【不要求同一天】尝试互换
             for (let i = 0; i < highDays.length && !swapped; i++) {
               for (let j = 0; j < lowDays.length && !swapped; j++) {
                 let d1 = highDays[i];
@@ -1412,16 +1405,37 @@ async function getAllHistoryMonthsData() {
                 let originalHigh = schedule[highIdx][d1];
                 let originalLow = schedule[lowIdx][d2];
 
-                // 先互换，再校验互换后是否仍然合法，不合法则还原
+                // 模拟互换
                 schedule[highIdx][d1] = originalLow;
                 schedule[lowIdx][d2] = originalHigh;
 
+                // 校验互换后是否仍然合法
                 let validHigh = isAssignmentValid(highIdx, d1, schedule[highIdx][d1], schedule);
                 let validLow = isAssignmentValid(lowIdx, d2, schedule[lowIdx][d2], schedule);
 
                 if (validHigh && validLow) {
-                  swapped = true;
+                  // 【重要修复】：同步更新全局的次数统计，防止后续排班重复分配！
+                  if (shiftCounts) {
+                      shiftCounts[highIdx][shiftName] -= 1;
+                      shiftCounts[highIdx][originalLow] = (shiftCounts[highIdx][originalLow] || 0) + 1;
+                      
+                      shiftCounts[lowIdx][shiftName] = (shiftCounts[lowIdx][shiftName] || 0) + 1;
+                      shiftCounts[lowIdx][originalHigh] -= 1;
+                  }
+                  if (intensityCounts) {
+                      let highShiftObj = baseShiftsList.find(s => s.name === shiftName);
+                      let lowShiftObj = baseShiftsList.find(s => s.name === originalLow);
+                      if (highShiftObj && lowShiftObj) {
+                          intensityCounts[highIdx][highShiftObj.level]--;
+                          intensityCounts[highIdx][lowShiftObj.level]++;
+                          
+                          intensityCounts[lowIdx][highShiftObj.level]++;
+                          intensityCounts[lowIdx][lowShiftObj.level]--;
+                      }
+                  }
+                  swapped = true; // 交换成功
                 } else {
+                  // 交换失败，还原
                   schedule[highIdx][d1] = originalHigh;
                   schedule[lowIdx][d2] = originalLow;
                 }
@@ -1432,7 +1446,7 @@ async function getAllHistoryMonthsData() {
           }
         }
 
-        // 所有「超前/落后」组合都试过仍找不到可互换的方案，代表当前条件下无法再调整，跳出避免死循环
+        // 如果尝试了所有可能的组合都找不到方案，强制打破僵局
         if (!swapped) break;
       }
     });
