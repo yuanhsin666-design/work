@@ -259,9 +259,20 @@
       lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
     }
   }
-
-  function toggleCellLock(sIdx, dayIdx) {
+function toggleCellLock(sIdx, dayIdx) {
     if (isManualEditMode) return; 
+    
+    // 檢查該格子是否為匯入的休假或休假狀態
+    const staffRests = currentMonthRests[sIdx] || [];
+    const isRestDay = staffRests.includes(dayIdx + 1);
+    let currentVal = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";
+    if (currentVal === "休(预)" || currentVal === "休(預)") currentVal = "休";
+
+    if (isRestDay || currentVal === "休") {
+      alert("提示：這是已匯入的休假格子，若要修改請先開啟「✏️ 手動修改模式」！");
+      return;
+    }
+
     initLockedMap();
     lockedMap[sIdx][dayIdx] = !lockedMap[sIdx][dayIdx];
     renderAll();
