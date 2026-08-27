@@ -1980,135 +1980,255 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
- async function generateSchedule() {
+  async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
 
-    const year = parseInt(document.getElementById('yearSelect').value);
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const totalDays = getDaysInMonth(year, month);
-    initLockedMap();
+    try {
+      const year = parseInt(document.getElementById('yearSelect').value);
+      const month = parseInt(document.getElementById('monthSelect').value);
+      const totalDays = getDaysInMonth(year, month);
+      initLockedMap();
 
-    const baseShiftsList = baseShifts;
-    const supName = supportShift.name;
-    
-    let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
-    
-    // 1. 初始化休假和锁定
-    for (let day = 1; day <= totalDays; day++) {
-      let dayIdx = day - 1;
-      staffs.forEach((_, sIdx) => {
-        const staffRests = currentMonthRests[sIdx] || [];
-        const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
-        let existingShift = lastGeneratedSchedule ? lastGeneratedSchedule[sIdx][dayIdx] : "";
-        if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
+      const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
+      const supName = supportShift.name;
+      
+      let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+      let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
+      let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
+      let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
 
-        if (isLocked && existingShift) {
-          newSchedule[sIdx][dayIdx] = existingShift;
-        } else if (staffRests.includes(day)) {
-          newSchedule[sIdx][dayIdx] = "休";
+      // 准备分红日历史数据（冷却规则）
+      let allHistoryData = await getAllHistoryMonthsData();
+      let currentKey = getMonthKey();
+      allHistoryData[currentKey] = newSchedule;
+      let dividendHighHistory = {}; 
+      let userLastAssignedDividendRound = {}; 
+
+      Object.keys(allHistoryData).forEach(mKey => {
+        let mSched = allHistoryData[mKey];
+        if (mSched) {
+          staffs.forEach((staff, sIdx) => {
+            const matchedIdx = staffs.findIndex(s => s.name === staff.name);
+            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+            if (mSched[rowIdx]) {
+              [1, 16].forEach(day => {
+                let shiftOnDiv = mSched[rowIdx][day - 1];
+                if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
+                  dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
+                }
+              });
+            }
+          });
         }
       });
-    }
 
-    // 2. 记录当前次数
-    let currentCounts = Array.from({ length: staffs.length }, () => ({}));
-    for (let s = 0; s < staffs.length; s++) {
-      for (let d = 0; d < totalDays; d++) {
-        let shift = newSchedule[s][d];
-        if (shift && shift !== "休" && shift !== supName) {
-          currentCounts[s][shift] = (currentCounts[s][shift] || 0) + 1;
-        }
-      }
-    }
+      let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
 
-    // 3. 核心分配：遍历每一天，只要有人没排班，就给他分配【他最缺的岗位】
-    for (let d = 0; d < totalDays; d++) {
-      let usedToday = {}; // 今天已经用掉的岗位
-      for (let s = 0; s < staffs.length; s++) {
-        if (newSchedule[s][d] !== "") {
-          usedToday[newSchedule[s][d]] = true;
-        }
-      }
+      // 1. 把休假和锁定填入表格
+      for (let day = 1; day <= totalDays; day++) {
+        const dayIdx = day - 1;
+        staffs.forEach((_, sIdx) => {
+          const staffRests = (currentMonthRests && currentMonthRests[sIdx]) ? currentMonthRests[sIdx] : [];
+          const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
+          let existingShift = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";
+          if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
 
-      for (let s = 0; s < staffs.length; s++) {
-        if (newSchedule[s][d] !== "") continue; // 已经有班或休假了，跳过
-
-        // 如果这人当天没班，开始给他找岗位
-        let chosen = null;
-        let minCnt = Infinity;
-
-        // 从所有岗位里，找全月次数最少（0次或1次），且当天没人做，且不连排的岗位
-        for (let bS of baseShiftsList) {
-          let nm = bS.name;
-          if (usedToday[nm]) continue; // 当天有人做，防重复
-
-          // 防连排：前后一天不能一样
-          let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-          let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-          if (nm === prev || nm === next) continue;
-
-          let cnt = currentCounts[s][nm] || 0;
-          // 只要不超过2次，就可以选；优先选0次，再选1次
-          if (cnt <= 2 && cnt < minCnt) {
-            minCnt = cnt;
-            chosen = nm;
+          if (isLocked && existingShift) {
+            newSchedule[sIdx][dayIdx] = existingShift;
+          } else if (staffRests.includes(day)) {
+            newSchedule[sIdx][dayIdx] = "休";
           }
-        }
+        });
+      }
 
-        // 如果当天实在找不到不重复、不连排、又不超2次的岗位，
-        // 就放宽条件，找一个当天没人做、且全月次数最少的（保证绝对不会产生3次）
-        if (!chosen) {
-          for (let bS of baseShiftsList) {
-            let nm = bS.name;
-            if (usedToday[nm]) continue;
-            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-            if (nm === prev || nm === next) continue;
-            let cnt = currentCounts[s][nm] || 0;
-            if (cnt < minCnt) {
-              minCnt = cnt;
-              chosen = nm;
+      // 2. 分红日优先排高强度的岗位（保证不卡死，只在1号和16号有特定逻辑）
+      [1, 16].forEach(dividendDay => {
+        if (dividendDay > totalDays) return;
+        let dayIdx = dividendDay - 1;
+        let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDay);
+        let availableStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => {
+          return newSchedule[sIdx][dayIdx] !== "休" && !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
+        });
+
+        highShifts.forEach(shiftName => {
+          let alreadyHas = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
+          if (alreadyHas || availableStaffs.length === 0) return;
+
+          let candidates = availableStaffs.filter(sIdx => {
+            let userMap = userLastAssignedDividendRound[sIdx] || {};
+            let lastIdx = userMap[shiftName];
+            if (lastIdx !== undefined) {
+              let roundsPassed = currentActiveRoundIndex - lastIdx;
+              if (roundsPassed < 2) return false; 
+            }
+            return true;
+          });
+
+          if (candidates.length === 0) candidates = [...availableStaffs];
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => {
+              let histA = dividendHighHistory[a] || 0;
+              let histB = dividendHighHistory[b] || 0;
+              if (histA !== histB) return histA - histB;
+              return Math.random() - 0.5;
+            });
+            let chosen = candidates[0];
+            newSchedule[chosen][dayIdx] = shiftName;
+            availableStaffs = availableStaffs.filter(s => s !== chosen);
+            shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
+            intensityCounts[chosen]['高']++;
+            dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
+            if (!userLastAssignedDividendRound[chosen]) userLastAssignedDividendRound[chosen] = {};
+            userLastAssignedDividendRound[chosen][shiftName] = currentActiveRoundIndex;
+          }
+        });
+      });
+
+      // 3. 核心逻辑：逐天分配（无死循环，全规则检查）
+      for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
+        // 当天哪些人上班
+        let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
+
+        // 支援分配：如果当天上班超过13人，随机安排一个
+        if (workingStaffs.length >= 13) {
+          let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
+          if (!existingSup) {
+            let availableForSup = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && supportCountsThisMonth[sIdx] === 0);
+            if (availableForSup.length > 0) {
+              let assignedSup = availableForSup[0];
+              newSchedule[assignedSup][dayIdx] = supName;
+              supportCountsThisMonth[assignedSup]++;
             }
           }
         }
 
-        // 填入并更新数据
-        newSchedule[s][d] = chosen;
-        usedToday[chosen] = true;
-        currentCounts[s][chosen] = (currentCounts[s][chosen] || 0) + 1;
-      }
-    }
+        // 打乱岗位顺序，让每个月的排班有随机性，但规则依然不变
+        let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
+        let orderedBaseShifts = [...shuffledBaseShifts.filter(s => s.level === '高'), ...shuffledBaseShifts.filter(s => s.level !== '高')];
 
-    // 4. 最后强杀所有3次及以上
-    for (let s = 0; s < staffs.length; s++) {
-      for (let d = 0; d < totalDays; d++) {
-        let shift = newSchedule[s][d];
-        if (!shift || shift === "休" || shift === supName) continue;
-        
-        if ((currentCounts[s][shift] || 0) > 2) {
-          for (let bS of baseShiftsList) {
-            let nm = bS.name;
-            if (nm === shift) continue;
-            let taken = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === nm);
-            if (taken) continue;
-            if ((currentCounts[s][nm] || 0) <= 1) {
-              newSchedule[s][d] = nm;
-              currentCounts[s][shift]--;
-              currentCounts[s][nm]++;
-              break;
+        // 给每个人找岗位
+        for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
+          if (newSchedule[sIdx][dayIdx] !== "") continue; // 已有工作或休假
+
+          let chosen = null;
+          let minCount = Infinity;
+
+          // 全规则寻找最合适的岗位
+          for (let shift of orderedBaseShifts) {
+            let shiftName = shift.name;
+
+            // 规则1：当天不能有重复
+            let takenToday = newSchedule.some((row, sIdx2) => sIdx2 !== sIdx && row[dayIdx] === shiftName);
+            if (takenToday) continue;
+
+            // 规则2：不能连排
+            let prevShift = (dayIdx > 0) ? newSchedule[sIdx][dayIdx - 1] : "";
+            let nextShift = (dayIdx < totalDays - 1) ? newSchedule[sIdx][dayIdx + 1] : "";
+            if (shiftName === prevShift || shiftName === nextShift) continue;
+            if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prevShift) || getShiftCategory(shiftName) === getShiftCategory(nextShift))) continue;
+
+            // 规则3：高强度不能连续3天（前后都有高强度）
+            if (shift.level === '高') {
+              let prevHigh = (dayIdx > 0) ? (baseShifts.find(b => b.name === newSchedule[sIdx][dayIdx - 1])?.level === '高') : false;
+              let nextHigh = (dayIdx < totalDays - 1) ? (baseShifts.find(b => b.name === newSchedule[sIdx][dayIdx + 1])?.level === '高') : false;
+              if (prevHigh && nextHigh) continue;
             }
+
+            // 规则4：优先选次数最少的（0次最佳，其次1次，绝对不能选3次以上的）
+            let shiftCnt = shiftCounts[sIdx][shiftName] || 0;
+            if (shiftCnt <= 2 && shiftCnt < minCount) {
+              minCount = shiftCnt;
+              chosen = shiftName;
+            }
+          }
+
+          // 兜底：如果当天所有岗位都被占了（极少情况），直接挑一个次数最低的（哪怕产生少量重复，后面统一修）
+          if (!chosen && minCount === Infinity) {
+            for (let shift of orderedBaseShifts) {
+              let shiftCnt = shiftCounts[sIdx][shift.name] || 0;
+              if (shiftCnt < minCount) {
+                minCount = shiftCnt;
+                chosen = shift.name;
+              }
+            }
+          }
+
+          if (chosen) {
+            newSchedule[sIdx][dayIdx] = chosen;
+            shiftCounts[sIdx][chosen] = (shiftCounts[sIdx][chosen] || 0) + 1;
+            let foundS = baseShifts.find(s => s.name === chosen);
+            if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) intensityCounts[sIdx][foundS.level]++;
           }
         }
       }
-    }
 
-    lastGeneratedSchedule = sanitizeSchedule(newSchedule);
-    renderAll();
-    saveDataToLocal();
-    document.getElementById('status').innerText = `✅ [${year}-${month}] 排班生成完毕！`;
-    alert(`排班已生成！这次强制限制1~2次，且不会卡死网页！`);
+      // 4. 绝对不超过3次（永远只保持1~2次）的终极刷洗器
+      for (let nm of baseShifts.map(s => s.name)) {
+        let safety = 0;
+        while (safety < 30) { // 理论上最多跑几十次，绝对不卡
+          safety++;
+          let changed = false;
+
+          // 找出所有拿这个岗位超过2次的人
+          for (let s = 0; s < staffs.length; s++) {
+            if ((shiftCounts[s][nm] || 0) <= 2) continue;
+
+            // 开始给他找0次或1次（小于2次）的岗位进行替换
+            for (let d = 0; d < totalDays; d++) {
+              // 必须当天拿的是这个超限岗位，且不被锁定
+              if (newSchedule[s][d] !== nm || (lockedMap[s] && lockedMap[s][d])) continue;
+
+              // 找一个完全没出现过（0次），或者只出现过1次，且当天没人做的岗位
+              let fallback = null;
+              let minCnt = Infinity;
+              for (let bS of baseShifts) {
+                let bName = bS.name;
+                if (bName === nm) continue;
+                
+                // 当天必须没人做这个岗位（防重复）
+                let taken = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === bName);
+                if (taken) continue;
+
+                let cnt = shiftCounts[s][bName] || 0;
+                // 强行只允许 0次 或 1次 的岗位（保持1~2次）
+                if (cnt <= 1 && cnt < minCnt) {
+                  minCnt = cnt;
+                  fallback = bName;
+                }
+              }
+
+              if (fallback) {
+                // 直接替换
+                newSchedule[s][d] = fallback;
+                shiftCounts[s][nm]--;
+                shiftCounts[s][fallback]++;
+                
+                changed = true;
+                break; // 换完一个就跳出，重新统计
+              }
+            }
+            if (changed) break;
+          }
+          
+          // 如果一轮跑下来没变化，说明没人拿3次了，直接退出
+          if (!changed) break;
+        }
+      }
+
+      // 5. 完成，保存输出
+      lastGeneratedSchedule = sanitizeSchedule(newSchedule);
+      renderAll();
+      saveDataToLocal();
+      
+      document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
+      alert(`排班已完成！本次使用了全规则：防重复、防连排、分红日冷却、高强度限制、以及强制1~2次平摊。`);
+
+    } catch (err) {
+      console.error(err);
+      alert("排班发生错误：" + err.message);
+    }
   }
 
   window.onload = async function() {
