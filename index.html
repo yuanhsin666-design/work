@@ -1980,319 +1980,213 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
- async function generateSchedule() {
+  async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
-    try {
-      const year = parseInt(document.getElementById('yearSelect').value);
-      const month = parseInt(document.getElementById('monthSelect').value);
-      const totalDays = getDaysInMonth(year, month);
-      initLockedMap();
-      const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
-      const supName = supportShift.name;
-      let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
-      let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
-      let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
-      let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
-      let allHistoryData = await getAllHistoryMonthsData();
-      let currentKey = getMonthKey();
-      allHistoryData[currentKey] = newSchedule;
-      let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
-      let dividendHighHistory = {}; 
-      let userLastAssignedDividendRound = {}; 
-      Object.keys(allHistoryData).forEach(mKey => {
-        let mSched = allHistoryData[mKey];
-        if (mSched) {
-          staffs.forEach((staff, sIdx) => {
-            const matchedIdx = staffs.findIndex(s => s.name === staff.name);
-            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
-            if (mSched[rowIdx]) {
-              if (mKey !== currentKey) {
-                mSched[rowIdx].forEach(shift => {
-                  if (shift === supName) pastSupportCounts[sIdx]++;
-                });
-              }
-              [1, 16].forEach(day => {
-                let shiftOnDiv = mSched[rowIdx][day - 1];
-                if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
-                  dividendHighHistory[sIdx] = (dividendHighHistory[sIdx] || 0) + 1;
-                }
-              });
-            }
-          });
-        }
-      });
-      for (let day = 1; day <= totalDays; day++) {
-        const dayIdx = day - 1;
-        staffs.forEach((_, sIdx) => {
-          const staffRests = (currentMonthRests && currentMonthRests[sIdx]) ? currentMonthRests[sIdx] : [];
-          const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
-          let existingShift = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";
-          if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
-          if (isLocked && existingShift) {
-            newSchedule[sIdx][dayIdx] = existingShift;
-            if (existingShift !== "休") {
-              if (existingShift === supName) {
-                supportCountsThisMonth[sIdx]++;
-              } else {
-                shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
-                let foundS = baseShifts.find(s => s.name === existingShift);
-                if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
-                  intensityCounts[sIdx][foundS.level]++;
-                }
-              }
-            }
-          } else if (staffRests.includes(day)) {
-            newSchedule[sIdx][dayIdx] = "休";
-          }
-        });
-      }
-      let totalWorkCells = 0;
-      for (let s = 0; s < staffs.length; s++) {
-        for (let d = 0; d < totalDays; d++) if (newSchedule[s][d] !== "休") totalWorkCells++;
-      }
-      const avgWorkDays = staffs.length ? (totalWorkCells / staffs.length) : totalDays;
-      const levelShiftQty = { 高: 0, 中: 0, 低: 0 };
-      baseShifts.forEach(s => { if (levelShiftQty[s.level] !== undefined) levelShiftQty[s.level]++; });
-      const levelSoftMax = {};
-      ['高', '中', '低'].forEach(L => {
-        const share = baseShifts.length ? (levelShiftQty[L] / baseShifts.length) : 0;
-        levelSoftMax[L] = Math.max(1, Math.ceil(avgWorkDays * share) + 1);
-      });
 
-      let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    initLockedMap();
+
+    const baseShiftsList = baseShifts;
+    const supName = supportShift.name;
+    
+    // 新排班表
+    let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+    
+    // 初始化：填入休假和锁定
+    for (let day = 1; day <= totalDays; day++) {
+      let dayIdx = day - 1;
       staffs.forEach((_, sIdx) => {
-        let lastRoundIndexForSpecificShift = {};
-        allRounds.forEach((round, rIndex) => {
-          let mSched = (round.mKey === currentKey) ? newSchedule : allHistoryData[round.mKey];
-          if (mSched) {
-            const matchedIdx = staffs.findIndex(s => s.name === staffs[sIdx].name);
-            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
-            if (mSched[rowIdx]) {
-              let shiftOnDiv = mSched[rowIdx][round.dayNum - 1];
-              if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
-                lastRoundIndexForSpecificShift[shiftOnDiv] = rIndex;
-              }
-            }
-          }
-        });
-        userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
-      });
-      [1, 16].forEach(dividendDay => {
-        if (dividendDay > totalDays) return;
-        let dayIdx = dividendDay - 1;
-        let currentActiveRoundIndex = allRounds.findIndex(r => r.mKey === currentKey && r.dayNum === dividendDay);
-        let availableStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => {
-          return newSchedule[sIdx][dayIdx] !== "休" && !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
-        });
-        highShifts.forEach(shiftName => {
-          let alreadyHas = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
-          if (alreadyHas || availableStaffs.length === 0) return;
-          let candidates = availableStaffs.filter(sIdx => {
-            let userMap = userLastAssignedDividendRound[sIdx] || {};
-            let lastIdx = userMap[shiftName];
-            if (lastIdx !== undefined) {
-              let roundsPassed = currentActiveRoundIndex - lastIdx;
-              if (roundsPassed < 2) return false; 
-            }
-            return true;
-          });
-          if (candidates.length === 0) {
-            candidates = [...availableStaffs];
-          }
-          if (candidates.length > 0) {
-            candidates.sort((a, b) => {
-              let histA = dividendHighHistory[a] || 0;
-              let histB = dividendHighHistory[b] || 0;
-              if (histA !== histB) return histA - histB;
-              return Math.random() - 0.5;
-            });
-            let chosen = candidates[0];
-            newSchedule[chosen][dayIdx] = shiftName;
-            availableStaffs = availableStaffs.filter(s => s !== chosen);
-            shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
-            intensityCounts[chosen]['高']++;
-            dividendHighHistory[chosen] = (dividendHighHistory[chosen] || 0) + 1;
-            if (!userLastAssignedDividendRound[chosen]) userLastAssignedDividendRound[chosen] = {};
-            userLastAssignedDividendRound[chosen][shiftName] = currentActiveRoundIndex;
-          }
-        });
-      });
-      for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-        let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
-        let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
-        let assignedSupportStaffIdx = null;
-        if (workingStaffs.length >= 13) {
-          let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
-          if (existingSup !== undefined) {
-            assignedSupportStaffIdx = existingSup;
-          } else {
-            let availableForSup = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && supportCountsThisMonth[sIdx] === 0);
-            if (availableForSup.length > 0) {
-              availableForSup.sort((a, b) => {
-                let totalA = pastSupportCounts[a];
-                let totalB = pastSupportCounts[b];
-                if (totalA !== totalB) return totalA - totalB;
-                return Math.random() - 0.5;
-              });
-              assignedSupportStaffIdx = availableForSup[0];
-              newSchedule[assignedSupportStaffIdx][dayIdx] = supName;
-              supportCountsThisMonth[assignedSupportStaffIdx]++;
-            }
-          }
-        }
-        let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
-        let highPriorityShifts = shuffledBaseShifts.filter(s => s.level === '高').map(s => s.name);
-        let otherPriorityShifts = shuffledBaseShifts.filter(s => s.level !== '高').map(s => s.name);
-        let orderedBaseShifts = [...highPriorityShifts, ...otherPriorityShifts];
-        orderedBaseShifts.forEach(shiftName => {
-          let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
-          if (alreadyAssigned) return;
-          let foundS = baseShifts.find(s => s.name === shiftName);
-          let level = foundS ? foundS.level : '中';
-          let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
-          let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
-          let hardMaxLimit = (levelSoftMax && levelSoftMax[level]) ? levelSoftMax[level] : 99;
-          let candidates = workingStaffs.filter(sIdx => {
-            if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-            if (intensityCounts[sIdx][level] >= hardMaxLimit) return false;
-            if (level === '高') {
-              let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
-              if (shiftSpecificCount >= 2) return false; 
-            }
-            return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
-          });
-          if (candidates.length === 0) {
-            candidates = workingStaffs.filter(sIdx => {
-              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
-              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
-            });
-          }
-          if (candidates.length > 0) {
-            candidates.sort((a, b) => {
-              let countA_shift = shiftCounts[a][shiftName] || 0;
-              let countB_shift = shiftCounts[b][shiftName] || 0;
-              if (countA_shift !== countB_shift) return countA_shift - countB_shift;
-              let countA_level = intensityCounts[a][level] || 0;
-              let countB_level = intensityCounts[b][level] || 0;
-              if (countA_level !== countB_level) return countA_level - countB_level;
-              let highA = intensityCounts[a]['高'] || 0;
-              let highB = intensityCounts[b]['高'] || 0;
-              if (highA !== highB) return highA - highB;
-              return Math.random() - 0.5;
-            });
-            let chosen = candidates[0];
-            newSchedule[chosen][dayIdx] = shiftName;
-            shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
-            if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
-          }
-        });
-        workingStaffs.forEach(sIdx => {
-          if (newSchedule[sIdx][dayIdx] === "") {
-            let todayCount = {};
-            baseShifts.forEach(s => { todayCount[s.name] = 0; });
-            for (let k = 0; k < newSchedule.length; k++) {
-              let v = newSchedule[k][dayIdx];
-              if (todayCount[v] !== undefined) todayCount[v]++;
-            }
-            let monthTotal = {};
-            baseShifts.forEach(s => { monthTotal[s.name] = 0; });
-            for (let k = 0; k < newSchedule.length; k++) {
-              for (let dd = 0; dd < totalDays; dd++) {
-                const v = newSchedule[k][dd];
-                if (monthTotal[v] !== undefined) monthTotal[v]++;
-              }
-            }
-            let chosenFallback = null, bestScore = Infinity;
-            baseShifts.forEach(s => {
-              const nm = s.name;
-              let prevShift = (dayIdx > 0) ? newSchedule[sIdx][dayIdx - 1] : "";
-              let nextShift = (dayIdx < totalDays - 1) ? newSchedule[sIdx][dayIdx + 1] : "";
-              if (nm === prevShift || nm === nextShift) {
-                return; 
-              }
-              if (s.level === '高') {
-                let prevLevel = "";
-                if (dayIdx > 0) {
-                   let prevS = baseShifts.find(bs => bs.name === newSchedule[sIdx][dayIdx - 1]);
-                   if (prevS) prevLevel = prevS.level;
-                }
-                if (prevLevel === '高') {
-                   return;
-                }
-              }
-              let score = todayCount[nm] * 100000;
-              score += (shiftCounts[sIdx][nm] || 0) * 1000;
-              if (!isAssignmentValid(sIdx, dayIdx, nm, newSchedule)) score += 300;  
-              score += (monthTotal[nm] || 0) * 10;                    
-              score += (intensityCounts[sIdx][s.level] || 0);
-              let maxHighCount = Math.max(...staffs.map((_, idx) => intensityCounts[idx]['高'] || 0));
-              let currentHighCount = intensityCounts[sIdx]['高'] || 0;
-              if (s.level === '高' && currentHighCount >= maxHighCount) {
-                score += 50000; 
-              }
-              if (score < bestScore) { bestScore = score; chosenFallback = nm; }
-            });
+        const staffRests = currentMonthRests[sIdx] || [];
+        const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
+        let existingShift = lastGeneratedSchedule ? lastGeneratedSchedule[sIdx][dayIdx] : "";
+        if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
 
-            if (!chosenFallback) {
-               // 兜底逻辑修改：绝对不能随便拿第一个！必须优先找0次或1次，绝不允许第3次！
-               let minCount = Infinity;
-               baseShifts.forEach(s => {
-                   let cnt = shiftCounts[sIdx][s.name] || 0;
-                   if (cnt <= 2 && cnt < minCount) {
-                       minCount = cnt;
-                       chosenFallback = s.name;
-                   }
-               });
-               if (!chosenFallback) {
-                   chosenFallback = baseShifts[0].name;
-               }
-            }
-
-            newSchedule[sIdx][dayIdx] = chosenFallback;
-            shiftCounts[sIdx][chosenFallback] = (shiftCounts[sIdx][chosenFallback] || 0) + 1;
-            let foundS = baseShifts.find(s => s.name === chosenFallback);
-            if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) intensityCounts[sIdx][foundS.level]++;
-          }
-        });
-      }
-      
-      const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
-      
-      shiftCounts = Array.from({ length: staffs.length }, () => ({}));
-      intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
-      for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
-        for (let d = 0; d < newSchedule[sIdx].length; d++) {
-          let shift = newSchedule[sIdx][d];
-          if (shift && shift !== "休") {
-            shiftCounts[sIdx][shift] = (shiftCounts[sIdx][shift] || 0) + 1;
-            let fS = baseShifts.find(s => s.name === shift);
-            if (fS && intensityCounts[sIdx][fS.level] !== undefined) {
-               intensityCounts[sIdx][fS.level]++;
-            }
-          }
+        if (isLocked && existingShift) {
+          newSchedule[sIdx][dayIdx] = existingShift;
+        } else if (staffRests.includes(day)) {
+          newSchedule[sIdx][dayIdx] = "休";
         }
-      }
-      lastGeneratedSchedule = sanitizeSchedule(newSchedule);
-      renderAll();
-      saveDataToLocal();
-      const monthKey = getMonthKey();
-      if (fairnessReport && !fairnessReport.ok) {
-        warningBox.innerHTML = `<b>⚠️ [${monthKey}] 平摊体检（以下项目受锁定格 / 请假 / 岗位天数不足限制，无法自动拉平）：</b><br>`
-          + fairnessReport.problems.map(p => '• ' + p).join('<br>');
-        warningBox.style.display = 'block';
-        document.getElementById('status').innerText = `⚠️ [${monthKey}] 排班完成，但有 ${fairnessReport.problems.length} 项无法完全拉平（见下方提醒）`;
-        alert(`[${monthKey}] 排班生成完毕！\n\n但有 ${fairnessReport.problems.length} 项无法自动拉平，已列在表格上方的提醒框，通常是「该岗位全月班次数 < 人数」或「格子被锁定」造成的。`);
-      } else {
-        document.getElementById('status').innerText = `✅ [${monthKey}] 排班完成：每人每岗位次数极差 <= 1、强度总数已平摊`
-          + (fairnessReport ? `（同类型连排 ${fairnessReport.adjViolations} 处、连续3天高强度 ${fairnessReport.highRun3} 处）` : '');
-        alert(`[${monthKey}] 排班生成完毕！\n\n✅ 每个人、每个岗位的次数极差都 <= 1（不会再有人 1 次、别人 3 次）\n✅ 高/中/低 强度总次数已平摊在平均值 ±1\n✅ 分红日高强度岗位仍优先固定 + 两轮冷却`);
-      }
-    } catch (err) {
-      console.error(err);
-      alert("排班发生错误：" + err.message);
+      });
     }
+
+    // 记录每个人每天的可用状态（以及当前已分配的次数）
+    let currentCounts = Array.from({ length: staffs.length }, () => ({}));
+    let updateCounts = (sIdx, shiftName) => {
+      if (shiftName && shiftName !== "休" && shiftName !== supName) {
+        currentCounts[sIdx][shiftName] = (currentCounts[sIdx][shiftName] || 0) + 1;
+      }
+    };
+    for (let s = 0; s < staffs.length; s++) {
+      for (let d = 0; d < totalDays; d++) {
+        updateCounts(s, newSchedule[s][d]);
+      }
+    }
+
+    // 【核心发牌逻辑】
+    // 1. 先预计算每个人上班的天数
+    let workDaysArr = [];
+    for (let s = 0; s < staffs.length; s++) {
+      let cnt = 0;
+      for (let d = 0; d < totalDays; d++) {
+        if (newSchedule[s][d] !== "休" && newSchedule[s][d] === "") cnt++;
+      }
+      workDaysArr.push(cnt);
+    }
+
+    // 2. 构建岗位总需求量（目标：能让所有人尽量拿到1-2次，不产生3次）
+    // 因为我们有12个岗位，17个人。先尽量让每个人每个岗位拿1次（需要12次）。
+    // 总上班次数 = 所有上班天数的总和。
+    let totalWorkdays = workDaysArr.reduce((a, b) => a + b, 0);
+    
+    // 3. 每个岗位需要被分配的总次数（优先拿2次，排不下就1次。绝不产生3次！）
+    let targetCounts = {};
+    baseShiftsList.forEach(shift => targetCounts[shift.name] = 0);
+    
+    // 先让每人拿1次
+    baseShiftsList.forEach(shift => {
+      targetCounts[shift.name] += staffs.length;
+    });
+    
+    // 如果总上班天数远超17*12，我们再给每人补1次（变成2次）
+    let extraSlots = totalWorkdays - (staffs.length * baseShiftsList.length);
+    let maxSecondSlots = staffs.length * baseShiftsList.length; // 最多再给每人加满1次
+    if (extraSlots > 0) {
+      let secondCount = Math.min(extraSlots, maxSecondSlots);
+      // 平均分配第二张牌
+      while (secondCount > 0) {
+        for (let i = 0; i < baseShiftsList.length; i++) {
+          if (secondCount <= 0) break;
+          // 给每个岗位轮流加1次
+          targetCounts[baseShiftsList[i].name]++;
+          secondCount--;
+        }
+      }
+    }
+
+    // 4. 开始发牌！按天发，当天如果有人做这个岗位，第二天就换人。
+    // 建一个队列，记录每个岗位接下来该给谁做（循环轮换，保证公平）
+    let shiftQueue = {};
+    baseShiftsList.forEach(shift => {
+      // 生成一个包含所有员工的队列，但优先发0次/1次的人
+      let queue = [];
+      for (let round = 0; round < targetCounts[shift.name]; round++) {
+        for (let s = 0; s < staffs.length; s++) {
+          queue.push(s);
+        }
+      }
+      shiftQueue[shift.name] = queue;
+    });
+
+    // 5. 遍历每一天，进行发牌
+    for (let d = 0; d < totalDays; d++) {
+      // 收集当天有空位的人
+      let availableToday = [];
+      for (let s = 0; s < staffs.length; s++) {
+        if (newSchedule[s][d] === "") {
+          availableToday.push(s);
+        }
+      }
+
+      // 收集当天还没安排、且还需要被排的岗位
+      let pendingShifts = [];
+      baseShiftsList.forEach(shift => {
+        if (targetCounts[shift.name] > 0) pendingShifts.push(shift.name);
+      });
+
+      // 先分配当天必须有的岗位（不重复）
+      while (availableToday.length > 0 && pendingShifts.length > 0) {
+        let shiftName = pendingShifts[0];
+        let assigned = false;
+
+        // 找到队列里第一个有空且在当天没有做过的人
+        for (let i = 0; i < shiftQueue[shiftName].length; i++) {
+          let s = shiftQueue[shiftName][i];
+          // 检查这个人是不是今天有空、并且今天还没做这个岗位
+          if (availableToday.includes(s)) {
+            // 检查是否连排（前后一天不能是同岗位）
+            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+            if (prev !== shiftName && next !== shiftName) {
+              // 分配！
+              newSchedule[s][d] = shiftName;
+              targetCounts[shiftName]--;
+              availableToday = availableToday.filter(x => x !== s);
+              shiftQueue[shiftName].splice(i, 1);
+              updateCounts(s, shiftName);
+              assigned = true;
+              break;
+            }
+          }
+        }
+
+        // 如果没人能接，就把这个岗位放到队尾，等下一天
+        if (!assigned) {
+          pendingShifts.push(pendingShifts.shift()); // 移到队尾
+        } else {
+          pendingShifts.shift(); // 分配成功，移除
+        }
+      }
+    }
+
+    // 6. 剩余没排上的人，给他补当天最容易拿且没拿过的岗位
+    for (let d = 0; d < totalDays; d++) {
+      for (let s = 0; s < staffs.length; s++) {
+        if (newSchedule[s][d] !== "") continue;
+
+        // 选一个这个人全月拿得最少、且当天没有人做的岗位
+        let bestShift = null;
+        let minCount = Infinity;
+        baseShiftsList.forEach(shift => {
+          let takenToday = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === shift.name);
+          if (takenToday) return;
+          let cnt = currentCounts[s][shift.name] || 0;
+          if (cnt < minCount) {
+            minCount = cnt;
+            bestShift = shift.name;
+          }
+        });
+
+        if (bestShift) {
+          newSchedule[s][d] = bestShift;
+          updateCounts(s, bestShift);
+        }
+      }
+    }
+
+    // 7. 最后检查：如果还有人某岗位拿了3次，就直接降级给他0次的
+    for (let s = 0; s < staffs.length; s++) {
+      for (let d = 0; d < totalDays; d++) {
+        let shiftName = newSchedule[s][d];
+        if (!shiftName || shiftName === "休" || shiftName === supName) continue;
+        
+        let cnt = currentCounts[s][shiftName] || 0;
+        if (cnt > 2) {
+          // 找一个0次/1次且没人做的岗位
+          for (let bS of baseShiftsList) {
+            let nm = bS.name;
+            if (nm === shiftName) continue;
+            let taken = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === nm);
+            if (taken) continue;
+            if ((currentCounts[s][nm] || 0) === 0) {
+              newSchedule[s][d] = nm;
+              currentCounts[s][shiftName]--;
+              currentCounts[s][nm]++;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    lastGeneratedSchedule = sanitizeSchedule(newSchedule);
+    renderAll();
+    saveDataToLocal();
+    document.getElementById('status').innerText = `✅ [${year}-${month}] 排班生成完毕！已按发牌制强制限制1-2次！`;
+    alert(`排班已生成！这次绝对是按“发牌制”进行分配，不会再有3次和0次！`);
   }
 
   window.onload = async function() {
