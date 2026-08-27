@@ -2022,82 +2022,7 @@ async function getAllHistoryMonthsData() {
     });
     return uniqueRounds;
   }
-  // 终极强制平摊：强制让每个人每个岗位的极差 <= 1，且不超过2次
-  function enforceHardLimit(schedule, staffList, baseShiftsList) {
-    const n = staffList.length;
-    const totalDays = schedule[0].length;
-    const names = baseShiftsList.map(s => s.name);
-    const nameSet = new Set(names);
-    
-    // 统计当前次数
-    const counts = Array.from({ length: n }, () => { const o = {}; names.forEach(nm => o[nm] = 0); return o; });
-    for (let s = 0; s < n; s++) {
-      for (let d = 0; d < totalDays; d++) {
-        const v = schedule[s][d];
-        if (nameSet.has(v)) counts[s][v]++;
-      }
-    }
 
-    const cellLocked = (s, d) => !!(lockedMap[s] && lockedMap[s][d]);
-    const swappable = (s, d) => nameSet.has(schedule[s][d]) && !cellLocked(s, d);
-
-    let moved = true;
-    let guard = 0;
-    // 循环直到无法移动或达到保护上限
-    while (moved && guard < 300) {
-      moved = false;
-      guard++;
-
-      // 找出所有极差 > 1 的岗位
-      for (let nm of names) {
-        let mx = -Infinity, mn = Infinity;
-        for (let s = 0; s < n; s++) { const c = counts[s][nm]; if (c > mx) mx = c; if (c < mn) mn = c; }
-        if (mx - mn <= 1) continue;
-
-        // 找出次数为最多（>=3）的人和最少的人
-        let donors = []; // 次数>=3的人
-        let receivers = []; // 次数<2的人
-
-        for (let s = 0; s < n; s++) {
-          if (counts[s][nm] >= 3) donors.push(s);
-          if (counts[s][nm] <= 1) receivers.push(s);
-        }
-
-        if (donors.length === 0 || receivers.length === 0) continue;
-
-        // 强制进行互换
-        outer:
-        for (let i = 0; i < donors.length; i++) {
-          for (let j = 0; j < receivers.length; j++) {
-            const dn = donors[i];
-            const rc = receivers[j];
-            if (dn === rc) continue;
-
-            // 寻找某一天，donor 做了 nm，而 receiver 做了其他岗位
-            for (let d = 0; d < totalDays; d++) {
-              if (schedule[dn][d] !== nm) continue;
-              if (schedule[rc][d] === nm) continue; // 防止制造重复
-              if (!swappable(dn, d) || !swappable(rc, d)) continue;
-
-              // 执行互换
-              const X = schedule[dn][d]; // nm
-              const Y = schedule[rc][d]; // 其他岗位
-              schedule[dn][d] = Y;
-              schedule[rc][d] = X;
-
-              // 更新计数
-              counts[dn][X]--; counts[dn][Y]++;
-              counts[rc][Y]--; counts[rc][X]++;
-
-              moved = true;
-              break outer;
-            }
-          }
-        }
-      }
-    }
-    return schedule;
-  }
  async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
@@ -2365,8 +2290,7 @@ async function getAllHistoryMonthsData() {
         });
       }
       // 强制执行硬性平摊（确保不出现3次，也不出现0次）
-newSchedule = enforceHardLimit(newSchedule, staffs, baseShifts);
-// 强制执行完硬性平摊后，再跑一遍全局公平（微调连排、强度）
+
 const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
       shiftCounts = Array.from({ length: staffs.length }, () => ({}));
       intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
