@@ -2290,7 +2290,6 @@ async function getAllHistoryMonthsData() {
         });
       }
       
-      // 全局公平引擎
       const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
       
       shiftCounts = Array.from({ length: staffs.length }, () => ({}));
