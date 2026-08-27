@@ -905,20 +905,23 @@
             }
           });
 
-          // 2. 如果当天有缺失岗位，尝试将做缺失岗位次数最少的那个人，和当前重复的人互换
+          // 2. 如果当天有缺失岗位，尝试互换
           if (missingShiftsToday.length > 0) {
-            // 遍历缺失岗位
             for (let missingShift of missingShiftsToday) {
               let bestCandidateIdx = -1;
               let bestScore = Infinity;
 
-              // 在所有人中，找出做这个缺失岗位次数最少的人
+              // 找出所有今天做了这个缺失岗位的人
               for (let otherSIdx = 0; otherSIdx < staffs.length; otherSIdx++) {
                 if (otherSIdx === sIdx) continue;
                 if (lockedMap[otherSIdx] && lockedMap[otherSIdx][dayIdx]) continue;
                 
                 // 那个人当天必须是这个缺失岗位
                 if (schedule[otherSIdx][dayIdx] !== missingShift) continue;
+
+                // 【核心修改点】绝对不能为了救人，把别人搞成0次！
+                let countForCurrentShiftOfOther = currentCounts[otherSIdx][shiftName] || 0;
+                if (countForCurrentShiftOfOther <= 1) continue; // 如果互换会让对方变成0次，直接跳过！
 
                 let countForMissingShift = currentCounts[otherSIdx][missingShift] || 0;
                 if (countForMissingShift < bestScore) {
@@ -927,7 +930,7 @@
                 }
               }
 
-              // 如果找到了做缺失岗位次数最少的候选人
+              // 如果找到了安全的候选人
               if (bestCandidateIdx !== -1) {
                 let otherSIdx = bestCandidateIdx;
                 let shiftA = schedule[sIdx][dayIdx];       // 重复的岗位
@@ -951,7 +954,7 @@
                   otherSIdxNewAdj = true;
                 }
 
-                // 如果没产生新连排，直接执行互换！这是最完美的方案
+                // 如果没产生新连排，且安全，执行互换！
                 if (!sIdxNewAdj && !otherSIdxNewAdj) {
                   schedule[sIdx][dayIdx] = shiftB;
                   schedule[otherSIdx][dayIdx] = shiftA;
@@ -963,8 +966,8 @@
                   currentCounts[otherSIdx][shiftA] = (currentCounts[otherSIdx][shiftA] || 0) + 1;
 
                   fixedCount++;
-                  fixLogs.push(`📅 <b>第 ${dayIdx + 1} 天</b>：填补空缺！将 <b>${staffs[sIdx].name}</b> 的重复岗位 [${shiftA.replace(/\n/g,'')}] 与 <b>${staffs[otherSIdx].name}</b> 做的最少的岗位 [${shiftB.replace(/\n/g,'')}] 进行了完美互换！`);
-                  break; // 换完一个空缺就退出，继续处理下一个
+                  fixLogs.push(`📅 <b>第 ${dayIdx + 1} 天</b>：安全互换！<b>${staffs[sIdx].name}</b> 的 [${shiftA.replace(/\n/g,'')}] 与 <b>${staffs[otherSIdx].name}</b> 的 [${shiftB.replace(/\n/g,'')}] 互换。`);
+                  break; 
                 }
               }
             }
@@ -976,7 +979,7 @@
     if (fixedCount > 0) {
       lastGeneratedSchedule = sanitizeSchedule(schedule);
       
-      // 交给全局平摊引擎兜底，确保极差 <= 1
+      // 交给全局平摊引擎兜底，确保极差 <= 1，并且强制消灭 0 次！
       const fairnessReport = enforceGlobalFairness(lastGeneratedSchedule, staffs, baseShifts);
       
       shiftCounts = Array.from({ length: staffs.length }, () => ({}));
@@ -998,7 +1001,7 @@
       saveDataToLocal();
 
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 修复完成（共修复 ${fixedCount} 处，全部通过填补空缺完美互换）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处重复岗位！`;
       
@@ -1006,7 +1009,7 @@
          warningBox.innerHTML += `<br>⚠️ 全局平摊体检报告：<br>` + fairnessReport.problems.map(p => '• ' + p).join('<br>');
       }
 
-      alert(`已完成修复！系统自动找到了当天空缺的岗位，并挑选了做该岗位最少的人进行互换，保证了不产生0次、不产生新连排！`);
+      alert(`已完成修复！系统已通过安全互换消除了重复岗位，且保证不会产生新的0次岗位！`);
 
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无重复岗位！`;
