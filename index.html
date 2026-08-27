@@ -879,145 +879,7 @@ if (fixedCount > 0) {
   }
 
   // ⚖️ 修复次数平摊
-  async function autoFixCounts() {
-    if (!lastGeneratedSchedule) {
-      return alert("当前没有排班数据，请先执行排班！");
-    }
-    const year = parseInt(document.getElementById('yearSelect').value);
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const totalDays = getDaysInMonth(year, month);
-
-    let schedule = lastGeneratedSchedule.map(row => [...row]);
-    let fixedCount = 0;
-    let fixLogs = [];
-
-    function getCounts() {
-      let counts = Array.from({ length: staffs.length }, () => ({}));
-      for (let s = 0; s < staffs.length; s++) {
-        for (let d = 0; d < totalDays; d++) {
-          let shift = schedule[s][d];
-          if (shift && shift !== "休" && shift !== supportShift.name) {
-            counts[s][shift] = (counts[s][shift] || 0) + 1;
-          }
-        }
-      }
-      return counts;
-    }
-
-    let currentCounts = getCounts();
-    let baseNames = baseShifts.map(s => s.name);
-
-    for (let nm of baseNames) {
-      let moved = true;
-      while (moved) {
-        moved = false;
-        let donors = [], receivers = [];
-        for (let s = 0; s < staffs.length; s++) {
-          let cnt = currentCounts[s][nm] || 0;
-          if (cnt >= 3) donors.push(s);
-          if (cnt === 1) receivers.push(s);
-        }
-        if (!donors.length || !receivers.length) break;
-
-        outer:
-        for (let i = 0; i < donors.length; i++) {
-          for (let j = 0; j < receivers.length; j++) {
-            let dn = donors[i], rc = receivers[j];
-            if (dn === rc) continue;
-
-            for (let d = 0; d < totalDays; d++) {
-              if (schedule[dn][d] !== nm) continue;
-              if (schedule[rc][d] === nm) continue;
-              if (lockedMap[dn] && lockedMap[dn][d]) continue;
-              if (lockedMap[rc] && lockedMap[rc][d]) continue;
-              if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
-
-              let X = schedule[dn][d], Y = schedule[rc][d];
-              let dnPrev = (d > 0) ? schedule[dn][d - 1] : "";
-              let dnNext = (d < totalDays - 1) ? schedule[dn][d + 1] : "";
-              let rcPrev = (d > 0) ? schedule[rc][d - 1] : "";
-              let rcNext = (d < totalDays - 1) ? schedule[rc][d + 1] : "";
-              if (Y === dnPrev || Y === dnNext || X === rcPrev || X === rcNext) continue;
-
-              schedule[dn][d] = Y;
-              schedule[rc][d] = X;
-              currentCounts[dn][X]--; currentCounts[dn][Y]++;
-              currentCounts[rc][Y]--; currentCounts[rc][X]++;
-
-              fixedCount++;
-              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：消除3次！<b>${staffs[dn].name}</b> 的 [${X.replace(/\n/g,'')}] 与 <b>${staffs[rc].name}</b> 的 [${Y.replace(/\n/g,'')}] 互换。`);
-              moved = true;
-              break outer;
-            }
-          }
-        }
-      }
-    }
-
-    for (let nm of baseNames) {
-      let moved = true;
-      while (moved) {
-        moved = false;
-        let donors = [], receivers = [];
-        for (let s = 0; s < staffs.length; s++) {
-          let cnt = currentCounts[s][nm] || 0;
-          if (cnt >= 2) donors.push(s);
-          if (cnt === 0) receivers.push(s);
-        }
-        if (!donors.length || !receivers.length) break;
-
-        outer:
-        for (let i = 0; i < donors.length; i++) {
-          for (let j = 0; j < receivers.length; j++) {
-            let dn = donors[i], rc = receivers[j];
-            if (dn === rc) continue;
-
-            for (let d = 0; d < totalDays; d++) {
-              if (schedule[dn][d] !== nm) continue;
-              if (schedule[rc][d] === nm) continue;
-              if (lockedMap[dn] && lockedMap[dn][d]) continue;
-              if (lockedMap[rc] && lockedMap[rc][d]) continue;
-              
-              let Y = schedule[rc][d];
-              if (Y === "休" || Y === supportShift.name) continue;
-              if ((currentCounts[rc][Y] || 0) <= 1) continue;
-
-              let X = schedule[dn][d];
-              let dnPrev = (d > 0) ? schedule[dn][d - 1] : "";
-              let dnNext = (d < totalDays - 1) ? schedule[dn][d + 1] : "";
-              let rcPrev = (d > 0) ? schedule[rc][d - 1] : "";
-              let rcNext = (d < totalDays - 1) ? schedule[rc][d + 1] : "";
-              if (Y === dnPrev || Y === dnNext || X === rcPrev || X === rcNext) continue;
-
-              schedule[dn][d] = Y;
-              schedule[rc][d] = X;
-              currentCounts[dn][X]--; currentCounts[dn][Y]++;
-              currentCounts[rc][Y]--; currentCounts[rc][X]++;
-
-              fixedCount++;
-              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：填补0次！<b>${staffs[dn].name}</b> 的 [${X.replace(/\n/g,'')}] 与 <b>${staffs[rc].name}</b> 的 [${Y.replace(/\n/g,'')}] 互换，帮助 <b>${staffs[rc].name}</b> 获得了 1 次。`);
-              moved = true;
-              break outer;
-            }
-          }
-        }
-      }
-    }
-
-    if (fixedCount > 0) {
-      lastGeneratedSchedule = sanitizeSchedule(schedule);
-      renderAll();
-      saveDataToLocal();
-      const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 次数平摊修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
-      warningBox.style.display = 'block';
-      document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`已完成！已成功消除了极端 3 次，并尽力填补了 0 次。`);
-    } else {
-      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布已经很均匀！`;
-      alert("排班非常完美！当前次数分布很均匀，没有多余的3次，也没有可以填补的0次。");
-    }
-  }
+  async function autoFixCounts(
 
   // 修复重复岗位
   async function autoFixDuplicateShifts() {
@@ -2250,8 +2112,28 @@ async function getAllHistoryMonthsData() {
               if (score < bestScore) { bestScore = score; chosenFallback = nm; }
             });
 
-            if (!chosenFallback) {
-               chosenFallback = baseShifts[0].name;
+                       if (!chosenFallback) {
+               // 绝对不能随便塞！必须先看这个人哪个岗位已经拿过0次，优先拿那个
+               let minCount = Infinity;
+               baseShifts.forEach(s => {
+                   let cnt = shiftCounts[sIdx][s.name] || 0;
+                   if (cnt < minCount) {
+                       minCount = cnt;
+                       chosenFallback = s.name;
+                   }
+               });
+               // 如果全都拿过1次了，才允许拿2次的
+               if (!chosenFallback || minCount >= 2) {
+                   baseShifts.forEach(s => {
+                       let cnt = shiftCounts[sIdx][s.name] || 0;
+                       if (cnt < minCount) {
+                           minCount = cnt;
+                           chosenFallback = s.name;
+                       }
+                   });
+               }
+               // 最后实在没得选了（比如所有人都满2次了），才拿第一个
+               if (!chosenFallback) chosenFallback = baseShifts[0].name;
             }
 
             newSchedule[sIdx][dayIdx] = chosenFallback;
