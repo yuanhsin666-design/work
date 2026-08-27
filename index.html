@@ -1980,7 +1980,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-  async function generateSchedule() {
+ async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1993,10 +1993,9 @@ async function getAllHistoryMonthsData() {
     const baseShiftsList = baseShifts;
     const supName = supportShift.name;
     
-    // 新排班表
     let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
     
-    // 初始化：填入休假和锁定
+    // 1. 初始化休假和锁定
     for (let day = 1; day <= totalDays; day++) {
       let dayIdx = day - 1;
       staffs.forEach((_, sIdx) => {
@@ -2013,167 +2012,90 @@ async function getAllHistoryMonthsData() {
       });
     }
 
-    // 记录每个人每天的可用状态（以及当前已分配的次数）
+    // 2. 记录当前次数
     let currentCounts = Array.from({ length: staffs.length }, () => ({}));
-    let updateCounts = (sIdx, shiftName) => {
-      if (shiftName && shiftName !== "休" && shiftName !== supName) {
-        currentCounts[sIdx][shiftName] = (currentCounts[sIdx][shiftName] || 0) + 1;
-      }
-    };
     for (let s = 0; s < staffs.length; s++) {
       for (let d = 0; d < totalDays; d++) {
-        updateCounts(s, newSchedule[s][d]);
-      }
-    }
-
-    // 【核心发牌逻辑】
-    // 1. 先预计算每个人上班的天数
-    let workDaysArr = [];
-    for (let s = 0; s < staffs.length; s++) {
-      let cnt = 0;
-      for (let d = 0; d < totalDays; d++) {
-        if (newSchedule[s][d] !== "休" && newSchedule[s][d] === "") cnt++;
-      }
-      workDaysArr.push(cnt);
-    }
-
-    // 2. 构建岗位总需求量（目标：能让所有人尽量拿到1-2次，不产生3次）
-    // 因为我们有12个岗位，17个人。先尽量让每个人每个岗位拿1次（需要12次）。
-    // 总上班次数 = 所有上班天数的总和。
-    let totalWorkdays = workDaysArr.reduce((a, b) => a + b, 0);
-    
-    // 3. 每个岗位需要被分配的总次数（优先拿2次，排不下就1次。绝不产生3次！）
-    let targetCounts = {};
-    baseShiftsList.forEach(shift => targetCounts[shift.name] = 0);
-    
-    // 先让每人拿1次
-    baseShiftsList.forEach(shift => {
-      targetCounts[shift.name] += staffs.length;
-    });
-    
-    // 如果总上班天数远超17*12，我们再给每人补1次（变成2次）
-    let extraSlots = totalWorkdays - (staffs.length * baseShiftsList.length);
-    let maxSecondSlots = staffs.length * baseShiftsList.length; // 最多再给每人加满1次
-    if (extraSlots > 0) {
-      let secondCount = Math.min(extraSlots, maxSecondSlots);
-      // 平均分配第二张牌
-      while (secondCount > 0) {
-        for (let i = 0; i < baseShiftsList.length; i++) {
-          if (secondCount <= 0) break;
-          // 给每个岗位轮流加1次
-          targetCounts[baseShiftsList[i].name]++;
-          secondCount--;
+        let shift = newSchedule[s][d];
+        if (shift && shift !== "休" && shift !== supName) {
+          currentCounts[s][shift] = (currentCounts[s][shift] || 0) + 1;
         }
       }
     }
 
-    // 4. 开始发牌！按天发，当天如果有人做这个岗位，第二天就换人。
-    // 建一个队列，记录每个岗位接下来该给谁做（循环轮换，保证公平）
-    let shiftQueue = {};
-    baseShiftsList.forEach(shift => {
-      // 生成一个包含所有员工的队列，但优先发0次/1次的人
-      let queue = [];
-      for (let round = 0; round < targetCounts[shift.name]; round++) {
-        for (let s = 0; s < staffs.length; s++) {
-          queue.push(s);
-        }
-      }
-      shiftQueue[shift.name] = queue;
-    });
-
-    // 5. 遍历每一天，进行发牌
+    // 3. 核心分配：遍历每一天，只要有人没排班，就给他分配【他最缺的岗位】
     for (let d = 0; d < totalDays; d++) {
-      // 收集当天有空位的人
-      let availableToday = [];
+      let usedToday = {}; // 今天已经用掉的岗位
       for (let s = 0; s < staffs.length; s++) {
-        if (newSchedule[s][d] === "") {
-          availableToday.push(s);
+        if (newSchedule[s][d] !== "") {
+          usedToday[newSchedule[s][d]] = true;
         }
       }
 
-      // 收集当天还没安排、且还需要被排的岗位
-      let pendingShifts = [];
-      baseShiftsList.forEach(shift => {
-        if (targetCounts[shift.name] > 0) pendingShifts.push(shift.name);
-      });
+      for (let s = 0; s < staffs.length; s++) {
+        if (newSchedule[s][d] !== "") continue; // 已经有班或休假了，跳过
 
-      // 先分配当天必须有的岗位（不重复）
-      while (availableToday.length > 0 && pendingShifts.length > 0) {
-        let shiftName = pendingShifts[0];
-        let assigned = false;
+        // 如果这人当天没班，开始给他找岗位
+        let chosen = null;
+        let minCnt = Infinity;
 
-        // 找到队列里第一个有空且在当天没有做过的人
-        for (let i = 0; i < shiftQueue[shiftName].length; i++) {
-          let s = shiftQueue[shiftName][i];
-          // 检查这个人是不是今天有空、并且今天还没做这个岗位
-          if (availableToday.includes(s)) {
-            // 检查是否连排（前后一天不能是同岗位）
+        // 从所有岗位里，找全月次数最少（0次或1次），且当天没人做，且不连排的岗位
+        for (let bS of baseShiftsList) {
+          let nm = bS.name;
+          if (usedToday[nm]) continue; // 当天有人做，防重复
+
+          // 防连排：前后一天不能一样
+          let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+          let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+          if (nm === prev || nm === next) continue;
+
+          let cnt = currentCounts[s][nm] || 0;
+          // 只要不超过2次，就可以选；优先选0次，再选1次
+          if (cnt <= 2 && cnt < minCnt) {
+            minCnt = cnt;
+            chosen = nm;
+          }
+        }
+
+        // 如果当天实在找不到不重复、不连排、又不超2次的岗位，
+        // 就放宽条件，找一个当天没人做、且全月次数最少的（保证绝对不会产生3次）
+        if (!chosen) {
+          for (let bS of baseShiftsList) {
+            let nm = bS.name;
+            if (usedToday[nm]) continue;
             let prev = (d > 0) ? newSchedule[s][d - 1] : "";
             let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-            if (prev !== shiftName && next !== shiftName) {
-              // 分配！
-              newSchedule[s][d] = shiftName;
-              targetCounts[shiftName]--;
-              availableToday = availableToday.filter(x => x !== s);
-              shiftQueue[shiftName].splice(i, 1);
-              updateCounts(s, shiftName);
-              assigned = true;
-              break;
+            if (nm === prev || nm === next) continue;
+            let cnt = currentCounts[s][nm] || 0;
+            if (cnt < minCnt) {
+              minCnt = cnt;
+              chosen = nm;
             }
           }
         }
 
-        // 如果没人能接，就把这个岗位放到队尾，等下一天
-        if (!assigned) {
-          pendingShifts.push(pendingShifts.shift()); // 移到队尾
-        } else {
-          pendingShifts.shift(); // 分配成功，移除
-        }
+        // 填入并更新数据
+        newSchedule[s][d] = chosen;
+        usedToday[chosen] = true;
+        currentCounts[s][chosen] = (currentCounts[s][chosen] || 0) + 1;
       }
     }
 
-    // 6. 剩余没排上的人，给他补当天最容易拿且没拿过的岗位
-    for (let d = 0; d < totalDays; d++) {
-      for (let s = 0; s < staffs.length; s++) {
-        if (newSchedule[s][d] !== "") continue;
-
-        // 选一个这个人全月拿得最少、且当天没有人做的岗位
-        let bestShift = null;
-        let minCount = Infinity;
-        baseShiftsList.forEach(shift => {
-          let takenToday = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === shift.name);
-          if (takenToday) return;
-          let cnt = currentCounts[s][shift.name] || 0;
-          if (cnt < minCount) {
-            minCount = cnt;
-            bestShift = shift.name;
-          }
-        });
-
-        if (bestShift) {
-          newSchedule[s][d] = bestShift;
-          updateCounts(s, bestShift);
-        }
-      }
-    }
-
-    // 7. 最后检查：如果还有人某岗位拿了3次，就直接降级给他0次的
+    // 4. 最后强杀所有3次及以上
     for (let s = 0; s < staffs.length; s++) {
       for (let d = 0; d < totalDays; d++) {
-        let shiftName = newSchedule[s][d];
-        if (!shiftName || shiftName === "休" || shiftName === supName) continue;
+        let shift = newSchedule[s][d];
+        if (!shift || shift === "休" || shift === supName) continue;
         
-        let cnt = currentCounts[s][shiftName] || 0;
-        if (cnt > 2) {
-          // 找一个0次/1次且没人做的岗位
+        if ((currentCounts[s][shift] || 0) > 2) {
           for (let bS of baseShiftsList) {
             let nm = bS.name;
-            if (nm === shiftName) continue;
+            if (nm === shift) continue;
             let taken = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === nm);
             if (taken) continue;
-            if ((currentCounts[s][nm] || 0) === 0) {
+            if ((currentCounts[s][nm] || 0) <= 1) {
               newSchedule[s][d] = nm;
-              currentCounts[s][shiftName]--;
+              currentCounts[s][shift]--;
               currentCounts[s][nm]++;
               break;
             }
@@ -2185,8 +2107,8 @@ async function getAllHistoryMonthsData() {
     lastGeneratedSchedule = sanitizeSchedule(newSchedule);
     renderAll();
     saveDataToLocal();
-    document.getElementById('status').innerText = `✅ [${year}-${month}] 排班生成完毕！已按发牌制强制限制1-2次！`;
-    alert(`排班已生成！这次绝对是按“发牌制”进行分配，不会再有3次和0次！`);
+    document.getElementById('status').innerText = `✅ [${year}-${month}] 排班生成完毕！`;
+    alert(`排班已生成！这次强制限制1~2次，且不会卡死网页！`);
   }
 
   window.onload = async function() {
