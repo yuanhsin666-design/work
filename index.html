@@ -827,12 +827,6 @@
     });
 if (fixedCount > 0) {
       lastGeneratedSchedule = sanitizeSchedule(schedule);
-      
-      // 强制拉回1-2次（防止修复连排时打破了平摊）
-      lastGeneratedSchedule = enforceHardLimit(lastGeneratedSchedule, staffs, baseShifts);
-      // 跑全局公平微调（防止产生0次和3次）
-      enforceGlobalFairness(lastGeneratedSchedule, staffs, baseShifts);
-
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
