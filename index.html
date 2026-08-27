@@ -2289,9 +2289,10 @@ async function getAllHistoryMonthsData() {
           }
         });
       }
-      // 强制执行硬性平摊（确保不出现3次，也不出现0次）
-
-const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
+      
+      // 全局公平引擎
+      const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
+      
       shiftCounts = Array.from({ length: staffs.length }, () => ({}));
       intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
