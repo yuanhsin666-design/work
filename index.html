@@ -2219,6 +2219,80 @@ async function getAllHistoryMonthsData() {
         });
       }
       
+            // 生成后立刻进行安全平摊（绝不产生重复！绝不破坏当天岗位唯一性！）
+      (function safeBalance() {
+        // 辅助函数：检查某天是否安全（没有重复岗位）
+        function isDaySafe(schedule, d) {
+          let seen = {};
+          for (let s = 0; s < schedule.length; s++) {
+            let shift = schedule[s][d];
+            if (shift && shift !== "休" && shift !== supportShift.name) {
+              if (seen[shift]) return false;
+              seen[shift] = true;
+            }
+          }
+          return true;
+        }
+
+        let safeCount = 0;
+        let guard = 0;
+        while (guard < 100) { // 最多尝试 100 次
+          guard++;
+          let changed = false;
+          let localCounts = Array.from({ length: staffs.length }, () => ({}));
+          for (let s = 0; s < staffs.length; s++) {
+            for (let d = 0; d < totalDays; d++) {
+              let shift = newSchedule[s][d];
+              if (shift && shift !== "休" && shift !== supportShift.name) {
+                localCounts[s][shift] = (localCounts[s][shift] || 0) + 1;
+              }
+            }
+          }
+
+          // 找所有3次的人，和0/1次的人
+          for (let nm of baseShifts.map(s => s.name)) {
+            for (let s = 0; s < staffs.length; s++) {
+              if ((localCounts[s][nm] || 0) <= 2) continue;
+              for (let otherS = 0; otherS < staffs.length; otherS++) {
+                if (otherS === s || (localCounts[otherS][nm] || 0) >= 2) continue;
+
+                for (let d = 0; d < totalDays; d++) {
+                  if (newSchedule[s][d] !== nm) continue;
+                  if (newSchedule[otherS][d] === "休" || newSchedule[otherS][d] === supportShift.name) continue;
+                  if (lockedMap[s] && lockedMap[s][d]) continue;
+                  if (lockedMap[otherS] && lockedMap[otherS][d]) continue;
+
+                  let otherShift = newSchedule[otherS][d];
+                  // 尝试交换，并检查当天是否安全
+                  let backupS = newSchedule[s][d];
+                  let backupOther = newSchedule[otherS][d];
+                  newSchedule[s][d] = backupOther;
+                  newSchedule[otherS][d] = backupS;
+
+                  if (isDaySafe(newSchedule, d)) {
+                    // 交换成功，更新本地计数
+                    localCounts[s][nm]--; localCounts[s][otherShift]++;
+                    localCounts[otherS][otherShift]--; localCounts[otherS][nm]++;
+                    changed = true;
+                    safeCount++;
+                    break;
+                  } else {
+                    // 恢复
+                    newSchedule[s][d] = backupS;
+                    newSchedule[otherS][d] = backupOther;
+                  }
+                }
+                if (changed) break;
+              }
+              if (changed) break;
+            }
+            if (changed) break;
+          }
+          if (!changed) break;
+        }
+      })();
+
+      // 再跑一遍全局公平引擎做微调
       const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
       
       shiftCounts = Array.from({ length: staffs.length }, () => ({}));
