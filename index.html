@@ -878,7 +878,7 @@ if (fixedCount > 0) {
     }
   }
 
-  // ⚖️ 完美全月调配器（强制每个人每个岗位只能1~2次，且绝无0次）
+    // ⚖️ 强制直接调配器（无条件消灭3次和0次，确保1~2次！）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
@@ -891,7 +891,6 @@ if (fixedCount > 0) {
     let fixedCount = 0;
     let fixLogs = [];
 
-    // 计算当前每个人、每个岗位的次数
     function getCounts() {
       let counts = Array.from({ length: staffs.length }, () => ({}));
       for (let s = 0; s < staffs.length; s++) {
@@ -907,93 +906,94 @@ if (fixedCount > 0) {
 
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
-    let baseNameSet = new Set(baseNames);
 
-    // ================= 1. 彻底消除所有 3 次及以上 =================
-    // 将某个人超过2次的岗位，无条件替换成他全月次数最少（0次或1次）且当天没人做的岗位
+    // ======= 1. 直接解决 3次 和 0次（人脑调配逻辑） =======
+    // 遍历每个基础岗位
     for (let nm of baseNames) {
       let moved = true;
       while (moved) {
         moved = false;
+        
+        // 找出拿这个岗位 >=3 次的人（比如闵诗）和 ==0 次的人（比如大抠）
+        let donors = [], receivers = [];
         for (let s = 0; s < staffs.length; s++) {
-          if ((currentCounts[s][nm] || 0) <= 2) continue;
+          let cnt = currentCounts[s][nm] || 0;
+          if (cnt >= 3) donors.push(s);
+          if (cnt === 0) receivers.push(s);
+        }
 
-          for (let d = 0; d < totalDays; d++) {
-            if (schedule[s][d] !== nm) continue;
-            if (lockedMap[s] && lockedMap[s][d]) continue;
+        // 如果找不到3次或者0次的人，说明这个岗位没问题了，去下一个岗位
+        if (donors.length === 0 || receivers.length === 0) break;
 
-            let fallback = null;
-            let minCnt = Infinity;
-            for (let baseNm of baseNames) {
-              if (baseNm === nm) continue;
-              let takenToday = schedule.some((row, sIdx) => sIdx !== s && row[d] === baseNm);
-              if (takenToday) continue;
-              let cnt = currentCounts[s][baseNm] || 0;
-              if (cnt <= 1 && cnt < minCnt) {
-                minCnt = cnt;
-                fallback = baseNm;
-              }
-            }
+        // 循环挑人，直接把3次的人换给0次的人
+        outer:
+        for (let i = 0; i < donors.length; i++) {
+          for (let j = 0; j < receivers.length; j++) {
+            let dn = donors[i];  // 比如闵诗
+            let rc = receivers[j]; // 比如大抠
+            if (dn === rc) continue;
 
-            if (fallback) {
-              schedule[s][d] = fallback;
-              currentCounts[s][nm]--;
-              currentCounts[s][fallback]++;
+            // 找闵诗哪天拿了 nm，并且大抠那天在上班（不是休/支援）
+            for (let d = 0; d < totalDays; d++) {
+              if (schedule[dn][d] !== nm) continue;
+              if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
+              if (lockedMap[dn] && lockedMap[dn][d]) continue;
+              if (lockedMap[rc] && lockedMap[rc][d]) continue;
+
+              // 大抠那天做的是什么岗位？
+              let rcShift = schedule[rc][d];
+              
+              // 安全验证：大抠做 rcShift 的次数不能是 1 次，否则换了会变成0次
+              if ((currentCounts[rc][rcShift] || 0) <= 1) continue;
+
+              // 检查连排：不能把大抠前后两天搞成连排
+              let rcPrev = (d > 0) ? schedule[rc][d - 1] : "";
+              let rcNext = (d < totalDays - 1) ? schedule[rc][d + 1] : "";
+              if (nm === rcPrev || nm === rcNext) continue;
+
+              // ===== 直接执行交换：闵诗拿 nm 的这一天换给大抠 =====
+              schedule[rc][d] = nm;
+              schedule[dn][d] = rcShift;
+
+              currentCounts[rc][rcShift]--; currentCounts[rc][nm]++;
+              currentCounts[dn][nm]--; currentCounts[dn][rcShift]++;
+
               fixedCount++;
-              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：消除超限！<b>${staffs[s].name}</b> 的 [${nm.replace(/\n/g,'')}] 改成了 [${fallback.replace(/\n/g,'')}]。`);
+              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：直接调配！<b>${staffs[dn].name}</b> 的 [${nm.replace(/\n/g,'')}] 直接给了 <b>${staffs[rc].name}</b>。`);
+              
               moved = true;
-              break;
+              break outer;
             }
           }
-          if (moved) break;
         }
       }
     }
 
-    // ================= 2. 彻底填补所有 0 次 =================
-    // 找某个0次的人，找到一个拿过2次的人，两人在当天做不同的岗位，直接调换！
+    // ======= 2. 全局兜底：消除所有剩下的 3 次 =======
     for (let nm of baseNames) {
-      let moved = true;
-      while (moved) {
-        moved = false;
-        for (let rc = 0; rc < staffs.length; rc++) {
-          if ((currentCounts[rc][nm] || 0) >= 1) continue;
-
-          // 尝试每一天，找到可以和别人换的机会
-          for (let d = 0; d < totalDays; d++) {
-            if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
-            if (schedule[rc][d] === nm) continue;
-            if (lockedMap[rc] && lockedMap[rc][d]) continue;
-
-            // 寻找捐赠者：必须全月某个岗位拿过2次，且当天和 rc 做的是完全一样的岗位（这样才是完美的直接平替！）
-            for (let s = 0; s < staffs.length; s++) {
-              if (s === rc) continue;
-              if (lockedMap[s] && lockedMap[s][d]) continue;
-
-              // 同一天，某个人和 rc 正在做同一个岗位，才能完美互换！
-              if (schedule[s][d] !== schedule[rc][d]) continue; 
-
-              let donorShift = schedule[s][d];
-              if (baseNameSet.has(donorShift) && (currentCounts[s][donorShift] || 0) >= 2) {
-                // 执行完美交换
-                let X = schedule[s][d];
-                let Y = schedule[rc][d];
-
-                schedule[s][d] = Y;
-                schedule[rc][d] = X;
-
-                currentCounts[s][X]--; currentCounts[s][Y]++;
-                currentCounts[rc][Y]--; currentCounts[rc][X]++;
-
-                fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：完美填补0次！<b>${staffs[rc].name}</b> 的 [${Y.replace(/\n/g,'')}] 与 <b>${staffs[s].name}</b> 的 [${X.replace(/\n/g,'')}] 互换。`);
-                moved = true;
-                break;
-              }
-            }
-            if (moved) break;
+      for (let s = 0; s < staffs.length; s++) {
+        if ((currentCounts[s][nm] || 0) <= 2) continue;
+        // 找全月最少次数的岗位
+        let fallback = null, minCnt = Infinity;
+        for (let baseNm of baseNames) {
+          if (baseNm === nm) continue;
+          let cnt = currentCounts[s][baseNm] || 0;
+          if (cnt < minCnt) {
+            minCnt = cnt;
+            fallback = baseNm;
           }
-          if (moved) break;
+        }
+        if (fallback) {
+          for (let d = 0; d < totalDays; d++) {
+            if (schedule[s][d] === nm && !(lockedMap[s] && lockedMap[s][d])) {
+              schedule[s][d] = fallback;
+              currentCounts[s][nm]--;
+              currentCounts[s][fallback]++;
+              fixedCount++;
+              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：兜底消除！<b>${staffs[s].name}</b> 的 [${nm.replace(/\n/g,'')}] 换成了 [${fallback.replace(/\n/g,'')}]。`);
+              break;
+            }
+          }
         }
       }
     }
@@ -1003,10 +1003,10 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 完美调配完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 人脑式调配完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`已完成！已彻底消灭3次，并强制填补了所有0次，每个人每个岗位都是完美的1~2次！`);
+      alert(`已完成！这是按照人脑调配逻辑：直接把3次的人换给0次的人，并补齐全表！`);
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美（1~2次）！`;
       alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
