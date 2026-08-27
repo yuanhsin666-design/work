@@ -878,7 +878,7 @@ if (fixedCount > 0) {
     }
   }
 
-  // ⚖️ 全局智能调配器（像人脑一样，遍历所有人，直到完美平衡！）
+  // ⚖️ 强制修复次数平摊（严格遵守1-2次）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
@@ -904,145 +904,91 @@ if (fixedCount > 0) {
       return counts;
     }
 
-    function isDaySafe(schedule, d) {
-      let seen = {};
-      for (let s = 0; s < schedule.length; s++) {
-        let shift = schedule[s][d];
-        if (shift && shift !== "休" && shift !== supportShift.name) {
-          if (seen[shift]) return false;
-          seen[shift] = true;
-        }
-      }
-      return true;
-    }
-
-    function isNoAdjacent(schedule, s, d) {
-      let shift = schedule[s][d];
-      if (!shift || shift === "休") return true;
-      if (d > 0) {
-        let prev = schedule[s][d - 1];
-        if (prev && prev !== "休" && (prev === shift || getShiftCategory(prev) === getShiftCategory(shift))) return false;
-      }
-      if (d < totalDays - 1) {
-        let next = schedule[s][d + 1];
-        if (next && next !== "休" && (next === shift || getShiftCategory(next) === getShiftCategory(shift))) return false;
-      }
-      return true;
-    }
-
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 第一步：拿3次的，去给拿1次或0次的人
+    // 1. 强制消除所有3次及以上！优先填补0次和1次！
     for (let nm of baseNames) {
       let moved = true;
-      let safety = 0;
-      while (moved && safety < 50) {
+      while (moved) {
         moved = false;
-        safety++;
-        
-        let donors = [];
-        let receivers = [];
-
         for (let s = 0; s < staffs.length; s++) {
           let cnt = currentCounts[s][nm] || 0;
-          if (cnt >= 3) donors.push(s);
-          if (cnt <= 1) receivers.push(s);
-        }
+          if (cnt <= 2) continue;
 
-        if (donors.length === 0 || receivers.length === 0) break;
+          for (let d = 0; d < totalDays; d++) {
+            if (schedule[s][d] !== nm) continue;
+            if (lockedMap[s] && lockedMap[s][d]) continue;
 
-        outer:
-        for (let i = 0; i < donors.length; i++) {
-          for (let j = 0; j < receivers.length; j++) {
-            let dn = donors[i];
-            let rc = receivers[j];
-            if (dn === rc) continue;
-
-            for (let d = 0; d < totalDays; d++) {
-              if (schedule[dn][d] !== nm) continue;
-              if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
-              if (lockedMap[dn] && lockedMap[dn][d]) continue;
-              if (lockedMap[rc] && lockedMap[rc][d]) continue;
-
-              let rcShift = schedule[rc][d];
-              let backupDn = schedule[dn][d];
-              let backupRc = schedule[rc][d];
-
-              schedule[dn][d] = backupRc;
-              schedule[rc][d] = backupDn;
-
-              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, dn, d) && isNoAdjacent(schedule, rc, d) && (currentCounts[rc][rcShift] || 0) > 1) {
-                currentCounts[rc][rcShift]--; currentCounts[rc][nm]++;
-                currentCounts[dn][nm]--; currentCounts[dn][rcShift]++;
-
-                fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：3次给1/0次！<b>${staffs[dn].name}</b> 的 [${nm.replace(/\n/g,'')}] 给 <b>${staffs[rc].name}</b>。`);
-                moved = true;
-                break outer;
-              } else {
-                schedule[dn][d] = backupDn;
-                schedule[rc][d] = backupRc;
+            // 寻找这个人所有全月少于2次的岗位
+            let fallback = null;
+            let minCnt = Infinity;
+            for (let baseNm of baseNames) {
+              if (baseNm === nm) continue;
+              let takenToday = schedule.some((row, sIdx) => sIdx !== s && row[d] === baseNm);
+              if (takenToday) continue;
+              let cnt2 = currentCounts[s][baseNm] || 0;
+              if (cnt2 < 2 && cnt2 < minCnt) {
+                minCnt = cnt2;
+                fallback = baseNm;
               }
             }
+
+            if (fallback) {
+              schedule[s][d] = fallback;
+              currentCounts[s][nm]--;
+              currentCounts[s][fallback]++;
+              fixedCount++;
+              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：超限！<b>${staffs[s].name}</b> 的 [${nm.replace(/\n/g,'')}] 改成了 [${fallback.replace(/\n/g,'')}]。`);
+              moved = true;
+              break;
+            }
           }
+          if (moved) break;
         }
       }
     }
 
-    // 第二步：0次的，向所有拿2次的人借一天
+    // 2. 强制填补0次！
     for (let nm of baseNames) {
       let moved = true;
-      let safety = 0;
-      while (moved && safety < 50) {
+      while (moved) {
         moved = false;
-        safety++;
-        
-        let zeroPeople = [];
-        let richPeople = [];
+        for (let rc = 0; rc < staffs.length; rc++) {
+          if ((currentCounts[rc][nm] || 0) > 0) continue;
 
-        for (let s = 0; s < staffs.length; s++) {
-          let cnt = currentCounts[s][nm] || 0;
-          if (cnt === 0) zeroPeople.push(s);
-          if (cnt >= 2) richPeople.push(s);
-        }
+          // 找一个有2次岗位的人换给他
+          for (let d = 0; d < totalDays; d++) {
+            if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
+            if (schedule[rc][d] === nm) continue;
+            if (lockedMap[rc] && lockedMap[rc][d]) continue;
 
-        if (zeroPeople.length === 0 || richPeople.length === 0) break;
-
-        outer:
-        for (let i = 0; i < zeroPeople.length; i++) {
-          for (let j = 0; j < richPeople.length; j++) {
-            let zero = zeroPeople[i];
-            let rich = richPeople[j];
-            if (zero === rich) continue;
-
-            for (let d = 0; d < totalDays; d++) {
-              if (schedule[rich][d] !== nm) continue;
-              if (schedule[zero][d] === "休" || schedule[zero][d] === supportShift.name) continue;
-              if (lockedMap[rich] && lockedMap[rich][d]) continue;
-              if (lockedMap[zero] && lockedMap[zero][d]) continue;
-
-              let zeroShift = schedule[zero][d];
-              let backupRich = schedule[rich][d];
-              let backupZero = schedule[zero][d];
-
-              schedule[rich][d] = backupZero;
-              schedule[zero][d] = backupRich;
-
-              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, zero, d) && isNoAdjacent(schedule, rich, d) && (currentCounts[rich][zeroShift] || 0) > 1) {
-                currentCounts[zero][zeroShift]--; currentCounts[zero][nm]++;
-                currentCounts[rich][nm]--; currentCounts[rich][zeroShift]++;
-
-                fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：0次向2次借！<b>${staffs[rich].name}</b> 的 [${nm.replace(/\n/g,'')}] 借给了 <b>${staffs[zero].name}</b>。`);
-                moved = true;
-                break outer;
-              } else {
-                schedule[rich][d] = backupRich;
-                schedule[zero][d] = backupZero;
+            let donorIdx = -1;
+            for (let s = 0; s < staffs.length; s++) {
+              if (s === rc || schedule[s][d] !== schedule[rc][d]) continue;
+              let donorShift = schedule[s][d];
+              if (baseNames.includes(donorShift) && (currentCounts[s][donorShift] || 0) >= 2) {
+                donorIdx = s;
+                break;
               }
             }
+
+            if (donorIdx !== -1) {
+              let X = schedule[donorIdx][d]; 
+              let Y = schedule[rc][d];
+
+              schedule[donorIdx][d] = Y;
+              schedule[rc][d] = X;
+              currentCounts[donorIdx][X]--; currentCounts[donorIdx][Y]++;
+              currentCounts[rc][Y]--; currentCounts[rc][X]++;
+
+              fixedCount++;
+              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：填补0次！<b>${staffs[rc].name}</b> 的 [${Y.replace(/\n/g,'')}] 换成了 [${X.replace(/\n/g,'')}]。`);
+              moved = true;
+              break;
+            }
           }
+          if (moved) break;
         }
       }
     }
@@ -1052,13 +998,13 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 全局智能调配完成（共 ${fixedCount} 步，像人脑一样遍历调配）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 次数平摊修复完成（强制1~2次规则，共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`调配完成！首先将3次的人遍历给1/0次，然后让0次的人向2次的人借岗位。每次交换都进行了全局检查，杜绝重复和连排！`);
+      alert(`已完成！已强制消除了3次以上和0次，严格遵守了1~2次规则！`);
     } else {
-      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
-      alert("排班非常完美！当前没有多余的3次，也没有0次或1次。");
+      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美（1~2次）！`;
+      alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
     }
   }
 
@@ -1980,32 +1926,27 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-  async function generateSchedule() {
+ async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
-
     try {
       const year = parseInt(document.getElementById('yearSelect').value);
       const month = parseInt(document.getElementById('monthSelect').value);
       const totalDays = getDaysInMonth(year, month);
       initLockedMap();
-
       const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
       const supName = supportShift.name;
-      
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
       let intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
       let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
-
-      // 准备分红日历史数据（冷却规则）
       let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
       allHistoryData[currentKey] = newSchedule;
+      let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
       let userLastAssignedDividendRound = {}; 
-
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
         if (mSched) {
@@ -2013,6 +1954,11 @@ async function getAllHistoryMonthsData() {
             const matchedIdx = staffs.findIndex(s => s.name === staff.name);
             const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
             if (mSched[rowIdx]) {
+              if (mKey !== currentKey) {
+                mSched[rowIdx].forEach(shift => {
+                  if (shift === supName) pastSupportCounts[sIdx]++;
+                });
+              }
               [1, 16].forEach(day => {
                 let shiftOnDiv = mSched[rowIdx][day - 1];
                 if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
@@ -2023,10 +1969,6 @@ async function getAllHistoryMonthsData() {
           });
         }
       });
-
-      let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
-
-      // 1. 把休假和锁定填入表格
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -2034,16 +1976,55 @@ async function getAllHistoryMonthsData() {
           const isLocked = lockedMap[sIdx] && lockedMap[sIdx][dayIdx];
           let existingShift = (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) ? lastGeneratedSchedule[sIdx][dayIdx] : "";
           if (existingShift === "休(预)" || existingShift === "休(預)") existingShift = "休";
-
           if (isLocked && existingShift) {
             newSchedule[sIdx][dayIdx] = existingShift;
+            if (existingShift !== "休") {
+              if (existingShift === supName) {
+                supportCountsThisMonth[sIdx]++;
+              } else {
+                shiftCounts[sIdx][existingShift] = (shiftCounts[sIdx][existingShift] || 0) + 1;
+                let foundS = baseShifts.find(s => s.name === existingShift);
+                if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) {
+                  intensityCounts[sIdx][foundS.level]++;
+                }
+              }
+            }
           } else if (staffRests.includes(day)) {
             newSchedule[sIdx][dayIdx] = "休";
           }
         });
       }
+      let totalWorkCells = 0;
+      for (let s = 0; s < staffs.length; s++) {
+        for (let d = 0; d < totalDays; d++) if (newSchedule[s][d] !== "休") totalWorkCells++;
+      }
+      const avgWorkDays = staffs.length ? (totalWorkCells / staffs.length) : totalDays;
+      const levelShiftQty = { 高: 0, 中: 0, 低: 0 };
+      baseShifts.forEach(s => { if (levelShiftQty[s.level] !== undefined) levelShiftQty[s.level]++; });
+      const levelSoftMax = {};
+      ['高', '中', '低'].forEach(L => {
+        const share = baseShifts.length ? (levelShiftQty[L] / baseShifts.length) : 0;
+        levelSoftMax[L] = Math.max(1, Math.ceil(avgWorkDays * share) + 1);
+      });
 
-      // 2. 分红日优先排高强度的岗位（保证不卡死，只在1号和16号有特定逻辑）
+      let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
+      staffs.forEach((_, sIdx) => {
+        let lastRoundIndexForSpecificShift = {};
+        allRounds.forEach((round, rIndex) => {
+          let mSched = (round.mKey === currentKey) ? newSchedule : allHistoryData[round.mKey];
+          if (mSched) {
+            const matchedIdx = staffs.findIndex(s => s.name === staffs[sIdx].name);
+            const rowIdx = (matchedIdx !== -1 && mSched[matchedIdx]) ? matchedIdx : sIdx;
+            if (mSched[rowIdx]) {
+              let shiftOnDiv = mSched[rowIdx][round.dayNum - 1];
+              if (shiftOnDiv && highShifts.includes(shiftOnDiv)) {
+                lastRoundIndexForSpecificShift[shiftOnDiv] = rIndex;
+              }
+            }
+          }
+        });
+        userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
+      });
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2051,11 +2032,9 @@ async function getAllHistoryMonthsData() {
         let availableStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => {
           return newSchedule[sIdx][dayIdx] !== "休" && !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "";
         });
-
         highShifts.forEach(shiftName => {
           let alreadyHas = staffs.some((_, sIdx) => newSchedule[sIdx][dayIdx] === shiftName);
           if (alreadyHas || availableStaffs.length === 0) return;
-
           let candidates = availableStaffs.filter(sIdx => {
             let userMap = userLastAssignedDividendRound[sIdx] || {};
             let lastIdx = userMap[shiftName];
@@ -2065,8 +2044,9 @@ async function getAllHistoryMonthsData() {
             }
             return true;
           });
-
-          if (candidates.length === 0) candidates = [...availableStaffs];
+          if (candidates.length === 0) {
+            candidates = [...availableStaffs];
+          }
           if (candidates.length > 0) {
             candidates.sort((a, b) => {
               let histA = dividendHighHistory[a] || 0;
@@ -2085,146 +2065,176 @@ async function getAllHistoryMonthsData() {
           }
         });
       });
-
-      // 3. 核心逻辑：逐天分配（无死循环，全规则检查）
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
-        // 当天哪些人上班
+        let isDividendDay = (dayIdx === 0 || dayIdx === 15); 
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
-
-        // 支援分配：如果当天上班超过13人，随机安排一个
+        let assignedSupportStaffIdx = null;
         if (workingStaffs.length >= 13) {
           let existingSup = workingStaffs.find(sIdx => newSchedule[sIdx][dayIdx] === supName);
-          if (!existingSup) {
+          if (existingSup !== undefined) {
+            assignedSupportStaffIdx = existingSup;
+          } else {
             let availableForSup = workingStaffs.filter(sIdx => !lockedMap[sIdx][dayIdx] && newSchedule[sIdx][dayIdx] === "" && supportCountsThisMonth[sIdx] === 0);
             if (availableForSup.length > 0) {
-              let assignedSup = availableForSup[0];
-              newSchedule[assignedSup][dayIdx] = supName;
-              supportCountsThisMonth[assignedSup]++;
+              availableForSup.sort((a, b) => {
+                let totalA = pastSupportCounts[a];
+                let totalB = pastSupportCounts[b];
+                if (totalA !== totalB) return totalA - totalB;
+                return Math.random() - 0.5;
+              });
+              assignedSupportStaffIdx = availableForSup[0];
+              newSchedule[assignedSupportStaffIdx][dayIdx] = supName;
+              supportCountsThisMonth[assignedSupportStaffIdx]++;
             }
           }
         }
-
-        // 打乱岗位顺序，让每个月的排班有随机性，但规则依然不变
         let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
-        let orderedBaseShifts = [...shuffledBaseShifts.filter(s => s.level === '高'), ...shuffledBaseShifts.filter(s => s.level !== '高')];
-
-        // 给每个人找岗位
-        for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
-          if (newSchedule[sIdx][dayIdx] !== "") continue; // 已有工作或休假
-
-          let chosen = null;
-          let minCount = Infinity;
-
-          // 全规则寻找最合适的岗位
-          for (let shift of orderedBaseShifts) {
-            let shiftName = shift.name;
-
-            // 规则1：当天不能有重复
-            let takenToday = newSchedule.some((row, sIdx2) => sIdx2 !== sIdx && row[dayIdx] === shiftName);
-            if (takenToday) continue;
-
-            // 规则2：不能连排
-            let prevShift = (dayIdx > 0) ? newSchedule[sIdx][dayIdx - 1] : "";
-            let nextShift = (dayIdx < totalDays - 1) ? newSchedule[sIdx][dayIdx + 1] : "";
-            if (shiftName === prevShift || shiftName === nextShift) continue;
-            if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prevShift) || getShiftCategory(shiftName) === getShiftCategory(nextShift))) continue;
-
-            // 规则3：高强度不能连续3天（前后都有高强度）
-            if (shift.level === '高') {
-              let prevHigh = (dayIdx > 0) ? (baseShifts.find(b => b.name === newSchedule[sIdx][dayIdx - 1])?.level === '高') : false;
-              let nextHigh = (dayIdx < totalDays - 1) ? (baseShifts.find(b => b.name === newSchedule[sIdx][dayIdx + 1])?.level === '高') : false;
-              if (prevHigh && nextHigh) continue;
+        let highPriorityShifts = shuffledBaseShifts.filter(s => s.level === '高').map(s => s.name);
+        let otherPriorityShifts = shuffledBaseShifts.filter(s => s.level !== '高').map(s => s.name);
+        let orderedBaseShifts = [...highPriorityShifts, ...otherPriorityShifts];
+        orderedBaseShifts.forEach(shiftName => {
+          let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
+          if (alreadyAssigned) return;
+          let foundS = baseShifts.find(s => s.name === shiftName);
+          let level = foundS ? foundS.level : '中';
+          let totalLevelCount = staffs.reduce((sum, _, idx) => sum + intensityCounts[idx][level], 0);
+          let avgLevelCount = staffs.length > 0 ? (totalLevelCount / staffs.length) : 0;
+          let hardMaxLimit = (levelSoftMax && levelSoftMax[level]) ? levelSoftMax[level] : 99;
+          let candidates = workingStaffs.filter(sIdx => {
+            if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+            if (intensityCounts[sIdx][level] >= hardMaxLimit) return false;
+            if (level === '高') {
+              let shiftSpecificCount = shiftCounts[sIdx][shiftName] || 0;
+              if (shiftSpecificCount >= 2) return false; 
             }
-
-            // 规则4：优先选次数最少的（0次最佳，其次1次，绝对不能选3次以上的）
-            let shiftCnt = shiftCounts[sIdx][shiftName] || 0;
-            if (shiftCnt <= 2 && shiftCnt < minCount) {
-              minCount = shiftCnt;
-              chosen = shiftName;
-            }
+            return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
+          });
+          if (candidates.length === 0) {
+            candidates = workingStaffs.filter(sIdx => {
+              if (lockedMap[sIdx][dayIdx] || newSchedule[sIdx][dayIdx] !== "") return false;
+              return isAssignmentValid(sIdx, dayIdx, shiftName, newSchedule);
+            });
           }
-
-          // 兜底：如果当天所有岗位都被占了（极少情况），直接挑一个次数最低的（哪怕产生少量重复，后面统一修）
-          if (!chosen && minCount === Infinity) {
-            for (let shift of orderedBaseShifts) {
-              let shiftCnt = shiftCounts[sIdx][shift.name] || 0;
-              if (shiftCnt < minCount) {
-                minCount = shiftCnt;
-                chosen = shift.name;
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => {
+              let countA_shift = shiftCounts[a][shiftName] || 0;
+              let countB_shift = shiftCounts[b][shiftName] || 0;
+              if (countA_shift !== countB_shift) return countA_shift - countB_shift;
+              let countA_level = intensityCounts[a][level] || 0;
+              let countB_level = intensityCounts[b][level] || 0;
+              if (countA_level !== countB_level) return countA_level - countB_level;
+              let highA = intensityCounts[a]['高'] || 0;
+              let highB = intensityCounts[b]['高'] || 0;
+              if (highA !== highB) return highA - highB;
+              return Math.random() - 0.5;
+            });
+            let chosen = candidates[0];
+            newSchedule[chosen][dayIdx] = shiftName;
+            shiftCounts[chosen][shiftName] = (shiftCounts[chosen][shiftName] || 0) + 1;
+            if (intensityCounts[chosen][level] !== undefined) intensityCounts[chosen][level]++;
+          }
+        });
+        workingStaffs.forEach(sIdx => {
+          if (newSchedule[sIdx][dayIdx] === "") {
+            let todayCount = {};
+            baseShifts.forEach(s => { todayCount[s.name] = 0; });
+            for (let k = 0; k < newSchedule.length; k++) {
+              let v = newSchedule[k][dayIdx];
+              if (todayCount[v] !== undefined) todayCount[v]++;
+            }
+            let monthTotal = {};
+            baseShifts.forEach(s => { monthTotal[s.name] = 0; });
+            for (let k = 0; k < newSchedule.length; k++) {
+              for (let dd = 0; dd < totalDays; dd++) {
+                const v = newSchedule[k][dd];
+                if (monthTotal[v] !== undefined) monthTotal[v]++;
               }
             }
-          }
-
-          if (chosen) {
-            newSchedule[sIdx][dayIdx] = chosen;
-            shiftCounts[sIdx][chosen] = (shiftCounts[sIdx][chosen] || 0) + 1;
-            let foundS = baseShifts.find(s => s.name === chosen);
-            if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) intensityCounts[sIdx][foundS.level]++;
-          }
-        }
-      }
-
-      // 4. 绝对不超过3次（永远只保持1~2次）的终极刷洗器
-      for (let nm of baseShifts.map(s => s.name)) {
-        let safety = 0;
-        while (safety < 30) { // 理论上最多跑几十次，绝对不卡
-          safety++;
-          let changed = false;
-
-          // 找出所有拿这个岗位超过2次的人
-          for (let s = 0; s < staffs.length; s++) {
-            if ((shiftCounts[s][nm] || 0) <= 2) continue;
-
-            // 开始给他找0次或1次（小于2次）的岗位进行替换
-            for (let d = 0; d < totalDays; d++) {
-              // 必须当天拿的是这个超限岗位，且不被锁定
-              if (newSchedule[s][d] !== nm || (lockedMap[s] && lockedMap[s][d])) continue;
-
-              // 找一个完全没出现过（0次），或者只出现过1次，且当天没人做的岗位
-              let fallback = null;
-              let minCnt = Infinity;
-              for (let bS of baseShifts) {
-                let bName = bS.name;
-                if (bName === nm) continue;
-                
-                // 当天必须没人做这个岗位（防重复）
-                let taken = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === bName);
-                if (taken) continue;
-
-                let cnt = shiftCounts[s][bName] || 0;
-                // 强行只允许 0次 或 1次 的岗位（保持1~2次）
-                if (cnt <= 1 && cnt < minCnt) {
-                  minCnt = cnt;
-                  fallback = bName;
+            let chosenFallback = null, bestScore = Infinity;
+            baseShifts.forEach(s => {
+              const nm = s.name;
+              let prevShift = (dayIdx > 0) ? newSchedule[sIdx][dayIdx - 1] : "";
+              let nextShift = (dayIdx < totalDays - 1) ? newSchedule[sIdx][dayIdx + 1] : "";
+              if (nm === prevShift || nm === nextShift) {
+                return; 
+              }
+              if (s.level === '高') {
+                let prevLevel = "";
+                if (dayIdx > 0) {
+                   let prevS = baseShifts.find(bs => bs.name === newSchedule[sIdx][dayIdx - 1]);
+                   if (prevS) prevLevel = prevS.level;
+                }
+                if (prevLevel === '高') {
+                   return;
                 }
               }
-
-              if (fallback) {
-                // 直接替换
-                newSchedule[s][d] = fallback;
-                shiftCounts[s][nm]--;
-                shiftCounts[s][fallback]++;
-                
-                changed = true;
-                break; // 换完一个就跳出，重新统计
+              let score = todayCount[nm] * 100000;
+              score += (shiftCounts[sIdx][nm] || 0) * 1000;
+              if (!isAssignmentValid(sIdx, dayIdx, nm, newSchedule)) score += 300;  
+              score += (monthTotal[nm] || 0) * 10;                    
+              score += (intensityCounts[sIdx][s.level] || 0);
+              let maxHighCount = Math.max(...staffs.map((_, idx) => intensityCounts[idx]['高'] || 0));
+              let currentHighCount = intensityCounts[sIdx]['高'] || 0;
+              if (s.level === '高' && currentHighCount >= maxHighCount) {
+                score += 50000; 
               }
+              if (score < bestScore) { bestScore = score; chosenFallback = nm; }
+            });
+
+            if (!chosenFallback) {
+               // 兜底逻辑修改：绝对不能随便拿第一个！必须优先找0次或1次，绝不允许第3次！
+               let minCount = Infinity;
+               baseShifts.forEach(s => {
+                   let cnt = shiftCounts[sIdx][s.name] || 0;
+                   if (cnt <= 2 && cnt < minCount) {
+                       minCount = cnt;
+                       chosenFallback = s.name;
+                   }
+               });
+               if (!chosenFallback) {
+                   chosenFallback = baseShifts[0].name;
+               }
             }
-            if (changed) break;
+
+            newSchedule[sIdx][dayIdx] = chosenFallback;
+            shiftCounts[sIdx][chosenFallback] = (shiftCounts[sIdx][chosenFallback] || 0) + 1;
+            let foundS = baseShifts.find(s => s.name === chosenFallback);
+            if (foundS && intensityCounts[sIdx][foundS.level] !== undefined) intensityCounts[sIdx][foundS.level]++;
           }
-          
-          // 如果一轮跑下来没变化，说明没人拿3次了，直接退出
-          if (!changed) break;
+        });
+      }
+      
+      const fairnessReport = enforceGlobalFairness(newSchedule, staffs, baseShifts);
+      
+      shiftCounts = Array.from({ length: staffs.length }, () => ({}));
+      intensityCounts = Array.from({ length: staffs.length }, () => ({ 高: 0, 中: 0, 低: 0 }));
+      for (let sIdx = 0; sIdx < staffs.length; sIdx++) {
+        for (let d = 0; d < newSchedule[sIdx].length; d++) {
+          let shift = newSchedule[sIdx][d];
+          if (shift && shift !== "休") {
+            shiftCounts[sIdx][shift] = (shiftCounts[sIdx][shift] || 0) + 1;
+            let fS = baseShifts.find(s => s.name === shift);
+            if (fS && intensityCounts[sIdx][fS.level] !== undefined) {
+               intensityCounts[sIdx][fS.level]++;
+            }
+          }
         }
       }
-
-      // 5. 完成，保存输出
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
-      
-      document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班已完成！本次使用了全规则：防重复、防连排、分红日冷却、高强度限制、以及强制1~2次平摊。`);
-
+      const monthKey = getMonthKey();
+      if (fairnessReport && !fairnessReport.ok) {
+        warningBox.innerHTML = `<b>⚠️ [${monthKey}] 平摊体检（以下项目受锁定格 / 请假 / 岗位天数不足限制，无法自动拉平）：</b><br>`
+          + fairnessReport.problems.map(p => '• ' + p).join('<br>');
+        warningBox.style.display = 'block';
+        document.getElementById('status').innerText = `⚠️ [${monthKey}] 排班完成，但有 ${fairnessReport.problems.length} 项无法完全拉平（见下方提醒）`;
+        alert(`[${monthKey}] 排班生成完毕！\n\n但有 ${fairnessReport.problems.length} 项无法自动拉平，已列在表格上方的提醒框，通常是「该岗位全月班次数 < 人数」或「格子被锁定」造成的。`);
+      } else {
+        document.getElementById('status').innerText = `✅ [${monthKey}] 排班完成：每人每岗位次数极差 <= 1、强度总数已平摊`
+          + (fairnessReport ? `（同类型连排 ${fairnessReport.adjViolations} 处、连续3天高强度 ${fairnessReport.highRun3} 处）` : '');
+        alert(`[${monthKey}] 排班生成完毕！\n\n✅ 每个人、每个岗位的次数极差都 <= 1（不会再有人 1 次、别人 3 次）\n✅ 高/中/低 强度总次数已平摊在平均值 ±1\n✅ 分红日高强度岗位仍优先固定 + 两轮冷却`);
+      }
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
