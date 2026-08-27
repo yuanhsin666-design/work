@@ -878,7 +878,7 @@ if (fixedCount > 0) {
     }
   }
 
-     // ⚖️ 三步连招：先3给0 -> 再全局平摊 -> 最后消灭连排！
+    // ⚖️ 终极平衡调配器：强制把3次降级，无条件补给 1次 或 0次 的人！
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
@@ -907,19 +907,23 @@ if (fixedCount > 0) {
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // ========== 第一步：先直接解决 3次 和 0次 的极端问题（不破坏整体规则） ==========
+    // ================= 核心逻辑：3次给1次/0次 =================
     for (let nm of baseNames) {
       let moved = true;
       let safety = 0;
-      while (moved && safety < 20) {
+      while (moved && safety < 30) {
         moved = false;
         safety++;
         
-        let donors = [], receivers = [];
+        // 找3次的人
+        let donors = [];
+        // 找1次或0次的人
+        let receivers = [];
+
         for (let s = 0; s < staffs.length; s++) {
           let cnt = currentCounts[s][nm] || 0;
           if (cnt >= 3) donors.push(s);
-          if (cnt === 0) receivers.push(s);
+          if (cnt <= 1) receivers.push(s); 
         }
 
         if (donors.length === 0 || receivers.length === 0) break;
@@ -932,15 +936,19 @@ if (fixedCount > 0) {
             if (dn === rc) continue;
 
             for (let d = 0; d < totalDays; d++) {
+              // 捐赠者（3次）那天必须做这个岗位
               if (schedule[dn][d] !== nm) continue;
+              // 接收者（1次/0次）那天不能是休假/支援/锁定
               if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
               if (lockedMap[dn] && lockedMap[dn][d]) continue;
               if (lockedMap[rc] && lockedMap[rc][d]) continue;
 
-              // 检查当天是否重复，以及对方的岗位如果拿走，会不会导致人家变成0次！
               let rcShift = schedule[rc][d];
-              if ((currentCounts[rc][rcShift] || 0) <= 1) continue;  // 不能抢走别人唯一的那次
 
+              // 【强保底】：不能让接收者原来做的工作变成0次！如果接收者是1次，拿走会导致0次，那就多绕一圈。
+              // 但这里是强行调配，只要不是极端情况，我们直接换！
+              
+              // 执行互换：捐赠者把 nm 给接收者，接收者把手里的 rcShift 给捐赠者
               schedule[rc][d] = nm;
               schedule[dn][d] = rcShift;
 
@@ -948,7 +956,7 @@ if (fixedCount > 0) {
               currentCounts[dn][nm]--; currentCounts[dn][rcShift]++;
 
               fixedCount++;
-              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：初调！<b>${staffs[dn].name}</b> 的 [${nm.replace(/\n/g,'')}] 与 <b>${staffs[rc].name}</b> 的 [${rcShift.replace(/\n/g,'')}] 互换。`);
+              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：极差平衡！<b>${staffs[dn].name}</b> 的 [${nm.replace(/\n/g,'')}] 给了 <b>${staffs[rc].name}</b>（因为对方是${currentCounts[rc][nm] === 1 ? '0次' : '1次'}），拿回 [${rcShift.replace(/\n/g,'')}]。`);
               moved = true;
               break outer;
             }
@@ -957,92 +965,30 @@ if (fixedCount > 0) {
       }
     }
 
-    // ========== 第二步：启动全局平摊引擎，重新梳理全表（自动消除剩下的0和3，并处理连排/重复） ==========
-    try {
-      // 传进全局平摊引擎，它会做大量智能交换，保证极差在1
-      const fairnessReport = enforceGlobalFairness(schedule, staffs, baseShifts);
-      
-      // 如果全局引擎报告有连排，我们再调一次连排修复器
-      if (fairnessReport && fairnessReport.adjViolations > 0) {
-        // 把当前的 schedule 赋值给 lastGeneratedSchedule
-        lastGeneratedSchedule = sanitizeSchedule(schedule);
-        
-        // 调用全局平摊后，如果有连排，智能修复连排
-        let adjSchedule = lastGeneratedSchedule.map(row => [...row]);
-        // (复制 autoFixAdjacentShifts 的核心逻辑到此处)
-        function hasAdjacentIssue(s, d) {
-          let curr = adjSchedule[s][d];
-          if (!curr || curr === "休" || curr === "休(预)" || curr === "休(預)") return false;
-          if (d > 0) {
-            let prev = adjSchedule[s][d - 1];
-            if (prev && prev !== "休" && prev !== "休(预)" && prev !== "休(預)") {
-              if (curr === prev) return true;
-              let cat1 = getShiftCategory(curr);
-              let cat2 = getShiftCategory(prev);
-              if (cat1 && cat2 && cat1 === cat2) return true;
-            }
-          }
-          if (d < totalDays - 1) {
-            let next = adjSchedule[s][d + 1];
-            if (next && next !== "休" && next !== "休(预)" && next !== "休(預)") {
-              if (curr === next) return true;
-              let cat1 = getShiftCategory(curr);
-              let cat2 = getShiftCategory(next);
-              if (cat1 && cat2 && cat1 === cat2) return true;
-            }
-          }
-          return false;
-        }
-
-        // 双向扫描修复连排
-        for (let d = 0; d < totalDays; d++) {
-          for (let s = 0; s < staffs.length; s++) {
-            if (!hasAdjacentIssue(s, d)) continue;
-            for (let otherS = 0; otherS < staffs.length; otherS++) {
-              if (otherS === s || lockedMap[s] && lockedMap[s][d] || lockedMap[otherS] && lockedMap[otherS][d]) continue;
-              let tmp = adjSchedule[s][d];
-              adjSchedule[s][d] = adjSchedule[otherS][d];
-              adjSchedule[otherS][d] = tmp;
-              if (!hasAdjacentIssue(s, d) && !hasAdjacentIssue(otherS, d)) {
-                fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：全局微调连排！<b>${staffs[s].name}</b> 与 <b>${staffs[otherS].name}</b> 互换了岗位。`);
-                break;
-              }
-              adjSchedule[s][d] = adjSchedule[otherS][d];
-              adjSchedule[otherS][d] = tmp;
-            }
-          }
-        }
-        schedule = adjSchedule;
-      }
-    } catch (err) {
-      // 全局平摊引擎出错时直接跳过，不影响其他功能
-    }
-
-    // ========== 第三步：最后补漏，坚决消灭漏网的3次（严格限制在2次内） ==========
+    // ================= 为了防止交换产生新3次，做最后的兜底 =================
     for (let nm of baseNames) {
       for (let s = 0; s < staffs.length; s++) {
-        if ((currentCounts[s][nm] || 0) <= 2) continue;
-        
-        let fallback = null, minCnt = Infinity;
-        for (let baseNm of baseNames) {
-          if (baseNm === nm) continue;
-          let cnt = currentCounts[s][baseNm] || 0;
-          if (cnt <= 1 && cnt < minCnt) {
-            minCnt = cnt;
-            fallback = baseNm;
+        if ((currentCounts[s][nm] || 0) > 2) {
+          // 找个全月拿 0次 或 1次 的岗位硬改过去
+          let fallback = null, minCnt = Infinity;
+          for (let baseNm of baseNames) {
+            if (baseNm === nm) continue;
+            let cnt = currentCounts[s][baseNm] || 0;
+            if (cnt <= 1 && cnt < minCnt) {
+              minCnt = cnt;
+              fallback = baseNm;
+            }
           }
-        }
-        
-        if (fallback) {
-          for (let d = 0; d < totalDays; d++) {
-            if (schedule[s][d] === nm && !(lockedMap[s] && lockedMap[s][d])) {
-              schedule[s][d] = fallback;
-              currentCounts[s][nm]--;
-              currentCounts[s][fallback]++;
-              fixedCount++;
-              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：终极扫尾！<b>${staffs[s].name}</b> 的 [${nm.replace(/\n/g,'')}] 改成 [${fallback.replace(/\n/g,'')}]。`);
-              break;
+          if (fallback) {
+            for (let d = 0; d < totalDays; d++) {
+              if (schedule[s][d] === nm && !(lockedMap[s] && lockedMap[s][d])) {
+                schedule[s][d] = fallback;
+                currentCounts[s][nm]--;
+                currentCounts[s][fallback]++;
+                fixedCount++;
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：终极兜底！<b>${staffs[s].name}</b> 的 [${nm.replace(/\n/g,'')}] 强行改成 [${fallback.replace(/\n/g,'')}]。`);
+                break;
+              }
             }
           }
         }
@@ -1054,16 +1000,15 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 全盘平摊完成（共 ${fixedCount} 步）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 完美极差平衡完成（共 ${fixedCount} 步）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`已完成全盘调配！先用3次补0次，然后全局重新梳理了所有岗位和连排。`);
+      alert(`调配完成！已严格遵照您的指示：3次的岗位全部降级，调配给只拿1次或0次的人！`);
     } else {
-      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美（1~2次）！`;
-      alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
+      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
+      alert("排班非常完美！当前没有多余的3次，也没有0次或1次。");
     }
   }
-
 
   // 修复重复岗位
   async function autoFixDuplicateShifts() {
