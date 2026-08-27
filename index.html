@@ -111,17 +111,19 @@
     </div>
   </div>
 
- <div class="toolbar">
+  <div class="toolbar">
     <button onclick="generateSchedule()">🎲 执行智能排班</button>
     <button class="warning-btn" onclick="validateDuplicateShifts()">🔍 校验排班重复岗位</button>
-   <button class="success" onclick="autoFixDuplicateShifts()">🔧 修复重复岗位并保持平摊</button>
+    <button class="success" onclick="autoFixDuplicateShifts()">🔧 修复重复岗位并保持平摊</button>
     <button class="warning-btn" onclick="validateAdjacentShifts()">⚠️ 校验连排岗位</button>
-   <button class="success" onclick="autoFixAdjacentShifts()">🛠️ 修复连排并保持平摊</button>
+    <button class="success" onclick="autoFixAdjacentShifts()">🛠️ 修复连排并保持平摊</button>
     <button class="warning-btn" onclick="validateZeroCounts()">🚨 校验岗位0次</button>
     <button class="success" onclick="autoFixCounts()">⚖️ 修复次数平摊</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
+  <div id="warningLog" class="log-box"></div>
+</div>
 
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -838,6 +840,7 @@ if (fixedCount > 0) {
       alert("排班非常完美！当前没有任何岗位连排的情况。");
     }
   }
+
   // 🚨 校验岗位0次
   function validateZeroCounts() {
     const year = parseInt(document.getElementById('yearSelect').value);
@@ -846,7 +849,6 @@ if (fixedCount > 0) {
     const warningBox = document.getElementById('warningLog');
     let zeroLogs = [];
 
-    // 统计每个人每个基础岗位的次数（不包含支援）
     staffs.forEach((staff, sIdx) => {
       let counts = {};
       baseShifts.forEach(s => counts[s.name] = 0);
@@ -876,12 +878,11 @@ if (fixedCount > 0) {
     }
   }
 
-  // ⚖️ 修复次数平摊（只做温和互换，绝不破坏连排、绝不占用休/支援、绝不制造0次和重复）
+  // ⚖️ 修复次数平摊
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
     }
-
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -890,7 +891,6 @@ if (fixedCount > 0) {
     let fixedCount = 0;
     let fixLogs = [];
 
-    // 实时统计次数（不包含支援和休）
     function getCounts() {
       let counts = Array.from({ length: staffs.length }, () => ({}));
       for (let s = 0; s < staffs.length; s++) {
@@ -907,7 +907,6 @@ if (fixedCount > 0) {
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 1. 消除 3 次（找只拿1次的人互换，绝对不会变成0）
     for (let nm of baseNames) {
       let moved = true;
       while (moved) {
@@ -933,7 +932,6 @@ if (fixedCount > 0) {
               if (lockedMap[rc] && lockedMap[rc][d]) continue;
               if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
 
-              // 检查连排
               let X = schedule[dn][d], Y = schedule[rc][d];
               let dnPrev = (d > 0) ? schedule[dn][d - 1] : "";
               let dnNext = (d < totalDays - 1) ? schedule[dn][d + 1] : "";
@@ -956,7 +954,6 @@ if (fixedCount > 0) {
       }
     }
 
-    // 2. 填补 0 次（绝对不能把别人变成0次，绝对不破坏连排）
     for (let nm of baseNames) {
       let moved = true;
       while (moved) {
@@ -981,12 +978,10 @@ if (fixedCount > 0) {
               if (lockedMap[dn] && lockedMap[dn][d]) continue;
               if (lockedMap[rc] && lockedMap[rc][d]) continue;
               
-              // 对方当天必须做别的岗位，且他做那个岗位不能只有1次（防止互换后变成0次）
               let Y = schedule[rc][d];
               if (Y === "休" || Y === supportShift.name) continue;
               if ((currentCounts[rc][Y] || 0) <= 1) continue;
 
-              // 检查连排
               let X = schedule[dn][d];
               let dnPrev = (d > 0) ? schedule[dn][d - 1] : "";
               let dnNext = (d < totalDays - 1) ? schedule[dn][d + 1] : "";
@@ -1013,23 +1008,22 @@ if (fixedCount > 0) {
       lastGeneratedSchedule = sanitizeSchedule(schedule);
       renderAll();
       saveDataToLocal();
-
       const warningBox = document.getElementById('warningLog');
       warningBox.innerHTML = `<b>✅ 次数平摊修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
       alert(`已完成！已成功消除了极端 3 次，并尽力填补了 0 次。`);
-
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布已经很均匀！`;
       alert("排班非常完美！当前次数分布很均匀，没有多余的3次，也没有可以填补的0次。");
     }
   }
-     async function autoFixDuplicateShifts() {
+
+  // 修复重复岗位
+  async function autoFixDuplicateShifts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
     }
-
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -1038,7 +1032,6 @@ if (fixedCount > 0) {
     let fixedCount = 0;
     let fixLogs = [];
 
-    // 统计每个人全月每个基础岗位的当前次数（不包含支援和休）
     function getCurrentCounts() {
       let counts = Array.from({ length: staffs.length }, () => ({}));
       for (let s = 0; s < staffs.length; s++) {
@@ -1054,11 +1047,9 @@ if (fixedCount > 0) {
 
     let currentCounts = getCurrentCounts();
 
-    // ================= 第一部分：修复重复岗位（直接填空，绝不打扰别人） =================
     for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
       let shiftOccurrences = {};
 
-      // 收集当天基础岗位（不统计支援和休）
       staffs.forEach((_, sIdx) => {
         let shiftVal = schedule[sIdx][dayIdx];
         if (shiftVal && shiftVal !== "休" && shiftVal !== supportShift.name) {
@@ -1067,12 +1058,10 @@ if (fixedCount > 0) {
         }
       });
 
-      // 找出当天的重复岗位
       Object.keys(shiftOccurrences).forEach(shiftName => {
         let duplicatedStaffs = shiftOccurrences[shiftName];
         if (duplicatedStaffs.length <= 1) return;
 
-        // 找出当天缺失的岗位
         let missingShiftsToday = [];
         baseShifts.forEach(s => {
           if (!shiftOccurrences[s.name]) {
@@ -1082,12 +1071,10 @@ if (fixedCount > 0) {
 
         if (missingShiftsToday.length === 0) return;
 
-        // 处理重复的人：保留第一个，其他的直接改成缺失岗位
         for (let i = 1; i < duplicatedStaffs.length; i++) {
           let sIdx = duplicatedStaffs[i];
           if (lockedMap[sIdx] && lockedMap[sIdx][dayIdx]) continue;
 
-          // 从缺失岗位里，找一个这个人全月次数最少的
           let chosenFallback = null;
           let minCount = Infinity;
 
@@ -1099,11 +1086,9 @@ if (fixedCount > 0) {
             }
           }
 
-          // 如果找到了缺失岗位，直接替换，不用跟任何人互换！
           if (chosenFallback) {
             let oldShift = schedule[sIdx][dayIdx];
             schedule[sIdx][dayIdx] = chosenFallback;
-
             currentCounts[sIdx][oldShift] = (currentCounts[sIdx][oldShift] || 1) - 1;
             currentCounts[sIdx][chosenFallback] = (currentCounts[sIdx][chosenFallback] || 0) + 1;
 
@@ -1114,16 +1099,14 @@ if (fixedCount > 0) {
       });
     }
 
-    // ================= 第二部分：消除 3 次，平摊给只有 1 次的人 =================
     let baseNames = baseShifts.map(s => s.name);
 
     for (let nm of baseNames) {
       let moved = true;
       while (moved) {
         moved = false;
-
-        let donors = [];   // 次数 >= 3 的人
-        let receivers = []; // 次数 = 1 的人（因为 1+1=2，3-1=2，绝对安全）
+        let donors = [];   
+        let receivers = []; 
 
         for (let s = 0; s < staffs.length; s++) {
           let cnt = currentCounts[s][nm] || 0;
@@ -1145,13 +1128,10 @@ if (fixedCount > 0) {
               if (schedule[rc][d] === nm) continue; 
               if (lockedMap[dn] && lockedMap[dn][d]) continue;
               if (lockedMap[rc] && lockedMap[rc][d]) continue;
-              
-              // 接收者当天必须是其他基础岗位（绝不碰休和支援）
               if (schedule[rc][d] === "休" || schedule[rc][d] === supportShift.name) continue;
 
-              // 检查连排（防止换完之后产生连排）
-              let X = schedule[dn][d]; // 3次的岗位
-              let Y = schedule[rc][d]; // 1次的人当天做的其他岗位
+              let X = schedule[dn][d]; 
+              let Y = schedule[rc][d]; 
 
               let dnPrev = (d > 0) ? schedule[dn][d - 1] : "";
               let dnNext = (d < totalDays - 1) ? schedule[dn][d + 1] : "";
@@ -1160,7 +1140,6 @@ if (fixedCount > 0) {
 
               if (Y === dnPrev || Y === dnNext || X === rcPrev || X === rcNext) continue;
 
-              // 执行互换
               schedule[dn][d] = Y;
               schedule[rc][d] = X;
 
@@ -1180,24 +1159,20 @@ if (fixedCount > 0) {
 
     if (fixedCount > 0) {
       lastGeneratedSchedule = sanitizeSchedule(schedule);
-      
       renderAll();
       saveDataToLocal();
-
       const warningBox = document.getElementById('warningLog');
       warningBox.innerHTML = `<b>✅ 修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处重复岗位！`;
-
       alert(`已完成修复！重复岗位已直接补齐空缺，3次岗位也完美平摊给只有1次的人，且绝对没动休假和支援！`);
-
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无重复岗位！`;
       alert("排班非常完美！当前没有任何岗位重复的情况。");
     }
   }
 
-    function validateDuplicateShifts() {
+  function validateDuplicateShifts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
@@ -1212,7 +1187,6 @@ if (fixedCount > 0) {
       let dayIdx = day - 1;
       let shiftOccurrences = {}; 
       
-      // 收集当天已有的岗位
       staffs.forEach((staff, sIdx) => {
         let shiftVal = "";
         if (isManualEditMode) {
@@ -1232,7 +1206,6 @@ if (fixedCount > 0) {
         }
       });
 
-      // 1. 检查重复岗位
       Object.keys(shiftOccurrences).forEach(shiftName => {
         let staffIndices = shiftOccurrences[shiftName];
         if (staffIndices.length > 1) {
@@ -1247,7 +1220,6 @@ if (fixedCount > 0) {
         }
       });
 
-      // 2. 检查缺失岗位（如果有重复，才去寻找缺失的岗位，方便用户直接拿来填坑）
       if (duplicateCount > 0) {
         let missingShiftsToday = [];
         baseShifts.forEach(shift => {
