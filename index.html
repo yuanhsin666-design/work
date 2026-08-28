@@ -2054,7 +2054,7 @@ async function getAllHistoryMonthsData() {
         });
       });
       
-      // 铁血发牌逻辑（铁规则：每人每岗位最多只拿2次！）
+      // 铁血发牌逻辑（铁规则：每人每岗位最多只拿2次！绝不让人因为排不到而被迫休假！）
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
         
@@ -2106,12 +2106,34 @@ async function getAllHistoryMonthsData() {
             }
           }
           
-          // 如果实在找不到（比如这天极度拥挤），宁可让他休假，也不给他第3次！
+          // 【核心修改】：如果因为规则限制没有找到合适的岗位，绝对不能让他休假！
           if (chosen) {
             newSchedule[sIdx][dayIdx] = chosen;
             shiftCounts[sIdx][chosen] = (shiftCounts[sIdx][chosen] || 0) + 1;
           } else {
-            newSchedule[sIdx][dayIdx] = "休";
+            // 放宽规则：只考虑“当天不重复”，硬塞一个当前次数最少的岗位！
+            let fallback = null;
+            let fallbackMin = Infinity;
+            for (let shift of shuffledBaseShifts) {
+              let shiftName = shift.name;
+              let takenToday = newSchedule.some((row, sIdx2) => sIdx2 !== sIdx && row[dayIdx] === shiftName);
+              if (takenToday) continue;
+              let cnt = shiftCounts[sIdx][shiftName] || 0;
+              if (cnt < fallbackMin) {
+                fallbackMin = cnt;
+                fallback = shiftName;
+              }
+            }
+            
+            // 允许他拿3次（保底不产生0次），后期用平摊修复！
+            if (fallback) {
+              newSchedule[sIdx][dayIdx] = fallback;
+              shiftCounts[sIdx][fallback] = (shiftCounts[sIdx][fallback] || 0) + 1;
+            } else {
+              // 如果连3次都被占满了（极度极端），为了防止0次，只能选一个已有的
+              newSchedule[sIdx][dayIdx] = shuffledBaseShifts[0].name;
+              shiftCounts[sIdx][shuffledBaseShifts[0].name] = (shiftCounts[sIdx][shuffledBaseShifts[0].name] || 0) + 1;
+            }
           }
         }
       }
