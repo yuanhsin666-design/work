@@ -889,8 +889,7 @@ if (fixedCount > 0) {
     }
   }
 
-  // ⚖️ 终极大修复器（直接重排，绝不互换，绝不无限循环！）
-  // ⚖️ 全盘连锁重排器（先让位，再全月重新调配，牵一发而动全身！）
+    // ⚖️ 终极全月连锁补漏器（3次给0次，2次给0次，全月重新调配）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
@@ -918,7 +917,7 @@ if (fixedCount > 0) {
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 检查当天是否有重复
+    // 判断某天是否有重复
     function isDaySafe(schedule, d) {
       let seen = {};
       for (let s = 0; s < schedule.length; s++) {
@@ -931,7 +930,7 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // 检查某人某天是否连排
+    // 判断某个人某天是否连排
     function isNoAdjacent(schedule, s, d) {
       let shift = schedule[s][d];
       if (!shift || shift === "休") return true;
@@ -946,21 +945,21 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // ==== 核心连锁重排逻辑 ====
+    // ==== 第一阶段：找3次的人，优先给他0次的人 ====
     for (let nm of baseNames) {
       let safety = 0;
       let moved = true;
-      while (moved && safety < 200) { // 提供足够多的轮次处理连锁反应
+      while (moved && safety < 100) {
         moved = false;
         safety++;
 
-        // 找出所有 3次 的人 和 1次 的人
-        let donors = [];
-        let receivers = [];
+        let donors = [];   // 拿3次的人
+        let receivers = []; // 拿0次的人
+
         for (let s = 0; s < staffs.length; s++) {
           let cnt = currentCounts[s][nm] || 0;
           if (cnt >= 3) donors.push(s);
-          if (cnt === 1) receivers.push(s);
+          if (cnt === 0) receivers.push(s);
         }
 
         if (donors.length === 0 || receivers.length === 0) break;
@@ -972,50 +971,108 @@ if (fixedCount > 0) {
             let under = receivers[j];
             if (over === under) continue;
 
-            // 找到 over 拿 nm 的某一天
             for (let d = 0; d < totalDays; d++) {
               if (schedule[over][d] !== nm) continue;
               if (schedule[under][d] === "休" || schedule[under][d] === supportShift.name) continue;
               if (lockedMap[over] && lockedMap[over][d]) continue;
               if (lockedMap[under] && lockedMap[under][d]) continue;
 
-              // 【连锁步骤 1】：over 直接把 nm 让给 under
-              let underShift = schedule[under][d]; // under 原本手上的牌
+              let underShift = schedule[under][d];
+
+              // 直接把岗位让给0次的人
               schedule[under][d] = nm;
               currentCounts[under][nm]++;
-              currentCounts[over][nm]--; 
+              currentCounts[over][nm]--;
 
-              // 【连锁步骤 2】：under 原本手上的牌（underShift）变成了空牌，现在全月去找一个新主人
+              // 【全月调配】：上一个人空出来的岗位，必须去找个“恰好缺这个岗位”的人顶替！
               let newOwner = -1;
               let minCnt = Infinity;
               for (let s = 0; s < staffs.length; s++) {
                 if (s === under) continue;
                 if (lockedMap[s] && lockedMap[s][d]) continue;
-                if (schedule[s][d] !== "" && schedule[s][d] !== "休") continue; // 只要当天有空位的人
+                if (schedule[s][d] !== "") continue; // 找当天还没排班（有空位）的人
 
-                // 看这个人全月拿 underShift 的次数最少（优先找0次，再找1次）
                 let cnt = currentCounts[s][underShift] || 0;
-                if (cnt < minCnt && cnt < 2) { // 绝对不能超过2次
+                if (cnt < minCnt && cnt <= 1) { // 只给0次或1次的人！
                   minCnt = cnt;
                   newOwner = s;
                 }
               }
 
-              // 【连锁步骤 3】：如果找到了新主人，把这张牌给他
+              // 如果找到了，把这张牌给他
               if (newOwner !== -1) {
                 schedule[newOwner][d] = underShift;
                 currentCounts[newOwner][underShift]++;
                 fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：连锁调配！<b>${staffs[over].name}</b> 的 [${nm.replace(/\n/g,'')}] 给了 <b>${staffs[under].name}</b>；<b>${staffs[under].name}</b> 的 [${underShift.replace(/\n/g,'')}] 由 <b>${staffs[newOwner].name}</b> 接下！`);
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：连锁调配！<b>${staffs[over].name}</b> 的 [${nm.replace(/\n/g,'')}] 给了 <b>${staffs[under].name}</b>，空出的 [${underShift.replace(/\n/g,'')}] 由 <b>${staffs[newOwner].name}</b> 顶替。`);
               } else {
-                // 如果找不到新主人（当天所有人都满2次或全在上班），我们直接让 under 保留这张牌
+                // 实在找不到人顶替，就保留原状（防止无限制空转）
                 currentCounts[under][underShift]++;
                 fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：强势调配！<b>${staffs[over].name}</b> 的 [${nm.replace(/\n/g,'')}] 直接让给 <b>${staffs[under].name}</b>，原本的牌保留。`);
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：调配！<b>${staffs[over].name}</b> 的 [${nm.replace(/\n/g,'')}] 直接给了 <b>${staffs[under].name}</b>。`);
               }
               
               moved = true;
               break outer;
+            }
+          }
+        }
+      }
+    }
+
+    // ==== 第二阶段：找2次的人，给0次的人（0次漏网之鱼扫尾）====
+    for (let nm of baseNames) {
+      let safety = 0;
+      let moved = true;
+      while (moved && safety < 100) {
+        moved = false;
+        safety++;
+
+        let donors = [];   // 拿2次的人
+        let receivers = []; // 拿0次的人
+
+        for (let s = 0; s < staffs.length; s++) {
+          let cnt = currentCounts[s][nm] || 0;
+          if (cnt >= 2) donors.push(s);
+          if (cnt === 0) receivers.push(s);
+        }
+
+        if (donors.length === 0 || receivers.length === 0) break;
+
+        outer:
+        for (let i = 0; i < donors.length; i++) {
+          for (let j = 0; j < receivers.length; j++) {
+            let over = donors[i];
+            let under = receivers[j];
+            if (over === under) continue;
+
+            for (let d = 0; d < totalDays; d++) {
+              if (schedule[over][d] !== nm) continue;
+              if (schedule[under][d] === "休" || schedule[under][d] === supportShift.name) continue;
+              if (lockedMap[over] && lockedMap[over][d]) continue;
+              if (lockedMap[under] && lockedMap[under][d]) continue;
+
+              let underShift = schedule[under][d];
+              let backupOver = schedule[over][d];
+              let backupUnder = schedule[under][d];
+
+              // 尝试交换
+              schedule[over][d] = backupUnder;
+              schedule[under][d] = backupOver;
+
+              // 检查全月规则
+              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, over, d) && isNoAdjacent(schedule, under, d) && (currentCounts[under][underShift] || 0) > 1) {
+                currentCounts[over][nm]--; currentCounts[over][underShift]++;
+                currentCounts[under][underShift]--; currentCounts[under][nm]++;
+
+                fixedCount++;
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：2次补给0次！<b>${staffs[over].name}</b> 的 [${nm.replace(/\n/g,'')}] 与 <b>${staffs[under].name}</b> 的 [${underShift.replace(/\n/g,'')}] 完美互换。`);
+                moved = true;
+                break outer;
+              } else {
+                schedule[over][d] = backupOver;
+                schedule[under][d] = backupUnder;
+              }
             }
           }
         }
@@ -1027,10 +1084,10 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 全盘连锁重排完成（共 ${fixedCount} 步，全月重新调配）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 全月连锁补漏完成（共 ${fixedCount} 步）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`完成！完全按照“牵一发而动全身”的逻辑：3次的人让位给1次，空出来的位置全月找人重新接手，绝对不放过任何一个死角！`);
+      alert(`完成！先处理3次给0次，再将2次补给0次，空出的岗位都在全月连锁调配，绝不留下任何一个0次！`);
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
       alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
