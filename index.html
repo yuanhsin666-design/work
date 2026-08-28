@@ -841,13 +841,14 @@ if (fixedCount > 0) {
     }
   }
 
-  // 🚨 校验岗位0次
+  // 🚨 校验岗位0次 & 3次
   function validateZeroCounts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
     const warningBox = document.getElementById('warningLog');
     let zeroLogs = [];
+    let overLogs = [];
 
     staffs.forEach((staff, sIdx) => {
       let counts = {};
@@ -863,18 +864,28 @@ if (fixedCount > 0) {
         if (counts[s.name] === 0) {
           zeroLogs.push(`👤 <b>${staff.name}</b> 在岗位 [<b>${s.name.replace(/\n/g, ' ')}</b>] 全月 <b>0次</b>！`);
         }
+        if (counts[s.name] >= 3) {
+          overLogs.push(`🔴 <b>${staff.name}</b> 在岗位 [<b>${s.name.replace(/\n/g, ' ')}</b>] 全月 <b>${counts[s.name]}次</b>（超限！）`);
+        }
       });
     });
 
-    if (zeroLogs.length > 0) {
-      warningBox.innerHTML = `<b>🚨 岗位0次校验提醒（共发现 ${zeroLogs.length} 处）：</b><br>` + zeroLogs.join('<br>');
+    if (zeroLogs.length > 0 || overLogs.length > 0) {
+      let message = "";
+      if (zeroLogs.length > 0) {
+        message += `<b>🚨 岗位0次校验提醒（共发现 ${zeroLogs.length} 处）：</b><br>` + zeroLogs.join('<br>') + `<br><br>`;
+      }
+      if (overLogs.length > 0) {
+        message += `<b>🔴 岗位超限校验提醒（共发现 ${overLogs.length} 处）：</b><br>` + overLogs.join('<br>');
+      }
+      warningBox.innerHTML = message;
       warningBox.style.display = 'block';
-      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${zeroLogs.length} 处 0 次岗位！`;
-      alert(`校验完成！发现有 ${zeroLogs.length} 处岗位拿过 0 次，已标出！`);
+      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${zeroLogs.length} 处0次，${overLogs.length} 处超限！`;
+      alert(`校验完成！发现有 ${zeroLogs.length} 处岗位拿过 0 次，${overLogs.length} 处岗位超过 2 次，请点击“修复次数平摊”进行处理！`);
     } else {
       warningBox.style.display = 'none';
-      document.getElementById('status').innerText = `✅ 校验完毕：所有人员所有基础岗位均大于 0 次！`;
-      alert(`校验完成！没有发现任何 0 次岗位。`);
+      document.getElementById('status').innerText = `✅ 校验完毕：所有人员所有基础岗位均为 1~2 次！`;
+      alert(`校验完成！当前排班完美，没有0次，也没有3次！`);
     }
   }
 
