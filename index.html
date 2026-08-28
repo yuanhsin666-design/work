@@ -1934,7 +1934,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
- async function generateSchedule() {
+  async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -2054,7 +2054,7 @@ async function getAllHistoryMonthsData() {
         });
       });
       
-      // 铁血发牌逻辑（铁规则：每人每岗位最多只拿2次！绝不让人因为排不到而被迫休假！）
+      // 铁血发牌逻辑（铁规则：每人每岗位绝对不超2次！每天不许重复、连排！）
       for (let dayIdx = 0; dayIdx < totalDays; dayIdx++) {
         let workingStaffs = staffs.map((_, sIdx) => sIdx).filter(sIdx => newSchedule[sIdx][dayIdx] !== "休");
         
@@ -2137,32 +2137,13 @@ async function getAllHistoryMonthsData() {
           }
         }
       }
-      
-      // 终极兜底：如果还有人0次，在所有有空位且不重复、不连排的地方硬插进去
-      for (let nm of baseShifts.map(s => s.name)) {
-        for (let s = 0; s < staffs.length; s++) {
-          if ((shiftCounts[s][nm] || 0) > 0) continue;
-          for (let d = 0; d < totalDays; d++) {
-            if (newSchedule[s][d] === "休") continue;
-            let taken = newSchedule.some((row, sIdx) => sIdx !== s && row[d] === nm);
-            if (taken) continue;
-            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-            if (nm === prev || nm === next) continue;
-            
-            newSchedule[s][d] = nm;
-            shiftCounts[s][nm]++;
-            break;
-          }
-        }
-      }
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
       
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班已完成！铁血发牌器强制限制每个人每个岗位绝对不超过2次！遇到排不下宁可休假，绝不出3次！`);
+      alert(`排班已完成！铁血发牌器强制限制每个人每个岗位绝对不超过2次，且每天绝对不重复不连排！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
