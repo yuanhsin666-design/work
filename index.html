@@ -878,14 +878,14 @@ if (fixedCount > 0) {
     }
   }
 
-    // ⚖️ 0次补漏器（只负责把0次补齐，严格按排班规则全局调配！）
+   // ⚖️ 人脑配对交换器（只做严格校验的1v1交换，绝无硬塞，全月审视直至平衡）
   async function autoFixCounts() {
-    if (!lastGeneratedSchedule) {
-      return alert("当前没有排班数据，请先执行排班！");
-    }
-    const year = parseInt(document.getElementById('yearSelect').value);
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const totalDays = getDaysInMonth(year, month);
+    if (!lastGeneratedSchedule) return alert("当前没有排班数据，请先执行排班！");
+
+    const totalDays = getDaysInMonth(
+      parseInt(document.getElementById('yearSelect').value),
+      parseInt(document.getElementById('monthSelect').value)
+    );
 
     let schedule = lastGeneratedSchedule.map(row => [...row]);
     let fixedCount = 0;
@@ -903,11 +903,11 @@ if (fixedCount > 0) {
       }
       return counts;
     }
-    
+
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 严格检查某天是否有重复
+    // 严格检查：当天不能有重复
     function isDaySafe(schedule, d) {
       let seen = {};
       for (let s = 0; s < schedule.length; s++) {
@@ -920,7 +920,7 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // 严格检查某个人的某天是否连排
+    // 严格检查：换完后双方不能连排
     function isNoAdjacent(schedule, s, d) {
       let shift = schedule[s][d];
       if (!shift || shift === "休") return true;
@@ -935,66 +935,75 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // ==== 全局遍历：专门挑0次的人，从2次的人手里调配！ ====
-    for (let nm of baseNames) {
-      let safety = 0;
-      let moved = true;
-      while (moved && safety < 100) {
-        moved = false;
-        safety++;
+    // 全月 1v1 严格配对扫描
+    let moved = true;
+    let safety = 0;
+    while (moved && safety < 200) {
+      moved = false;
+      safety++;
 
-        // 收集：拿0次的人
-        let zeroPeople = [];
-        // 收集：拿2次的人
-        let richPeople = [];
-        
+      for (let nm of baseNames) {
+        // 找拿3次的人（捐献者）和拿1次/0次的人（接收者）
+        let donors = [];
+        let receivers = [];
+
         for (let s = 0; s < staffs.length; s++) {
           let cnt = currentCounts[s][nm] || 0;
-          if (cnt === 0) zeroPeople.push(s);
-          if (cnt === 2) richPeople.push(s);
+          if (cnt >= 3) donors.push(s);
+          if (cnt <= 1) receivers.push(s);
         }
 
-        // 如果没有0次或者没有2次的人，说明这个岗位已经平了，进入下一个岗位
-        if (zeroPeople.length === 0 || richPeople.length === 0) break;
+        if (donors.length === 0 || receivers.length === 0) continue;
 
-        // 遍历所有0次的人，从2次的人手里“借”一天
         outer:
-        for (let i = 0; i < zeroPeople.length; i++) {
-          for (let j = 0; j < richPeople.length; j++) {
-            let zero = zeroPeople[i];
-            let rich = richPeople[j];
-            if (zero === rich) continue;
+        for (let i = 0; i < donors.length; i++) {
+          for (let j = 0; j < receivers.length; j++) {
+            let donor = donors[i];
+            let receiver = receivers[j];
+            if (donor === receiver) continue;
 
-            // 在全月寻找可以让这位0次的人拿到岗位的日子
+            // 严格全月找人：不只要找，还要严格匹配规则
             for (let d = 0; d < totalDays; d++) {
-              if (schedule[rich][d] !== nm) continue; // 必须2次的人今天正在做这个岗位
-              if (schedule[zero][d] === "休" || schedule[zero][d] === supportShift.name) continue; // 0次的人今天必须上班
-              if (lockedMap[rich] && lockedMap[rich][d]) continue;
-              if (lockedMap[zero] && lockedMap[zero][d]) continue;
+              // 1. 大抠今天必须是 nm，宏今天必须上班（不是休/支援）
+              if (schedule[donor][d] !== nm) continue;
+              if (schedule[receiver][d] === "休" || schedule[receiver][d] === supportShift.name) continue;
 
-              // 0次的人当天在做别的什么岗位？
-              let zeroShift = schedule[zero][d];
-              if ((currentCounts[zero][zeroShift] || 0) <= 1) continue; // 如果拿走会让自己变0次，绝对不行！
+              // 锁定保护
+              if (lockedMap[donor] && lockedMap[donor][d]) continue;
+              if (lockedMap[receiver] && lockedMap[receiver][d]) continue;
 
-              // 尝试交换，然后全月检查
-              let backupRich = schedule[rich][d];
-              let backupZero = schedule[zero][d];
-              schedule[rich][d] = backupZero;
-              schedule[zero][d] = backupRich;
+              // 2. 宏今天原本做的是什么？
+              let receiverShift = schedule[receiver][d];
 
-              // 严格检查：当天不重复，双方不连排！
-              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, rich, d) && isNoAdjacent(schedule, zero, d)) {
-                currentCounts[rich][nm]--; currentCounts[rich][zeroShift]++;
-                currentCounts[zero][zeroShift]--; currentCounts[zero][nm]++;
+              // 3. 模拟交换：大抠把nm给宏，宏把自己今天的岗位给大抠
+              let oldDonor = schedule[donor][d];
+              let oldReceiver = schedule[receiver][d];
+              schedule[donor][d] = oldReceiver;
+              schedule[receiver][d] = oldDonor;
+
+              // 4. 严格全月审视：
+              //    a. 当天不能出现重复
+              //    b. 换完不能连排
+              //    c. 不能因为交换，导致宏原来的岗位变成0次（这会导致死循环）
+              if (isDaySafe(schedule, d) && 
+                  isNoAdjacent(schedule, donor, d) && 
+                  isNoAdjacent(schedule, receiver, d) && 
+                  (currentCounts[receiver][receiverShift] || 0) > 1) {
+                
+                // 检验通过！正式更新
+                currentCounts[donor][nm]--;
+                currentCounts[donor][receiverShift]++;
+                currentCounts[receiver][receiverShift]--;
+                currentCounts[receiver][nm]++;
 
                 fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：全局调配！<b>${staffs[rich].name}</b> 的 [${nm.replace(/\n/g,'')}] 与 <b>${staffs[zero].name}</b> 的 [${zeroShift.replace(/\n/g,'')}] 进行了全局互换。`);
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：严格配对交换！<b>${staffs[donor].name}</b> 的 [${nm.replace(/\n/g,'')}] 与 <b>${staffs[receiver].name}</b> 的 [${receiverShift.replace(/\n/g,'')}] 完美互换。`);
                 moved = true;
                 break outer;
               } else {
-                // 恢复原状，继续找下一天
-                schedule[rich][d] = backupRich;
-                schedule[zero][d] = backupZero;
+                // 破坏规则，恢复原样，继续找下一天
+                schedule[donor][d] = oldDonor;
+                schedule[receiver][d] = oldReceiver;
               }
             }
           }
@@ -1007,10 +1016,10 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 0次补齐完成（共 ${fixedCount} 步）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 人脑配对完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`完成！专门由2次的人补0次的人，每次交换都经过全局（不重复、不连排、不变0）严格检查！`);
+      alert(`完成！完全按照“看当天是否合适，若合适才交换”的逻辑全月检索，绝不硬塞，绝不打破排班规则！`);
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
       alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
