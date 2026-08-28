@@ -889,7 +889,7 @@ if (fixedCount > 0) {
     }
   }
 
-   // ⚖️ 全盘重新洗牌器（不一对一，直接全月重新洗，绝对符合所有规则）
+  // ⚖️ 3次发配给1次（全月深挖版，每变动一格必定全月检查）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) {
       return alert("当前没有排班数据，请先执行排班！");
@@ -902,7 +902,6 @@ if (fixedCount > 0) {
     let fixedCount = 0;
     let fixLogs = [];
 
-    // 1. 全月计算：当前每个人、每个岗位的次数
     function getCounts() {
       let counts = Array.from({ length: staffs.length }, () => ({}));
       for (let s = 0; s < staffs.length; s++) {
@@ -918,88 +917,88 @@ if (fixedCount > 0) {
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 2. 核心洗牌：针对每一个岗位，全月重新洗一次！
+    function isDaySafe(schedule, d) {
+      let seen = {};
+      for (let s = 0; s < schedule.length; s++) {
+        let shift = schedule[s][d];
+        if (shift && shift !== "休" && shift !== supportShift.name) {
+          if (seen[shift]) return false;
+          seen[shift] = true;
+        }
+      }
+      return true;
+    }
+
+    function isNoAdjacent(schedule, s, d) {
+      let shift = schedule[s][d];
+      if (!shift || shift === "休") return true;
+      if (d > 0) {
+        let prev = schedule[s][d - 1];
+        if (prev && prev !== "休" && (prev === shift || getShiftCategory(prev) === getShiftCategory(shift))) return false;
+      }
+      if (d < totalDays - 1) {
+        let next = schedule[s][d + 1];
+        if (next && next !== "休" && (next === shift || getShiftCategory(next) === getShiftCategory(shift))) return false;
+      }
+      return true;
+    }
+
+    // 核心目标：强制3次发配给1次，全局深挖，绝不放过！
     for (let nm of baseNames) {
       let safety = 0;
       let moved = true;
-      while (moved && safety < 20) {
+      while (moved && safety < 100) { // 提供更多循环次数，保证全月深挖
         moved = false;
         safety++;
 
-        let overPeople = [];   // 次数 >= 3 的人
-        let underPeople = [];  // 次数 <= 1 的人
+        let donors = [];   // >=3次的人
+        let receivers = []; // =1次的人
 
         for (let s = 0; s < staffs.length; s++) {
           let cnt = currentCounts[s][nm] || 0;
-          if (cnt >= 3) overPeople.push(s);
-          if (cnt <= 1) underPeople.push(s);
+          if (cnt >= 3) donors.push(s);
+          if (cnt === 1) receivers.push(s); // 只找正好1次的人，坚决不发配给0次以防再出0次！
         }
 
-        // 如果已经完美，直接跳出
-        if (overPeople.length === 0 || underPeople.length === 0) break;
+        if (donors.length === 0 || receivers.length === 0) break;
 
-        // 3. 找到 超限 的人和 不足 的人，在全月里找一个完美交换点
         outer:
-        for (let i = 0; i < overPeople.length; i++) {
-          for (let j = 0; j < underPeople.length; j++) {
-            let over = overPeople[i];
-            let under = underPeople[j];
+        for (let i = 0; i < donors.length; i++) {
+          for (let j = 0; j < receivers.length; j++) {
+            let over = donors[i];
+            let under = receivers[j];
             if (over === under) continue;
 
-            // 全月遍历每一天
+            // 在全月深挖，直到挖到合适的位置
             for (let d = 0; d < totalDays; d++) {
-              // 只有超限的人这天拿了该岗位，且不足的人这天有空时，才能换
               if (schedule[over][d] !== nm) continue;
               if (schedule[under][d] === "休" || schedule[under][d] === supportShift.name) continue;
               if (lockedMap[over] && lockedMap[over][d]) continue;
               if (lockedMap[under] && lockedMap[under][d]) continue;
 
-              // 不足的人今天的岗位
               let underShift = schedule[under][d];
+              if ((currentCounts[under][underShift] || 0) <= 1) continue; // 不能把对方的岗位也变成0次！
 
-              // 【全月检查】严禁换完导致当天重复、连排、或把对方变成0次
+              // 尝试交换，然后进行全月检查
               let backupOver = schedule[over][d];
               let backupUnder = schedule[under][d];
               schedule[over][d] = backupUnder;
               schedule[under][d] = backupOver;
 
-              let daySafe = true;
-              let daySeen = {};
-              for (let s = 0; s < schedule.length; s++) {
-                let sh = schedule[s][d];
-                if (sh && sh !== "休" && sh !== supportShift.name) {
-                  if (daySeen[sh]) { daySafe = false; break; }
-                  daySeen[sh] = true;
-                }
+              // 检查：当天不重复，双方不连排
+              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, over, d) && isNoAdjacent(schedule, under, d)) {
+                currentCounts[over][nm]--; currentCounts[over][underShift]++;
+                currentCounts[under][underShift]--; currentCounts[under][nm]++;
+
+                fixedCount++;
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：发配！<b>${staffs[over].name}</b> 的 [${nm.replace(/\n/g,'')}] 给了 <b>${staffs[under].name}</b>，拿回 [${underShift.replace(/\n/g,'')}]。`);
+                moved = true;
+                break outer;
               }
 
-              let overAdj = false, underAdj = false;
-              let prevO = (d > 0) ? schedule[over][d - 1] : "";
-              let nextO = (d < totalDays - 1) ? schedule[over][d + 1] : "";
-              if (prevO && prevO !== "休" && (prevO === underShift || getShiftCategory(prevO) === getShiftCategory(underShift))) overAdj = true;
-              if (nextO && nextO !== "休" && (nextO === underShift || getShiftCategory(nextO) === getShiftCategory(underShift))) overAdj = true;
-              
-              let prevU = (d > 0) ? schedule[under][d - 1] : "";
-              let nextU = (d < totalDays - 1) ? schedule[under][d + 1] : "";
-              if (prevU && prevU !== "休" && (prevU === nm || getShiftCategory(prevU) === getShiftCategory(nm))) underAdj = true;
-              if (nextU && nextU !== "休" && (nextU === nm || getShiftCategory(nextU) === getShiftCategory(nm))) underAdj = true;
-
-              if (!daySafe || overAdj || underAdj || (currentCounts[under][underShift] || 0) <= 1) {
-                // 恢复原样，继续找下一天
-                schedule[over][d] = backupOver;
-                schedule[under][d] = backupUnder;
-                continue;
-              }
-
-              // ==== 全月检查通过，正式洗牌 ====
-              currentCounts[over][nm]--; currentCounts[over][underShift]++;
-              currentCounts[under][underShift]--; currentCounts[under][nm]++;
-
-              fixedCount++;
-              fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：全盘洗牌！<b>${staffs[over].name}</b> 的 [${nm.replace(/\n/g,'')}] 与 <b>${staffs[under].name}</b> 的 [${underShift.replace(/\n/g,'')}] 进行了完美全月互换。`);
-
-              moved = true;
-              break outer;
+              // 如果不行，恢复原样继续找下一天
+              schedule[over][d] = backupOver;
+              schedule[under][d] = backupUnder;
             }
           }
         }
@@ -1011,10 +1010,10 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 全盘洗牌完成（共 ${fixedCount} 步，已按全月规则检查）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 全月深挖发配完成（共 ${fixedCount} 步）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`完成！不是一对一硬塞，而是对全月进行了全盘洗牌。每次交换都检查了当天不重复、不连排，严格遵守了排班规则！`);
+      alert(`完成！严格按照“3次发配给1次”规则，且每一步都在全月深挖，绝不破坏重复和连排规则！`);
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
       alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
