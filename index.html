@@ -1489,8 +1489,14 @@ async function getAllHistoryMonthsData() {
       cloneCell.style.padding = "6px";
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
-            // 把原来的换行符(\n)替换成Excel粘贴时能识别的强制换行标签，这样复制到Excel才会是直式
-      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
+          
+            // 直接读取原单元格的 HTML 代码，这样完美的保留了你原本设置好的 <br> 换行
+      let cellText = cloneCell.innerHTML
+                          .replace(/🔒/g, '')
+                          // 把 HTML 的 &nbsp; 转成普通空格，防止 Excel 显示成奇怪字符
+                          .replace(/&nbsp;/g, ' ')
+                          // 把 HTML 的换行 <br> 替换成 Excel 绝对能识别且不会粘连的强制换行
+                          .replace(/<br>/g, '<br style="mso-data-placement:same-cell;">');
       cloneCell.innerHTML = cellText;
     });
     const htmlWrapper = `
