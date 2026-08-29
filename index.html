@@ -1489,8 +1489,9 @@ async function getAllHistoryMonthsData() {
       cloneCell.style.padding = "6px";
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
-      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
-      cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
+            // 把原来的换行符(\n)替换成Excel粘贴时能识别的强制换行标签，这样复制到Excel才会是直式
+      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
+      cloneCell.innerHTML = cellText;
     });
     const htmlWrapper = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
