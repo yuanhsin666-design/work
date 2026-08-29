@@ -839,7 +839,143 @@ if (fixedCount > 0) {
       alert("排班非常完美！当前没有任何岗位连排的情况。");
     }
   }
+  // ⚖️ 0次精准填缝器（无重复、无连排、不乱套，只精准补0）
+  async function autoFixCounts() {
+    if (!lastGeneratedSchedule) return alert("当前没有排班数据，请先执行排班！");
 
+    const totalDays = getDaysInMonth(
+      parseInt(document.getElementById('yearSelect').value),
+      parseInt(document.getElementById('monthSelect').value)
+    );
+
+    let schedule = lastGeneratedSchedule.map(row => [...row]);
+    let fixedCount = 0;
+    let fixLogs = [];
+
+    function getCounts() {
+      let counts = Array.from({ length: staffs.length }, () => ({}));
+      for (let s = 0; s < staffs.length; s++) {
+        for (let d = 0; d < totalDays; d++) {
+          let shift = schedule[s][d];
+          if (shift && shift !== "休" && shift !== supportShift.name) {
+            counts[s][shift] = (counts[s][shift] || 0) + 1;
+          }
+        }
+      }
+      return counts;
+    }
+
+    let currentCounts = getCounts();
+    let baseNames = baseShifts.map(s => s.name);
+
+    function isDaySafe(schedule, d) {
+      let seen = {};
+      for (let s = 0; s < schedule.length; s++) {
+        let shift = schedule[s][d];
+        if (shift && shift !== "休" && shift !== supportShift.name) {
+          if (seen[shift]) return false;
+          seen[shift] = true;
+        }
+      }
+      return true;
+    }
+
+    function isNoAdjacent(schedule, s, d) {
+      let shift = schedule[s][d];
+      if (!shift || shift === "休") return true;
+      if (d > 0) {
+        let prev = schedule[s][d - 1];
+        if (prev && prev !== "休" && (prev === shift || getShiftCategory(prev) === getShiftCategory(shift))) return false;
+      }
+      if (d < totalDays - 1) {
+        let next = schedule[s][d + 1];
+        if (next && next !== "休" && (next === shift || getShiftCategory(next) === getShiftCategory(shift))) return false;
+      }
+      return true;
+    }
+
+    function isLockSafe(s, d) {
+      return !(lockedMap[s] && lockedMap[s][d]);
+    }
+
+    // 全局扫一遍：找所有拿0次的人，尝试用2次的人帮他们补
+    for (let nm of baseNames) {
+      let moved = true;
+      let safety = 0;
+      while (moved && safety < 100) {
+        moved = false;
+        safety++;
+
+        let zeros = [];
+        let rich = [];
+
+        for (let s = 0; s < staffs.length; s++) {
+          let cnt = currentCounts[s][nm] || 0;
+          if (cnt === 0) zeros.push(s);
+          if (cnt >= 2) rich.push(s);
+        }
+
+        if (zeros.length === 0 || rich.length === 0) break;
+
+        outer:
+        for (let i = 0; i < zeros.length; i++) {
+          for (let j = 0; j < rich.length; j++) {
+            let zero = zeros[i];
+            let two = rich[j];
+            if (zero === two) continue;
+
+            // 全月寻找一个能置换的格子
+            for (let d = 0; d < totalDays; d++) {
+              if (schedule[two][d] !== nm) continue;
+              if (schedule[zero][d] === "休" || schedule[zero][d] === supportShift.name) continue;
+              if (!isLockSafe(two, d) || !isLockSafe(zero, d)) continue;
+
+              let zeroOldShift = schedule[zero][d];
+
+              // 保证换完后，对方原来的岗位不会变成0次
+              if ((currentCounts[zero][zeroOldShift] || 0) <= 1) continue;
+
+              // 模拟交换
+              let oldTwo = schedule[two][d];
+              let oldZero = schedule[zero][d];
+              schedule[two][d] = oldZero;
+              schedule[zero][d] = oldTwo;
+
+              // 全月检查
+              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, two, d) && isNoAdjacent(schedule, zero, d)) {
+                currentCounts[two][nm]--;
+                currentCounts[two][zeroOldShift]++;
+                currentCounts[zero][zeroOldShift]--;
+                currentCounts[zero][nm]++;
+
+                fixedCount++;
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：精准补0！<b>${staffs[two].name}</b> 的 [${nm.replace(/\n/g,'')}] 给了 <b>${staffs[zero].name}</b>，拿回 [${zeroOldShift.replace(/\n/g,'')}]。`);
+                moved = true;
+                break outer;
+              } else {
+                schedule[two][d] = oldTwo;
+                schedule[zero][d] = oldZero;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (fixedCount > 0) {
+      lastGeneratedSchedule = sanitizeSchedule(schedule);
+      renderAll();
+      saveDataToLocal();
+      const warningBox = document.getElementById('warningLog');
+      warningBox.innerHTML = `<b>✅ 精准填缝完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
+      warningBox.style.display = 'block';
+      document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
+      alert(`完成！精准补齐了0次岗位，全月不重复、不连排！`);
+    } else {
+      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
+      alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
+    }
+  }
   // 🚨 校验岗位0次
   function validateZeroCounts() {
     const year = parseInt(document.getElementById('yearSelect').value);
