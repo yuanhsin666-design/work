@@ -840,7 +840,44 @@ if (fixedCount > 0) {
       alert("排班非常完美！当前没有任何岗位连排的情况。");
     }
   }
-    // ⚖️ 绝不留空白！直接降级3次（如果找不到合适的，宁可保持原样，绝不挖洞！）
+    // 🚨 校验岗位0次
+  function validateZeroCounts() {
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    const warningBox = document.getElementById('warningLog');
+    let zeroLogs = [];
+
+    staffs.forEach((staff, sIdx) => {
+      let counts = {};
+      baseShifts.forEach(s => counts[s.name] = 0);
+      if (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) {
+        lastGeneratedSchedule[sIdx].forEach(shift => {
+          if (shift && shift !== "休" && shift !== supportShift.name && counts[shift] !== undefined) {
+            counts[shift]++;
+          }
+        });
+      }
+      baseShifts.forEach(s => {
+        if (counts[s.name] === 0) {
+          zeroLogs.push(`👤 <b>${staff.name}</b> 在岗位 [<b>${s.name.replace(/\n/g, ' ')}</b>] 全月 <b>0次</b>！`);
+        }
+      });
+    });
+
+    if (zeroLogs.length > 0) {
+      warningBox.innerHTML = `<b>🚨 岗位0次校验提醒（共发现 ${zeroLogs.length} 处）：</b><br>` + zeroLogs.join('<br>');
+      warningBox.style.display = 'block';
+      document.getElementById('status').innerText = `⚠️ 校验完毕：发现 ${zeroLogs.length} 处 0 次岗位！`;
+      alert(`校验完成！发现有 ${zeroLogs.length} 处岗位拿过 0 次，已标出！`);
+    } else {
+      warningBox.style.display = 'none';
+      document.getElementById('status').innerText = `✅ 校验完毕：所有人员所有基础岗位均大于 0 次！`;
+      alert(`校验完成！没有发现任何 0 次岗位。`);
+    }
+  }
+
+  // ⚖️ 修复次数平摊（绝不留空白！安全降级3次）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) return alert("当前没有排班数据，请先执行排班！");
 
@@ -869,7 +906,6 @@ if (fixedCount > 0) {
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 检查某天是否重复
     function isDaySafe(schedule, d) {
       let seen = {};
       for (let s = 0; s < schedule.length; s++) {
@@ -882,7 +918,6 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // 检查某人不连排
     function isNoAdjacent(schedule, s, d) {
       let shift = schedule[s][d];
       if (!shift || shift === "休") return true;
@@ -901,18 +936,16 @@ if (fixedCount > 0) {
       return !(lockedMap[s] && lockedMap[s][d]);
     }
 
-    // 全月扫描：凡是有3次的人，强制降级！绝不产生空白！
     for (let nm of baseNames) {
       let moved = true;
       let safety = 0;
-      while (moved && safety < 100) { // 限制最高循环100次
+      while (moved && safety < 100) {
         moved = false;
         safety++;
 
         for (let s = 0; s < staffs.length; s++) {
           if ((currentCounts[s][nm] || 0) <= 2) continue;
 
-          // 找出这个人全月哪些岗位是0次或1次的（优先0次）
           let targetShift = null;
           let targetCnt = Infinity;
           for (let bS of baseShifts) {
@@ -923,25 +956,19 @@ if (fixedCount > 0) {
             }
           }
 
-          // 如果全月所有岗位都已经2次了，那就不能降级了，跳过
           if (targetCnt >= 2) continue;
 
-          // 全月寻找一个可以安全替换的日子
           for (let d = 0; d < totalDays; d++) {
             if (schedule[s][d] !== nm) continue;
             if (!isLockSafe(s, d)) continue;
 
-            // 1. 必须先确认当天没人做 targetShift（防止重复）
             let taken = schedule.some((row, idx) => idx !== s && row[d] === targetShift);
             if (taken) continue;
 
-            // 2. 测试替换：把 3次 的 nm 换成 少次数的 targetShift
             let oldShift = schedule[s][d];
             schedule[s][d] = targetShift;
 
-            // 3. 检查连排和当天安全
             if (isDaySafe(schedule, d) && isNoAdjacent(schedule, s, d)) {
-              // 成功！更新数据，绝对不产生空白！
               currentCounts[s][nm]--;
               currentCounts[s][targetShift]++;
               
@@ -950,7 +977,6 @@ if (fixedCount > 0) {
               moved = true;
               break;
             } else {
-              // 没通过检查，恢复原样
               schedule[s][d] = oldShift;
             }
           }
@@ -958,7 +984,6 @@ if (fixedCount > 0) {
       }
     }
 
-    // 终极安全保险：最后清扫一遍，确保全表绝无空白（全变成“休”）
     for (let s = 0; s < staffs.length; s++) {
       for (let d = 0; d < totalDays; d++) {
         if (schedule[s][d] === "") schedule[s][d] = "休";
