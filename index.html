@@ -878,7 +878,7 @@ if (fixedCount > 0) {
     }
   }
 
-    // ⚖️ 终极人脑调配器（只拿3次去换对方当天的2次，全月审视）
+  // ⚖️ 全局解算器（全月扫描，自动拉人入局，直到完美平衡）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) return alert("当前没有排班数据，请先执行排班！");
 
@@ -907,7 +907,7 @@ if (fixedCount > 0) {
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 全月审视：当天绝对不能重复
+    // 全月体检：当天绝对不允许重复！
     function isDaySafe(schedule, d) {
       let seen = {};
       for (let s = 0; s < schedule.length; s++) {
@@ -920,7 +920,7 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // 全月审视：换完后双方绝对不能连排
+    // 全月体检：绝对不允许连排（同岗位或同类别）
     function isNoAdjacent(schedule, s, d) {
       let shift = schedule[s][d];
       if (!shift || shift === "休") return true;
@@ -935,17 +935,35 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // 终极人脑调配主循环
+    // 全月体检：高强度岗位不能连续 3 天！
+    function isHighSafe(schedule, s, d) {
+      let shift = schedule[s][d];
+      if (!shift) return true;
+      let obj = baseShifts.find(b => b.name === shift);
+      if (!obj || obj.level !== '高') return true;
+
+      let run = 1;
+      for (let i = d - 1; i >= 0 && baseShifts.find(b => b.name === schedule[s][i])?.level === '高'; i--) run++;
+      for (let i = d + 1; i < totalDays && baseShifts.find(b => b.name === schedule[s][i])?.level === '高'; i++) run++;
+      return run < 3;
+    }
+
+    // 全月体检：不能动锁定格
+    function isLockSafe(s, d) {
+      return !(lockedMap[s] && lockedMap[s][d]);
+    }
+
+    // 全局解算主循环
     let moved = true;
     let safety = 0;
-    while (moved && safety < 200) { // 安全上限，保证不卡死
+    while (moved && safety < 500) { // 提供足够大的空间让系统找到全局最优解
       moved = false;
       safety++;
 
       for (let nm of baseNames) {
-        // 找出所有拿了这个岗位3次的人
+        // 找出所有拿3次的人（需要送出岗位）
         let donors = [];
-        // 找出所有拿了这个岗位1次或0次的人（最需要补的人）
+        // 找出所有拿1次或0次的人（需要接收岗位）
         let receivers = [];
 
         for (let s = 0; s < staffs.length; s++) {
@@ -956,6 +974,7 @@ if (fixedCount > 0) {
 
         if (donors.length === 0 || receivers.length === 0) continue;
 
+        // 寻找完美的交换点
         outer:
         for (let i = 0; i < donors.length; i++) {
           for (let j = 0; j < receivers.length; j++) {
@@ -963,42 +982,41 @@ if (fixedCount > 0) {
             let receiver = receivers[j];
             if (donor === receiver) continue;
 
-            // 全月搜索，只要找到一次完美互换，立刻执行
             for (let d = 0; d < totalDays; d++) {
-              // 1. 宏（donor）今天必须做的是这个岗位
+              // 检查基本条件
               if (schedule[donor][d] !== nm) continue;
-              // 2. 接收者（大抠/YU）今天必须上班
               if (schedule[receiver][d] === "休" || schedule[receiver][d] === supportShift.name) continue;
-              if (lockedMap[donor] && lockedMap[donor][d]) continue;
-              if (lockedMap[receiver] && lockedMap[receiver][d]) continue;
+              if (!isLockSafe(donor, d) || !isLockSafe(receiver, d)) continue;
 
-              // 3. 接收者今天做的是什么岗位？
-              let receiverShift = schedule[receiver][d];
+              // 接收者今天原本做的是什么？
+              let receiverOldShift = schedule[receiver][d];
 
-              // 4. 【核心条件】：接收者今天做的岗位，必须是他全月拿了2次的，这样换了绝对不会让接收者出现0次或3次！
-              let receiverShiftCount = currentCounts[receiver][receiverShift] || 0;
-              if (receiverShiftCount < 2) continue; // 如果不是2次，直接跳过，找下一天！
+              // 保护：不能让接收者原本的岗位变成0次！
+              if ((currentCounts[receiver][receiverOldShift] || 0) <= 1) continue;
 
-              // 5. 进行模拟互换
+              // 模拟互换
               let oldDonor = schedule[donor][d];
               let oldReceiver = schedule[receiver][d];
               schedule[donor][d] = oldReceiver;
               schedule[receiver][d] = oldDonor;
 
-              // 6. 全月审视：换完后，看当天是否有重复？双方是否连排？
-              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, donor, d) && isNoAdjacent(schedule, receiver, d)) {
-                // 全月审视通过，正式更新！
+              // 【核心体检】检查：当天无重复、双方无连排、高强度合理
+              if (isDaySafe(schedule, d) && 
+                  isNoAdjacent(schedule, donor, d) && isNoAdjacent(schedule, receiver, d) && 
+                  isHighSafe(schedule, donor, d) && isHighSafe(schedule, receiver, d)) {
+                
+                // 完美！正式交换！
                 currentCounts[donor][nm]--;
-                currentCounts[donor][receiverShift]++;
-                currentCounts[receiver][receiverShift]--;
+                currentCounts[donor][receiverOldShift]++;
+                currentCounts[receiver][receiverOldShift]--;
                 currentCounts[receiver][nm]++;
 
                 fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：完美调配！<b>${staffs[donor].name}</b> 的 [${nm.replace(/\n/g,'')}] 与 <b>${staffs[receiver].name}</b> 的 [${receiverShift.replace(/\n/g,'')}] 完成互换。`);
+                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：全局解算！<b>${staffs[donor].name}</b> 的 [${nm.replace(/\n/g,'')}] 给了 <b>${staffs[receiver].name}</b>，拿回 [${receiverOldShift.replace(/\n/g,'')}]。`);
                 moved = true;
                 break outer;
               } else {
-                // 如果当天有重复或连排，立刻恢复，继续找下一天！
+                // 体检失败，恢复，继续全月寻找下一天！
                 schedule[donor][d] = oldDonor;
                 schedule[receiver][d] = oldReceiver;
               }
@@ -1013,10 +1031,10 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 全月调配完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 全局解算完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`完成！严格遵照“3次换对方2次”的逻辑，且每次交换都经过了全月审视（无重复、无连排）！`);
+      alert(`完成！已启动全局解算：全月扫描最优解，每次交换都严格通过（无重复、无连排、高强度合理、无锁定）！`);
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
       alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
