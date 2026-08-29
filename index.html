@@ -1945,6 +1945,7 @@ async function getAllHistoryMonthsData() {
       let pastSupportCounts = Array.from({ length: staffs.length }, () => 0);
       let dividendHighHistory = {}; 
       let userLastAssignedDividendRound = {}; 
+      
       Object.keys(allHistoryData).forEach(mKey => {
         let mSched = allHistoryData[mKey];
         if (mSched) {
@@ -1968,7 +1969,7 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 1. 先填入休假和锁定
+      // 1. 100% 严格填入锁定和休假日（绝对不允许任何代码改这里的单元格！）
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1979,17 +1980,10 @@ async function getAllHistoryMonthsData() {
           if (isLocked && existingShift) {
             newSchedule[sIdx][dayIdx] = existingShift;
           } else if (staffRests.includes(day)) {
-            newSchedule[sIdx][dayIdx] = "休";
+            newSchedule[sIdx][dayIdx] = "休"; // 这个休是死的，谁都别想改！
           }
         });
       }
-
-      // 2. 先算总账：12个岗位在整个月应该排多少次（按每个人1~2次来算）
-      let totalWorkCells = 0;
-      for (let s = 0; s < staffs.length; s++) {
-        for (let d = 0; d < totalDays; d++) if (newSchedule[s][d] !== "休") totalWorkCells++;
-      }
-      let targetPerShift = Math.floor(totalWorkCells / baseShifts.length); // 基础目标次数
 
       let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
       staffs.forEach((_, sIdx) => {
@@ -2010,7 +2004,7 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
-      // 3. 分红日优先（1号，16号优先排高强度）
+      // 2. 分红日（1号、16号）先排高强度
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2049,56 +2043,41 @@ async function getAllHistoryMonthsData() {
         });
       });
 
-      // 4. 核心逻辑：全月按岗位乱跳发牌！
-      let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
-      shuffledShifts.forEach(shift => {
-        let shiftName = shift.name;
-        let placed = 0;
-        let safety = 0;
-        while (placed < targetPerShift && safety < totalDays * 5) {
-          safety++;
-          // 找到所有没拿满2次的人，随机打乱（乱跳）
-          let candidates = [];
-          for (let s = 0; s < staffs.length; s++) {
-            let cnt = shiftCounts[s][shiftName] || 0;
-            if (cnt >= 2) continue; // 绝不允许拿满2次后再加
-            candidates.push(s);
-          }
-          if (candidates.length === 0) break;
-          candidates.sort(() => Math.random() - 0.5);
+      // 3. 核心排班：只动原本是空格的格子，绝不碰休假！
+      for (let d = 0; d < totalDays; d++) {
+        let availablePeople = [];
+        for (let s = 0; s < staffs.length; s++) {
+          if (newSchedule[s][d] === "") availablePeople.push(s);
+        }
+        
+        let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
 
-          // 从乱序的人里挑一个合适的空位
-          for (let c of candidates) {
-            let days = [];
-            for (let d = 0; d < totalDays; d++) {
-              if (newSchedule[c][d] !== "") continue; // 当天必须是空的
-              if (lockedMap[c] && lockedMap[c][d]) continue;
-              // 防连排！
-              let prev = (d > 0) ? newSchedule[c][d - 1] : "";
-              let next = (d < totalDays - 1) ? newSchedule[c][d + 1] : "";
-              if (shiftName === prev || shiftName === next) continue;
-              if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
-              // 防重复！
-              let taken = newSchedule.some((row, idx) => idx !== c && row[d] === shiftName);
-              if (taken) continue;
-              days.push(d);
-            }
-            if (days.length > 0) {
-              let chosenDay = days[Math.floor(Math.random() * days.length)]; // 乱跳选天
-              newSchedule[c][chosenDay] = shiftName;
-              shiftCounts[c][shiftName] = (shiftCounts[c][shiftName] || 0) + 1;
-              placed++;
-              break;
-            }
+        for (let shift of shuffledShifts) {
+          let shiftName = shift.name;
+          let placed = false;
+
+          for (let s of availablePeople) {
+            let cnt = shiftCounts[s][shiftName] || 0;
+            if (cnt >= 2) continue;
+            
+            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+            if (shiftName === prev || shiftName === next) continue;
+            if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
+
+            newSchedule[s][d] = shiftName;
+            shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
+            placed = true;
+            break;
           }
         }
-      });
+      }
 
-      // 5. 最后补空位（剩下的空格，找一个不是休假的人，给他全月次数最少且当天没人的岗位，绝不产生空白！）
+      // 4. 绝对保险：只填【空格】，绝不填休假！
       for (let d = 0; d < totalDays; d++) {
         for (let s = 0; s < staffs.length; s++) {
           if (newSchedule[s][d] !== "") continue;
-          // 找出这个人全月次数最少的岗位
+          
           let best = null;
           let bestCnt = Infinity;
           for (let bS of baseShifts) {
@@ -2114,12 +2093,12 @@ async function getAllHistoryMonthsData() {
               best = nm;
             }
           }
+
           if (best) {
             newSchedule[s][d] = best;
             shiftCounts[s][best] = (shiftCounts[s][best] || 0) + 1;
-          } else {
-            newSchedule[s][d] = "休"; // 极端情况绝不挖空白
-          }
+          } 
+          // 注意：如果是空的且真的找不到合理的岗位，这里【坚决不改成休】，宁可留着待定！
         }
       }
 
@@ -2127,12 +2106,13 @@ async function getAllHistoryMonthsData() {
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班已完成！已按全月岗位乱跳发牌法生成，防重复、防连排、防3次！`);
+      alert(`排班已完成！所有的休假日被100%严格保护，绝不篡改！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
     }
   }
+
 
   window.onload = async function() {
     initDateSelectors();
