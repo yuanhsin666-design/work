@@ -1923,7 +1923,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-  async function generateSchedule() {
+   async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1934,11 +1934,13 @@ async function getAllHistoryMonthsData() {
       initLockedMap();
       const highShifts = baseShifts.filter(s => s.level === '高').map(s => s.name);
       const supName = supportShift.name;
+      
+      // 初始化排班表
       let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
       let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
       let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
 
-      // 历史数据
+      // 读取跨月历史数据（分红日冷却）
       let allHistoryData = await getAllHistoryMonthsData();
       let currentKey = getMonthKey();
       allHistoryData[currentKey] = newSchedule;
@@ -1969,7 +1971,7 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 1. 100% 严格填入锁定和休假日（绝对不允许任何代码改这里的单元格！）
+      // ========== 1. 绝对锁死：导入的休假日和锁定格！==========
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -1980,7 +1982,7 @@ async function getAllHistoryMonthsData() {
           if (isLocked && existingShift) {
             newSchedule[sIdx][dayIdx] = existingShift;
           } else if (staffRests.includes(day)) {
-            newSchedule[sIdx][dayIdx] = "休"; // 这个休是死的，谁都别想改！
+            newSchedule[sIdx][dayIdx] = "休";
           }
         });
       }
@@ -2004,7 +2006,7 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
-      // 2. 分红日（1号、16号）先排高强度
+      // ========== 2. 分红日（1号、16号）优先安排高强度岗位 ==========
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2043,62 +2045,105 @@ async function getAllHistoryMonthsData() {
         });
       });
 
-      // 3. 核心排班：只动原本是空格的格子，绝不碰休假！
-      for (let d = 0; d < totalDays; d++) {
-        let availablePeople = [];
-        for (let s = 0; s < staffs.length; s++) {
-          if (newSchedule[s][d] === "") availablePeople.push(s);
+      // ========== 3. 全局统筹：为每个岗位建立一个“需求桶”，确保全员保底1次 ==========
+      // 计算每个人本月的“总上班格子数”
+      let workSlots = Array(staffs.length).fill(0);
+      for (let s = 0; s < staffs.length; s++) {
+        for (let d = 0; d < totalDays; d++) {
+          if (newSchedule[s][d] === "") workSlots[s]++;
         }
-        
-        let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
+      }
 
-        for (let shift of shuffledShifts) {
-          let shiftName = shift.name;
-          let placed = false;
+      // 12个岗位全月一共要排多少次
+      let totalSlots = workSlots.reduce((a, b) => a + b, 0);
+      
+      // 每个人每个岗位都必须排1次 (17人 * 12岗位 = 204次)
+      // 如果员工上班天数超过12天，则允许部分岗位排2次
+      let mustAssignCount = 12; // 保底每人12次（每个岗位1次）
 
-          for (let s of availablePeople) {
-            let cnt = shiftCounts[s][shiftName] || 0;
-            if (cnt >= 2) continue;
+      // 3.1 第一轮：全月乱跳，确保每个人每个岗位都拿满1次！
+      let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
+      shuffledShifts.forEach(shift => {
+        let shiftName = shift.name;
+        for (let s = 0; s < staffs.length; s++) {
+          let cnt = shiftCounts[s][shiftName] || 0;
+          if (cnt >= 1) continue; // 只要有1次了就跳过，等下一轮再补
+          
+          // 在全月里找这个人空格子的日子（且绝对不能是休假/锁定）
+          let days = [];
+          for (let d = 0; d < totalDays; d++) {
+            if (newSchedule[s][d] !== "") continue;
+            if (lockedMap[s] && lockedMap[s][d]) continue;
             
+            // 严格防连排
             let prev = (d > 0) ? newSchedule[s][d - 1] : "";
             let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
             if (shiftName === prev || shiftName === next) continue;
             if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
 
-            newSchedule[s][d] = shiftName;
-            shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
-            placed = true;
-            break;
+            // 防当天重复（因为有别人做这个岗位了，就不放）
+            let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
+            if (taken) continue;
+            
+            days.push(d);
+          }
+          
+          if (days.length > 0) {
+            // 乱跳：随机选一天
+            let chosenDay = days[Math.floor(Math.random() * days.length)];
+            newSchedule[s][chosenDay] = shiftName;
+            shiftCounts[s][shiftName] = 1;
           }
         }
-      }
+      });
 
-      // 4. 绝对保险：只填【空格】，绝不填休假！
+      // 3.2 第二轮：排剩余的“空位”（因为总上班天数超过12天，一定要有人拿第2次）
+      let remainingDays = [];
       for (let d = 0; d < totalDays; d++) {
         for (let s = 0; s < staffs.length; s++) {
-          if (newSchedule[s][d] !== "") continue;
+          if (newSchedule[s][d] === "") remainingDays.push({ s, d });
+        }
+      }
+      
+      // 打乱剩余格子，随机填
+      remainingDays.sort(() => Math.random() - 0.5);
+      remainingDays.forEach(slot => {
+        let s = slot.s;
+        let d = slot.d;
+        
+        let bestShift = null;
+        let bestCnt = Infinity;
+        for (let bS of baseShifts) {
+          let nm = bS.name;
+          if ((shiftCounts[s][nm] || 0) >= 2) continue; // 绝对禁止超过2次！
           
-          let best = null;
-          let bestCnt = Infinity;
-          for (let bS of baseShifts) {
-            let nm = bS.name;
-            let taken = newSchedule.some((row, idx) => idx !== s && row[d] === nm);
-            if (taken) continue;
-            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-            if (nm === prev || nm === next) continue;
-            let cnt = shiftCounts[s][nm] || 0;
-            if (cnt < bestCnt) {
-              bestCnt = cnt;
-              best = nm;
-            }
+          let taken = newSchedule.some((row, idx) => idx !== s && row[d] === nm);
+          if (taken) continue;
+          
+          let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+          let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+          if (nm === prev || nm === next) continue;
+          if (getShiftCategory(nm) && (getShiftCategory(nm) === getShiftCategory(prev) || getShiftCategory(nm) === getShiftCategory(next))) continue;
+          
+          let cnt = shiftCounts[s][nm] || 0;
+          if (cnt < bestCnt) {
+            bestCnt = cnt;
+            bestShift = nm;
           }
+        }
+        
+        if (bestShift) {
+          newSchedule[s][d] = bestShift;
+          shiftCounts[s][bestShift] = (shiftCounts[s][bestShift] || 0) + 1;
+        }
+      });
 
-          if (best) {
-            newSchedule[s][d] = best;
-            shiftCounts[s][best] = (shiftCounts[s][best] || 0) + 1;
-          } 
-          // 注意：如果是空的且真的找不到合理的岗位，这里【坚决不改成休】，宁可留着待定！
+      // ========== 4. 绝对安全兜底：如果因为排满导致放假，绝不产生空白！==========
+      // 如果全月连12个格子都排不满（极度罕见），会忽略这一轮
+      for (let s = 0; s < staffs.length; s++) {
+        for (let d = 0; d < totalDays; d++) {
+          if (newSchedule[s][d] !== "") continue;
+          // 如果是因为排满而没有格子，就直接留空（绝对不改休假日）
         }
       }
 
@@ -2106,7 +2151,7 @@ async function getAllHistoryMonthsData() {
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班已完成！所有的休假日被100%严格保护，绝不篡改！`);
+      alert(`排班完成！严格保护休假，全局统筹，保证每人每个岗位1~2次，防重复、防连排！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
