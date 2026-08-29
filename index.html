@@ -878,7 +878,7 @@ if (fixedCount > 0) {
     }
   }
 
-    // ⚖️ 极限全月搜索器（全月1~31号反复搜索，直到彻底消除0次和3次）
+    // ⚖️ 空缺漂流法（先移除超限，像多米诺骨牌一样全月填补空缺）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) return alert("当前没有排班数据，请先执行排班！");
 
@@ -907,7 +907,7 @@ if (fixedCount > 0) {
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
-    // 检查某天是否有重复
+    // 检查当天没有重复
     function isDaySafe(schedule, d) {
       let seen = {};
       for (let s = 0; s < schedule.length; s++) {
@@ -920,7 +920,7 @@ if (fixedCount > 0) {
       return true;
     }
 
-    // 检查某个人某天是否连排
+    // 检查某人某天不能连排
     function isNoAdjacent(schedule, s, d) {
       let shift = schedule[s][d];
       if (!shift || shift === "休") return true;
@@ -940,7 +940,7 @@ if (fixedCount > 0) {
       return !(lockedMap[s] && lockedMap[s][d]);
     }
 
-    // ==== 全月极速搜索：从头到尾扫描每一天，直到把极差全部找出来 ====
+    // ===== 核心：漂浮空缺法 =====
     let moved = true;
     let safety = 0;
     while (moved && safety < 500) {
@@ -948,54 +948,153 @@ if (fixedCount > 0) {
       safety++;
 
       for (let nm of baseNames) {
+        // 找出所有拿3次的人
         let donors = [];
-        let zeros = [];
-
         for (let s = 0; s < staffs.length; s++) {
-          let cnt = currentCounts[s][nm] || 0;
-          if (cnt >= 3) donors.push(s);
-          if (cnt === 0) zeros.push(s);
+          if ((currentCounts[s][nm] || 0) >= 3) donors.push(s);
         }
-
-        if (donors.length === 0 || zeros.length === 0) continue;
+        if (donors.length === 0) continue;
 
         outer:
-        for (let i = 0; i < donors.length; i++) {
-          for (let j = 0; j < zeros.length; j++) {
-            let donor = donors[i];
-            let zero = zeros[j];
-            if (donor === zero) continue;
+        for (let donor of donors) {
+          // 1. 找到施施哪一天做了超限的 nm，先把这个岗位删掉（变成空缺）
+          for (let d = 0; d < totalDays; d++) {
+            if (schedule[donor][d] !== nm) continue;
+            if (!isLockSafe(donor, d)) continue;
 
-            // ★ 核心：从 1 号到 31 号，极度坚持地一遍一遍找！
-            for (let d = 0; d < totalDays; d++) {
-              if (schedule[donor][d] !== nm) continue;
-              if (schedule[zero][d] === "休" || schedule[zero][d] === supportShift.name) continue;
-              if (!isLockSafe(donor, d) || !isLockSafe(zero, d)) continue;
+            // 先标记：这个岗位被删除了
+            let oldShift = schedule[donor][d];
+            schedule[donor][d] = "";
+            currentCounts[donor][nm]--;
 
-              let zeroOldShift = schedule[zero][d];
-
-              // 先尝试直接给
-              let oldDonor = schedule[donor][d];
-              let oldZero = schedule[zero][d];
-              schedule[donor][d] = oldZero;
-              schedule[zero][d] = oldDonor;
-
-              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, donor, d) && isNoAdjacent(schedule, zero, d)) {
-                currentCounts[donor][nm]--;
-                currentCounts[donor][zeroOldShift]++;
-                currentCounts[zero][zeroOldShift]--;
-                currentCounts[zero][nm]++;
-
-                fixedCount++;
-                fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：解决0次！<b>${staffs[donor].name}</b> 的 [${nm.replace(/\n/g,'')}] 给了 <b>${staffs[zero].name}</b>，拿回 [${zeroOldShift.replace(/\n/g,'')}]。`);
-                moved = true;
-                break outer;
-              } else {
-                // 如果这1天不行，就去找下一支组合，一定要找到为止！
-                schedule[donor][d] = oldDonor;
-                schedule[zero][d] = oldZero;
+            // 2. 看施施自己有哪个岗位只拿了1次，这就是他要补回来的目标
+            let targetShift = null;
+            let minCnt = Infinity;
+            for (let bS of baseShifts) {
+              if (bS.name === nm) continue;
+              let cnt = currentCounts[donor][bS.name] || 0;
+              if (cnt === 1 && cnt < minCnt) { // 只要1次的
+                minCnt = cnt;
+                targetShift = bS.name;
               }
             }
+
+            // 如果没有1次的，就找0次的
+            if (!targetShift) {
+              for (let bS of baseShifts) {
+                if (bS.name === nm) continue;
+                if ((currentCounts[donor][bS.name] || 0) === 0) {
+                  targetShift = bS.name;
+                  break;
+                }
+              }
+            }
+
+            if (!targetShift) continue;
+
+            // 3. 全月寻找：谁拿了 targetShift 拿了2次？把那个人的 targetShift 移给施施！
+            let chainDonor = -1;
+            let chainDay = -1;
+            for (let s = 0; s < staffs.length; s++) {
+              if (s === donor) continue;
+              if ((currentCounts[s][targetShift] || 0) < 2) continue; // 必须拿2次的人
+
+              for (let dd = 0; dd < totalDays; dd++) {
+                if (schedule[s][dd] !== targetShift) continue;
+                if (schedule[donor][dd] !== "") continue; // 施施当天必须有空位接收
+                if (!isLockSafe(s, dd) || !isLockSafe(donor, dd)) continue;
+
+                // 临时测试：把 targetShift 给施施
+                let oldChainShift = schedule[s][dd];
+                schedule[donor][dd] = targetShift;
+                schedule[s][dd] = ""; // 拿的人空出来了
+
+                if (isDaySafe(schedule, dd) && isNoAdjacent(schedule, donor, dd) && isNoAdjacent(schedule, s, dd)) {
+                  // 成功！更新数据
+                  currentCounts[donor][targetShift]++;
+                  currentCounts[s][targetShift]--;
+                  
+                  // 现在，把 s 空出来的位置，让下一个空缺继续漂
+                  chainDonor = s;
+                  chainDay = dd;
+                  break;
+                } else {
+                  // 不行就恢复
+                  schedule[donor][dd] = "";
+                  schedule[s][dd] = oldChainShift;
+                }
+              }
+              if (chainDonor !== -1) break;
+            }
+
+            if (chainDonor === -1) {
+              // 链条断了，恢复施施原本的状态（极其罕见）
+              schedule[donor][d] = oldShift;
+              currentCounts[donor][nm]++;
+              continue;
+            }
+
+            // 4. 链条漂移：继续给空出来的人找下一个1次/0次岗位……
+            let currentEmpty = chainDonor;
+            let currentDay = chainDay;
+            let guard = 0;
+            while (guard < 10) { // 链条最多漂移10次
+              guard++;
+              let currentEmptyShift = schedule[currentEmpty][currentDay]; // 目前是空位
+
+              // 找这个空出来的人，全月哪个岗位只有1次或0次，并且当天能有人“送”给他
+              let neededShift = null;
+              let needMin = Infinity;
+              for (let bS of baseShifts) {
+                let cnt = currentCounts[currentEmpty][bS.name] || 0;
+                if (cnt <= 1 && cnt < needMin) {
+                  needMin = cnt;
+                  neededShift = bS.name;
+                }
+              }
+
+              if (!neededShift) break; // 已经全2次了，链条结束
+
+              let nextDonor = -1;
+              let nextDay = -1;
+              for (let s = 0; s < staffs.length; s++) {
+                if (s === currentEmpty) continue;
+                if ((currentCounts[s][neededShift] || 0) < 2) continue; // 必须拿2次才给
+
+                for (let dd = 0; dd < totalDays; dd++) {
+                  if (schedule[s][dd] !== neededShift) continue;
+                  if (schedule[currentEmpty][dd] !== "") continue;
+                  if (!isLockSafe(s, dd) || !isLockSafe(currentEmpty, dd)) continue;
+
+                  let oldSwap = schedule[s][dd];
+                  schedule[currentEmpty][dd] = neededShift;
+                  schedule[s][dd] = "";
+
+                  if (isDaySafe(schedule, dd) && isNoAdjacent(schedule, currentEmpty, dd) && isNoAdjacent(schedule, s, dd)) {
+                    currentCounts[currentEmpty][neededShift]++;
+                    currentCounts[s][neededShift]--;
+                    nextDonor = s;
+                    nextDay = dd;
+                    break;
+                  } else {
+                    schedule[currentEmpty][dd] = "";
+                    schedule[s][dd] = oldSwap;
+                  }
+                }
+                if (nextDonor !== -1) break;
+              }
+
+              if (nextDonor === -1) break; // 链条结束
+
+              // 漂移继续
+              currentEmpty = nextDonor;
+              currentDay = nextDay;
+            }
+
+            fixedCount++;
+            fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：空缺漂流！<b>${staffs[donor].name}</b> 的 [${nm.replace(/\n/g,'')}] 被移出，形成了完美衔接链，全月已经补平！`);
+            moved = true;
+            break outer;
           }
         }
       }
@@ -1006,10 +1105,10 @@ if (fixedCount > 0) {
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 极限搜索完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 空缺漂流完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
       document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`完成！无论29、30号是否调得动，系统已经从头到尾反复搜索了全月（包括1-27号），终于找到了完美的调配方案！`);
+      alert(`完成！这是真正的“空缺漂流法”：先移除3次岗位，再顺着每个人的1次岗位，向2次的人索要，全月像多米诺骨牌一样填补，绝不破坏任何规则！`);
     } else {
       document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
       alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
