@@ -1930,7 +1930,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-     async function generateSchedule() {
+      async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -2011,7 +2011,7 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
-      // 【铁律2】分红日优先
+      // 【铁律2】分红日优先（1号，16号）
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2050,7 +2050,7 @@ async function getAllHistoryMonthsData() {
         });
       });
 
-      // 【铁律3】保底1次！保证每个人每个岗位都至少拿到1次
+      // 【核心第1步】发“第一轮牌”：确保每个人、每个岗位拿满1次！
       let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
       shuffledShifts.forEach(shift => {
         let shiftName = shift.name;
@@ -2078,7 +2078,7 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 【铁律4】补足剩余空格，但绝对不能超过2次！绝对不能产生3次！
+      // 【核心第2步】发“第二轮牌”：在剩下的空位里，补发第2次（绝不超2次）！
       let remainingDays = [];
       for (let d = 0; d < totalDays; d++) {
         for (let s = 0; s < staffs.length; s++) {
@@ -2095,7 +2095,7 @@ async function getAllHistoryMonthsData() {
         let bestCnt = Infinity;
         for (let bS of baseShifts) {
           let nm = bS.name;
-          // ★ 铁律：绝对不能超过2次！
+          // 【铁律】第二轮也绝对不能超过2次！
           if ((shiftCounts[s][nm] || 0) >= 2) continue;
           
           let taken = newSchedule.some((row, idx) => idx !== s && row[d] === nm);
@@ -2119,12 +2119,10 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 【铁律5】如果极个别人因为排不下，宁可保持原样也绝不填超过2次！
-      // 【兜底】处理没有排上的空白（但绝对不碰休假）
+      // 【终极兜底】绝对不产生空白！如果因为排不下，万不得已才填1次/2次的岗位。
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] === "") {
-            // 找到当前次数最少的岗位，如果还没到2次，就填上去
             let best = null;
             let bestCnt = Infinity;
             for (let bS of baseShifts) {
@@ -2146,7 +2144,7 @@ async function getAllHistoryMonthsData() {
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！绝对锁死休假，绝对不超过2次，绝不产生空白！`);
+      alert(`排班完成！先发保底1次，再发第2次，绝对锁死休假，绝不产生空白！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
