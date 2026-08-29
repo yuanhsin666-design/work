@@ -1490,7 +1490,7 @@ async function getAllHistoryMonthsData() {
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
           
-            // 直接读取原单元格的 HTML 代码，这样完美的保留了你原本设置好的 <br> 换行
+            // 直接读取原单元格的 HTML 代码，这样完美的保留了你原本设置好的 <\n> 换行
       let cellText = cloneCell.innerHTML
                           .replace(/🔒/g, '')
                           // 把 HTML 的 &nbsp; 转成普通空格，防止 Excel 显示成奇怪字符
