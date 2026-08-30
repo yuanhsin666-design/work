@@ -1584,6 +1584,8 @@ async function getAllHistoryMonthsData() {
       cloneCell.style.padding = "6px";
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
+      
+      // 【一定要用这一段，绝对不把 \n 换成空格，而是变成 Excel 强制换行标签！】
       let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
       cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
     });
