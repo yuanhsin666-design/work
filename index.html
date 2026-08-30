@@ -119,7 +119,6 @@
     <button class="success" onclick="autoFixAdjacentShifts()">🛠️ 修复连排并保持平摊</button>
     <button class="warning-btn" onclick="validateZeroCounts()">🚨 校验岗位0次</button>
     <button class="success" onclick="autoFixCounts()">⚖️ 修复次数平摊</button>
-    <button class="danger" onclick="forceFixOverTwo()">🔧 强制修复>=3次问题</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
@@ -1005,21 +1004,6 @@ await fillEmptyCells();
     saveDataToLocal();
     renderAll();
   }
-// 🔧 强制修复 >=3 次 + 强度不平衡（完整规则版）
-async function forceFixOverTwo() {
-    if (!lastGeneratedSchedule) {
-        return alert("当前没有排班数据，请先执行排班！");
-    }
-
-    const totalDays = getDaysInMonth(
-        parseInt(document.getElementById('yearSelect').value),
-        parseInt(document.getElementById('monthSelect').value)
-    );
-
-    let schedule = lastGeneratedSchedule.map(row => [...row]);
-    let totalFixes = 0;
-    let fixLogs = [];
-    let maxRounds = 300;
 
     // ================================================================
     // 1. 动态计算强度目标
@@ -1206,17 +1190,18 @@ async function forceFixOverTwo() {
         if (candidates.length === 0) return null;
 
         // 优先补「最缺的强度」
-        candidates.sort((a, b) => {
-            let levelA = getLevel(a);
-            let levelB = getLevel(b);
-            if (preferredLevel) {
-                if (levelA === preferredLevel && levelB !== preferredLevel) return -1;
-                if (levelB === preferredLevel && levelA !== preferredLevel) return 1;
-            }
-            let cntA = counts[sIdx][a] || 0;
-            let cntB = counts[sIdx][b] || 0;
-            return cntA - cntB;
-        });
+// 在 findCandidate 的排序部分，加入强度平衡
+candidates.sort((a, b) => {
+    // 1. 先看目标强度的平衡度（低于平均的优先）
+    let scoreA = getIntensityBalanceScore(a, targetLevel);
+    let scoreB = getIntensityBalanceScore(b, targetLevel);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    // 2. 再看这个岗位的次数（少的优先）
+    let cntA = shiftCounts[a][shiftName] || 0;
+    let cntB = shiftCounts[b][shiftName] || 0;
+    if (cntA !== cntB) return cntA - cntB;
+    return 0;
+});
 
         return candidates[0];
     }
