@@ -2383,8 +2383,14 @@ async function generateSchedule() {
         }
 
         // ================================================================
-        // 6. 核心动作：一次只看一个岗位，全月乱跳着找空位
+        // 核心动作：一次只看一个岗位，全月乱跳着找空位
         // ================================================================
+
+        function getLevel(shiftName) {
+            if (!shiftName || shiftName === "休" || shiftName === supName) return "";
+            let found = baseShifts.find(s => s.name === shiftName);
+            return found ? found.level : "";
+        }
 
         // 检查当天是否已有这个岗位（防重复）
         function isShiftTaken(day, shiftName) {
@@ -2413,27 +2419,66 @@ async function generateSchedule() {
             return false;
         }
 
-function checkHighThree(sIdx, day, shiftName) {
-    let shiftObj = baseShifts.find(s => s.name === shiftName);
-    if (!shiftObj || shiftObj.level !== '高') return false;
-    
-    // 检查前面已经连续多少天高强度
-    let consecutiveBefore = 0;
-    for (let d = day - 1; d >= 0; d--) {
-        let prev = newSchedule[sIdx][d];
-        let prevObj = baseShifts.find(s => s.name === prev);
-        if (prevObj && prevObj.level === '高') {
-            consecutiveBefore++;
-        } else {
-            break;
+        // 检查高强度是否连续3天（允许连续2天，不允许连续3天）
+        function checkHighThree(sIdx, day, shiftName) {
+            let shiftObj = baseShifts.find(s => s.name === shiftName);
+            if (!shiftObj || shiftObj.level !== '高') return false;
+            
+            let consecutiveBefore = 0;
+            for (let d = day - 1; d >= 0; d--) {
+                let prev = newSchedule[sIdx][d];
+                let prevObj = baseShifts.find(s => s.name === prev);
+                if (prevObj && prevObj.level === '高') {
+                    consecutiveBefore++;
+                } else {
+                    break;
+                }
+            }
+            // 前面已经连续2天高强度，加上今天是第3天 → 不允许
+            if (consecutiveBefore >= 2) return true;
+            
+            return false;
         }
-    }
-    
-    // 如果前面已经连续2天高强度，再加上今天就是第3天 → 不允许
-    if (consecutiveBefore >= 2) return true;
-    
-    return false;
-}
+
+        // 🆕 检查强度分布是否平均（不能连续3天同一强度，要穿插）
+        function checkIntensityBalance(sIdx, day, shiftName) {
+            let newLevel = getLevel(shiftName);
+            if (!newLevel) return true;
+
+            // 往前看5天，检查强度是否太集中
+            let last5Days = [];
+            for (let d = day - 1; d >= Math.max(0, day - 5); d--) {
+                let prevShift = newSchedule[sIdx][d];
+                let prevLevel = getLevel(prevShift);
+                if (prevLevel) last5Days.push(prevLevel);
+            }
+
+            // 如果最近3天都是同一个强度 → 不允许
+            if (last5Days.length >= 2) {
+                let allSame = true;
+                for (let i = 0; i < Math.min(2, last5Days.length); i++) {
+                    if (last5Days[i] !== newLevel) {
+                        allSame = false;
+                        break;
+                    }
+                }
+                if (allSame) return false;
+            }
+
+            // 检查过去5天是否出现"低低低"或"中中中"或"高高高"（高已由checkHighThree处理）
+            if (last5Days.length >= 3) {
+                for (let i = 0; i <= last5Days.length - 3; i++) {
+                    if (last5Days[i] === last5Days[i+1] && last5Days[i+1] === last5Days[i+2]) {
+                        // 检查这三个是否都不是空
+                        if (last5Days[i] && last5Days[i+1] && last5Days[i+2]) {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
 
         // 检查某员工某岗位是否已达2次上限
         function isMaxed(sIdx, shiftName) {
@@ -2459,6 +2504,7 @@ function checkHighThree(sIdx, day, shiftName) {
                 if (isMaxed(s, shiftName)) continue;
                 if (checkAdjacent(s, day, shiftName)) continue;
                 if (checkHighThree(s, day, shiftName)) continue;
+                if (!checkIntensityBalance(s, day, shiftName)) continue;
                 candidates.push(s);
             }
             if (candidates.length === 0) return -1;
@@ -2466,7 +2512,14 @@ function checkHighThree(sIdx, day, shiftName) {
             candidates.sort((a, b) => {
                 let cntA = shiftCounts[a][shiftName] || 0;
                 let cntB = shiftCounts[b][shiftName] || 0;
-                return cntA - cntB;
+                if (cntA !== cntB) return cntA - cntB;
+                // 次数相同，选强度更平衡的
+                let totalA = 0, totalB = 0;
+                for (let nm of shiftNames) {
+                    totalA += (shiftCounts[a][nm] || 0);
+                    totalB += (shiftCounts[b][nm] || 0);
+                }
+                return totalA - totalB;
             });
             return candidates[0];
         }
@@ -2500,7 +2553,7 @@ function checkHighThree(sIdx, day, shiftName) {
         }
 
         // ================================================================
-        // 【第二遍】补空位（再排一轮）
+        // 【第二遍】补空位
         // ================================================================
 
         let shuffledShifts2 = [...baseShifts].sort(() => Math.random() - 0.5);
@@ -2528,7 +2581,7 @@ function checkHighThree(sIdx, day, shiftName) {
         }
 
         // ================================================================
-        // 【第三遍】再补一轮（确保全部填满）
+        // 【第三遍】再补一轮
         // ================================================================
 
         let shuffledShifts3 = [...baseShifts].sort(() => Math.random() - 0.5);
@@ -2556,7 +2609,7 @@ function checkHighThree(sIdx, day, shiftName) {
         }
 
         // ================================================================
-        // 7. 绝对不留空白
+        // 绝对不留空白
         // ================================================================
 
         for (let d = 0; d < totalDays; d++) {
@@ -2579,6 +2632,7 @@ function checkHighThree(sIdx, day, shiftName) {
                     if (isMaxed(s, nm)) continue;
                     if (checkAdjacent(s, d, nm)) continue;
                     if (checkHighThree(s, d, nm)) continue;
+                    if (!checkIntensityBalance(s, d, nm)) continue;
                     let cnt = shiftCounts[s][nm] || 0;
                     if (cnt < bestCnt) {
                         bestCnt = cnt;
@@ -2607,7 +2661,7 @@ function checkHighThree(sIdx, day, shiftName) {
         renderAll();
         saveDataToLocal();
         document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-        alert(`排班完成！一次只看一个岗位，全月乱跳填空，无空白，无重复，无连排！`);
+        alert(`排班完成！一次只看一个岗位，全月乱跳填空，无空白，无重复，无连排，强度平均分布！`);
 
     } catch (err) {
         console.error(err);
