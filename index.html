@@ -886,7 +886,7 @@
     html += `</tbody>`;
     container.innerHTML = html;
   }
-// ========== 校验连排岗位（含互换建议） ==========
+// ========== 校验连排岗位 ==========
 function validateAdjacentShifts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -897,234 +897,6 @@ function validateAdjacentShifts() {
     let adjacentCount = 0;
     let adjacentLogs = [];
 
-    // ---------- 辅助函数 ----------
-    function isLocked(s, d) {
-        return lockedMap[s] && lockedMap[s][d];
-    }
-
-    function isDividendDay(d) {
-        return (d === 0 || d === 15);
-    }
-
-    function getLevel(shiftName) {
-        if (!shiftName || shiftName === "休" || shiftName === supportShift.name) return "";
-        let found = baseShifts.find(s => s.name === shiftName);
-        return found ? found.level : "";
-    }
-
-    function isHigh(shiftName) {
-        return getLevel(shiftName) === '高';
-    }
-
-    function hasAdjacentIssue(sIdx, day) {
-        let currentShift = lastGeneratedSchedule?.[sIdx]?.[day];
-        if (!currentShift || currentShift === "休" || currentShift === supportShift.name) return false;
-        let currentCategory = getShiftCategory(currentShift);
-
-        if (day > 0) {
-            let prevShift = lastGeneratedSchedule[sIdx][day - 1];
-            if (prevShift && prevShift !== "休" && prevShift !== supportShift.name) {
-                let prevCategory = getShiftCategory(prevShift);
-                if (prevCategory && currentCategory && prevCategory === currentCategory) {
-                    return true;
-                }
-            }
-        }
-        if (day < totalDays - 1) {
-            let nextShift = lastGeneratedSchedule[sIdx][day + 1];
-            if (nextShift && nextShift !== "休" && nextShift !== supportShift.name) {
-                let nextCategory = getShiftCategory(nextShift);
-                if (nextCategory && currentCategory && nextCategory === currentCategory) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    function isShiftTaken(day, shiftName) {
-        for (let s = 0; s < staffs.length; s++) {
-            if (lastGeneratedSchedule[s]?.[day] === shiftName) return true;
-        }
-        return false;
-    }
-
-    function isMaxed(sIdx, shiftName) {
-        let count = 0;
-        for (let d = 0; d < totalDays; d++) {
-            if (lastGeneratedSchedule[sIdx]?.[d] === shiftName) count++;
-        }
-        return count >= 2;
-    }
-
-    function wouldBeAdjacent(sIdx, day, shiftName) {
-        let newCategory = getShiftCategory(shiftName);
-        if (day > 0) {
-            let prev = lastGeneratedSchedule[sIdx]?.[day - 1];
-            if (prev && prev !== "休" && prev !== supportShift.name) {
-                if (getShiftCategory(prev) === newCategory) return true;
-            }
-        }
-        if (day < totalDays - 1) {
-            let next = lastGeneratedSchedule[sIdx]?.[day + 1];
-            if (next && next !== "休" && next !== supportShift.name) {
-                if (getShiftCategory(next) === newCategory) return true;
-            }
-        }
-        return false;
-    }
-
-    function wouldBeHighThree(sIdx, day, shiftName) {
-        if (!isHigh(shiftName)) return false;
-        let prevHigh = false;
-        let nextHigh = false;
-        if (day > 0) {
-            let prev = lastGeneratedSchedule[sIdx]?.[day - 1];
-            if (isHigh(prev)) prevHigh = true;
-        }
-        if (day < totalDays - 1) {
-            let next = lastGeneratedSchedule[sIdx]?.[day + 1];
-            if (isHigh(next)) nextHigh = true;
-        }
-        return prevHigh && nextHigh;
-    }
-
-    // ---------- 核心：找最佳互换人选 ----------
-    function findBestSwapCandidate(sIdx, day) {
-        let currentShift = lastGeneratedSchedule[sIdx]?.[day];
-        if (!currentShift) return null;
-
-        let candidates = [];
-
-        for (let otherS = 0; otherS < staffs.length; otherS++) {
-            if (otherS === sIdx) continue;
-            if (isLocked(otherS, day)) continue;
-
-            let otherShift = lastGeneratedSchedule[otherS]?.[day];
-            if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
-            if (otherShift === currentShift) continue;
-
-            // 检查交换后是否安全
-            let oldS = currentShift;
-            let oldOther = otherShift;
-
-            // 模拟交换
-            let tempSchedule = lastGeneratedSchedule.map(row => [...row]);
-            tempSchedule[sIdx][day] = oldOther;
-            tempSchedule[otherS][day] = oldS;
-
-            // 检查交换后 sIdx 是否还连排
-            let tempSAdjacent = false;
-            let tempSCategory = getShiftCategory(oldOther);
-            if (day > 0) {
-                let prev = tempSchedule[sIdx][day - 1];
-                if (prev && prev !== "休" && prev !== supportShift.name) {
-                    if (getShiftCategory(prev) === tempSCategory) tempSAdjacent = true;
-                }
-            }
-            if (day < totalDays - 1 && !tempSAdjacent) {
-                let next = tempSchedule[sIdx][day + 1];
-                if (next && next !== "休" && next !== supportShift.name) {
-                    if (getShiftCategory(next) === tempSCategory) tempSAdjacent = true;
-                }
-            }
-
-            // 检查交换后 otherS 是否还连排
-            let tempOtherAdjacent = false;
-            let tempOtherCategory = getShiftCategory(oldS);
-            if (day > 0) {
-                let prev = tempSchedule[otherS][day - 1];
-                if (prev && prev !== "休" && prev !== supportShift.name) {
-                    if (getShiftCategory(prev) === tempOtherCategory) tempOtherAdjacent = true;
-                }
-            }
-            if (day < totalDays - 1 && !tempOtherAdjacent) {
-                let next = tempSchedule[otherS][day + 1];
-                if (next && next !== "休" && next !== supportShift.name) {
-                    if (getShiftCategory(next) === tempOtherCategory) tempOtherAdjacent = true;
-                }
-            }
-
-            // 检查高强度是否连3天
-            let tempSHigh3 = false;
-            let tempOtherHigh3 = false;
-            // 简单检查：前后都是高强度
-            if (isHigh(oldOther)) {
-                let prevH = (day > 0 && isHigh(tempSchedule[sIdx][day - 1]));
-                let nextH = (day < totalDays - 1 && isHigh(tempSchedule[sIdx][day + 1]));
-                if (prevH && nextH) tempSHigh3 = true;
-            }
-            if (isHigh(oldS)) {
-                let prevH = (day > 0 && isHigh(tempSchedule[otherS][day - 1]));
-                let nextH = (day < totalDays - 1 && isHigh(tempSchedule[otherS][day + 1]));
-                if (prevH && nextH) tempOtherHigh3 = true;
-            }
-
-            // 检查当天是否重复
-            let tempDuplicate = false;
-            let seen = new Set();
-            for (let si = 0; si < staffs.length; si++) {
-                let sh = tempSchedule[si][day];
-                if (sh && sh !== "休" && sh !== supportShift.name) {
-                    if (seen.has(sh)) tempDuplicate = true;
-                    seen.add(sh);
-                }
-            }
-
-            // 检查交换后是否超次（2次上限）
-            let sCounts = {};
-            let otherCounts = {};
-            for (let d = 0; d < totalDays; d++) {
-                let sShift = tempSchedule[sIdx][d];
-                let otherShift = tempSchedule[otherS][d];
-                if (sShift && sShift !== "休" && sShift !== supportShift.name) {
-                    sCounts[sShift] = (sCounts[sShift] || 0) + 1;
-                }
-                if (otherShift && otherShift !== "休" && otherShift !== supportShift.name) {
-                    otherCounts[otherShift] = (otherCounts[otherShift] || 0) + 1;
-                }
-            }
-            let sOverMax = Object.values(sCounts).some(c => c > 2);
-            let otherOverMax = Object.values(otherCounts).some(c => c > 2);
-
-            // 如果不安全 → 跳过
-            if (tempSAdjacent || tempOtherAdjacent || tempSHigh3 || tempOtherHigh3 || tempDuplicate || sOverMax || otherOverMax) {
-                continue;
-            }
-
-            // 计算安全分数（越低越好）
-            let score = 0;
-            // 优先选不会造成任何连排的
-            // 按对方的岗位次数排序（次数多的优先换走，因为对方比较"富裕"）
-            let otherCount = 0;
-            for (let d = 0; d < totalDays; d++) {
-                if (lastGeneratedSchedule[otherS]?.[d] === otherShift) otherCount++;
-            }
-            score += otherCount * 10;
-
-            // 按对方总上班天数排序（上班天数多的优先）
-            let otherWorkDays = 0;
-            for (let d = 0; d < totalDays; d++) {
-                if (lastGeneratedSchedule[otherS]?.[d] && lastGeneratedSchedule[otherS][d] !== "休") otherWorkDays++;
-            }
-            score += otherWorkDays * 2;
-
-            candidates.push({
-                staffIdx: otherS,
-                staffName: staffs[otherS].name,
-                shiftName: otherShift,
-                score: score,
-                otherCount: otherCount
-            });
-        }
-
-        // 按分数排序（分数低的优先）
-        candidates.sort((a, b) => a.score - b.score);
-
-        return candidates.length > 0 ? candidates[0] : null;
-    }
-
-    // ---------- 主逻辑 ----------
     staffs.forEach((staff, sIdx) => {
         let prevShift = "";
         let prevCategory = "";
@@ -1150,24 +922,22 @@ function validateAdjacentShifts() {
             let currentCategory = getShiftCategory(currentShift);
 
             if (currentShift && currentShift !== "休") {
-                // 检查同类岗位连排（含相同岗位）
-                if (currentCategory && prevCategory && currentCategory === prevCategory) {
+                // 检查相同岗位连排
+                if (currentShift === prevShift && prevShift !== "") {
+                    adjacentCount++;
+                    let cleanName = getDisplayShiftName(currentShift).replace(/\n/g, ' ');
+                    adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 和 <b>第 ${day} 天</b> 连排了相同岗位 [<b>${cleanName}</b>]`);
+                    const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
+                    const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
+                    if (prevCell) prevCell.classList.add('shift-duplicate-error');
+                    if (currCell) currCell.classList.add('shift-duplicate-error');
+                }
+                // 检查同类岗位连排
+                else if (currentCategory && prevCategory && currentCategory === prevCategory && currentShift !== prevShift) {
                     adjacentCount++;
                     let cleanName1 = getDisplayShiftName(prevShift).replace(/\n/g, ' ');
                     let cleanName2 = getDisplayShiftName(currentShift).replace(/\n/g, ' ');
-
-                    // 【新增】找最佳互换人选
-                    let bestSwap = findBestSwapCandidate(sIdx, dayIdx);
-
-                    let suggestion = "";
-                    if (bestSwap) {
-                        suggestion = `<br>💡 建议：可与 <b>${bestSwap.staffName}</b> 互换第 ${day} 天的 [${bestSwap.shiftName.replace(/\n/g, ' ')}]（安全互换）`;
-                    } else {
-                        suggestion = `<br>⚠️ 当前找不到安全互换的人选，可能需要手动调整或解锁相关格子后重试。`;
-                    }
-
-                    adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 的 [<b>${cleanName1}</b>] 和 <b>第 ${day} 天</b> 的 [<b>${cleanName2}</b>] 属于同类岗位连排${suggestion}`);
-
+                    adjacentLogs.push(`📅 <b>${staff.name}</b> 在 <b>第 ${prevDay} 天</b> 的 [<b>${cleanName1}</b>] 和 <b>第 ${day} 天</b> 的 [<b>${cleanName2}</b>] 属于同类岗位连排`);
                     const prevCell = document.getElementById(`cell_${sIdx}_${prevDay - 1}`);
                     const currCell = document.getElementById(`cell_${sIdx}_${dayIdx}`);
                     if (prevCell) prevCell.classList.add('shift-duplicate-error');
@@ -1186,7 +956,7 @@ function validateAdjacentShifts() {
         warningBox.innerHTML = `<b>🚨 岗位连排校验提醒（共发现 ${adjacentCount} 处连排）：</b><br>` + adjacentLogs.join('<br>');
         warningBox.style.display = 'block';
         document.getElementById('status').innerText = `⚠️ 连排校验完毕：发现 ${adjacentCount} 处岗位连排！`;
-        alert(`校验完成！发现有 ${adjacentCount} 处岗位连排，已提供互换建议。`);
+        alert(`校验完成！发现有 ${adjacentCount} 处岗位连排，相关格子已为您标红显示！`);
     } else {
         warningBox.style.display = 'none';
         document.getElementById('status').innerText = `✅ 连排校验完毕：排班无同类或同岗连排！`;
@@ -2460,3 +2230,4 @@ async function getAllHistoryMonthsData() {
 </script>
 </body>
 </html>
+
