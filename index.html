@@ -2413,14 +2413,27 @@ async function generateSchedule() {
             return false;
         }
 
-        // 检查高强度是否连3天
-        function checkHighThree(sIdx, day, shiftName) {
-            let shiftObj = baseShifts.find(s => s.name === shiftName);
-            if (!shiftObj || shiftObj.level !== '高') return false;
-            let prevLevel = (day > 0) ? (baseShifts.find(b => b.name === newSchedule[sIdx][day - 1])?.level) : "";
-            let nextLevel = (day < totalDays - 1) ? (baseShifts.find(b => b.name === newSchedule[sIdx][day + 1])?.level) : "";
-            return (prevLevel === '高' && nextLevel === '高');
+function checkHighThree(sIdx, day, shiftName) {
+    let shiftObj = baseShifts.find(s => s.name === shiftName);
+    if (!shiftObj || shiftObj.level !== '高') return false;
+    
+    // 检查前面已经连续多少天高强度
+    let consecutiveBefore = 0;
+    for (let d = day - 1; d >= 0; d--) {
+        let prev = newSchedule[sIdx][d];
+        let prevObj = baseShifts.find(s => s.name === prev);
+        if (prevObj && prevObj.level === '高') {
+            consecutiveBefore++;
+        } else {
+            break;
         }
+    }
+    
+    // 如果前面已经连续2天高强度，再加上今天就是第3天 → 不允许
+    if (consecutiveBefore >= 2) return true;
+    
+    return false;
+}
 
         // 检查某员工某岗位是否已达2次上限
         function isMaxed(sIdx, shiftName) {
