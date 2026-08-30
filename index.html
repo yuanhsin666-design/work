@@ -1046,36 +1046,34 @@ async function getAllHistoryMonthsData() {
         });
     }
 
-    // 遍历所有格子：保留颜色 + 把 \n 转成 <br>
+    // 遍历所有格子：保留样式 + 把 \n 转成 <br>
     const allCells = cloneTable.querySelectorAll('th, td');
-    allCells.forEach(cell => {
-        // 获取原始颜色
-        const origCell = document.getElementById(cell.id) || 
-                         document.querySelector(`[id="${cell.id}"]`);
-        if (origCell) {
-            const computed = window.getComputedStyle(origCell);
-            cell.style.backgroundColor = computed.backgroundColor || '';
-            cell.style.color = computed.color || '';
-            cell.style.fontWeight = computed.fontWeight || '';
-            cell.style.border = "1px solid #ccc";
-        }
-        
-        // 【核心】从原始格子取 innerHTML，把 \n 转成 <br>
-        let html = cell.innerHTML;
-        // 如果里面是纯文本（没有 <br>），把 \n 转成 <br>
-        if (!html.includes('<br')) {
-            let text = cell.innerText || cell.textContent || '';
-            // 移除 🔒 图标
-            text = text.replace(/🔒/g, '').trim();
-            // 把 \n 替换成 <br>
-            html = text.replace(/\n/g, '<br>');
-        }
-        cell.innerHTML = html;
-        cell.style.whiteSpace = 'pre-wrap';
-        cell.style.wordBreak = 'break-word';
-        cell.style.verticalAlign = 'middle';
-        cell.style.textAlign = 'center';
-        cell.style.padding = '4px 6px';
+    const origCells = table.querySelectorAll('th, td');
+    
+    allCells.forEach((cloneCell, index) => {
+        const origCell = origCells[index];
+        if (!origCell) return;
+
+        // 1. 复制样式
+        const computed = window.getComputedStyle(origCell);
+        cloneCell.style.backgroundColor = computed.backgroundColor;
+        cloneCell.style.color = computed.color;
+        cloneCell.style.fontWeight = computed.fontWeight;
+        cloneCell.style.border = "1px solid #ccc";
+        cloneCell.style.padding = "6px";
+        cloneCell.style.textAlign = "center";
+        cloneCell.style.verticalAlign = "middle";
+        cloneCell.style.fontSize = "12px";
+        cloneCell.style.whiteSpace = "pre-wrap";
+        cloneCell.style.wordBreak = "break-word";
+
+        // 2. 复制内容，把 \n 转成 <br>
+        let text = origCell.innerText || origCell.textContent || "";
+        // 移除 🔒 图标
+        text = text.replace(/🔒/g, '').trim();
+        // 把 \n 替换成 <br>
+        text = text.replace(/\n/g, '<br>');
+        cloneCell.innerHTML = text;
     });
 
     // 构建 Excel 用的 HTML 包装器
@@ -1122,8 +1120,6 @@ async function getAllHistoryMonthsData() {
                 .staff-name { background-color: #f9f9f9; font-weight: bold; }
                 .locked-header { background-color: #cbd5e1 !important; color: #334155; }
                 .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; }
-                .cell-locked { position: relative; }
-                .cell-locked::after { content: "🔒"; font-size: 9px; opacity: 0.8; }
             </style>
         </head>
         <body>${cloneTable.outerHTML}</body>
@@ -1141,7 +1137,6 @@ async function getAllHistoryMonthsData() {
             ]);
             alert("✅ 已复制表格！直接在 Excel 中按 Ctrl+V 粘贴即可！");
         } else {
-            // 备用方案
             const textarea = document.createElement('textarea');
             textarea.value = cloneTable.innerText;
             document.body.appendChild(textarea);
