@@ -1005,7 +1005,7 @@ await fillEmptyCells();
     saveDataToLocal();
     renderAll();
   }
-// 🔧 强制修复 >=3 次（链式反应版）
+// 🔧 强制修复 >=3 次 + 强度不平衡（链式反应版）
 async function forceFixOverTwo() {
     if (!lastGeneratedSchedule) {
         return alert("当前没有排班数据，请先执行排班！");
@@ -1019,7 +1019,7 @@ async function forceFixOverTwo() {
     let schedule = lastGeneratedSchedule.map(row => [...row]);
     let totalFixes = 0;
     let fixLogs = [];
-    let maxRounds = 200;
+    let maxRounds = 300;
 
     // ---- 辅助函数 ----
     function getLevel(shiftName) {
@@ -1075,6 +1075,7 @@ async function forceFixOverTwo() {
         return consecutiveBefore >= 2;
     }
 
+    // 获取每个人每个岗位的次数
     function getCounts() {
         let counts = Array.from({ length: staffs.length }, () => ({}));
         for (let s = 0; s < staffs.length; s++) {
@@ -1088,7 +1089,53 @@ async function forceFixOverTwo() {
         return counts;
     }
 
-    // 检查某天某岗位是否已被占用
+    // 🆕 获取每个人的强度汇总（高/中/低各几次）
+    function getIntensityCounts() {
+        let result = Array.from({ length: staffs.length }, () => ({ high: 0, mid: 0, low: 0 }));
+        let counts = getCounts();
+        for (let s = 0; s < staffs.length; s++) {
+            for (let bS of baseShifts) {
+                let cnt = counts[s][bS.name] || 0;
+                if (bS.level === '高') result[s].high += cnt;
+                else if (bS.level === '中') result[s].mid += cnt;
+                else if (bS.level === '低') result[s].low += cnt;
+            }
+        }
+        return result;
+    }
+
+    // 🆕 检查某人的强度是否超出目标范围
+    function isIntensityOutOfRange(sIdx) {
+        let intCounts = getIntensityCounts();
+        let h = intCounts[sIdx].high;
+        let m = intCounts[sIdx].mid;
+        let l = intCounts[sIdx].low;
+        // 高: 6~8, 中: 7~9, 低: 4~6
+        if (h < 6 || h > 8) return true;
+        if (m < 7 || m > 9) return true;
+        if (l < 4 || l > 6) return true;
+        return false;
+    }
+
+    // 🆕 找出这个人最缺的强度（低于目标下限）
+    function getMostNeededIntensity(sIdx) {
+        let intCounts = getIntensityCounts();
+        let h = intCounts[sIdx].high;
+        let m = intCounts[sIdx].mid;
+        let l = intCounts[sIdx].low;
+        
+        // 计算每个强度的缺口
+        let hGap = Math.max(0, 6 - h); // 高目标6~8
+        let mGap = Math.max(0, 7 - m); // 中目标7~9
+        let lGap = Math.max(0, 4 - l); // 低目标4~6
+        
+        // 找缺口最大的
+        if (hGap >= mGap && hGap >= lGap) return '高';
+        if (mGap >= hGap && mGap >= lGap) return '中';
+        return '低';
+    }
+
+    // 🆕 检查某天某岗位是否已被占用
     function isShiftTaken(day, shiftName) {
         for (let s = 0; s < staffs.length; s++) {
             if (schedule[s][day] === shiftName) return true;
@@ -1096,17 +1143,7 @@ async function forceFixOverTwo() {
         return false;
     }
 
-    // 检查某天是否还有空位
-    function hasEmptySlot(day) {
-        for (let s = 0; s < staffs.length; s++) {
-            if (schedule[s][day] === "" && !isLocked(s, day)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // 找一个人当天可以放的岗位（当天没有、不连排、不满2次）
+    // 🆕 找一个人当天可以放的岗位（同时考虑岗位次数 + 强度平衡）
     function findAvailableShiftForPerson(sIdx, day) {
         let usedToday = new Set();
         for (let si = 0; si < staffs.length; si++) {
@@ -1117,28 +1154,63 @@ async function forceFixOverTwo() {
         }
 
         let counts = getCounts();
+        let intCounts = getIntensityCounts();
+        let mostNeeded = getMostNeededIntensity(sIdx);
+        
         let available = [];
         for (let bS of baseShifts) {
             let nm = bS.name;
+            // 1. 当天不能有重复
             if (usedToday.has(nm)) continue;
+            // 2. 这个人这个岗位不能超过2次
             if ((counts[sIdx][nm] || 0) >= 2) continue;
+            // 3. 不能连排
             if (wouldBeAdjacent(sIdx, day, nm)) continue;
+            // 4. 高强度不能连3天
             if (wouldBeHighThree(sIdx, day, nm)) continue;
+            // 5. 🆕 优先选最缺的强度
+            if (bS.level !== mostNeeded) {
+                // 如果这个岗位的强度不是最缺的，但这个人这个强度已经达标了，也可以选
+                let currentLevelCount = intCounts[sIdx][bS.level === '高' ? 'high' : bS.level === '中' ? 'mid' : 'low'];
+                let targetMin = bS.level === '高' ? 6 : bS.level === '中' ? 7 : 4;
+                let targetMax = bS.level === '高' ? 8 : bS.level === '中' ? 9 : 6;
+                // 如果这个强度已经达到目标，就跳过
+                if (currentLevelCount >= targetMin && currentLevelCount <= targetMax) {
+                    // 但如果当前是最缺的强度，还是要选
+                    if (bS.level !== mostNeeded) continue;
+                }
+            }
             available.push(nm);
         }
 
-        if (available.length === 0) return null;
-        // 选次数最少的
-        let best = available[0];
-        let bestCnt = counts[sIdx][best] || 0;
-        for (let a of available) {
-            let c = counts[sIdx][a] || 0;
-            if (c < bestCnt) {
-                bestCnt = c;
-                best = a;
+        if (available.length === 0) {
+            // 放宽条件：只检查不重复、不连排、不超次
+            for (let bS of baseShifts) {
+                let nm = bS.name;
+                if (usedToday.has(nm)) continue;
+                if ((counts[sIdx][nm] || 0) >= 2) continue;
+                if (wouldBeAdjacent(sIdx, day, nm)) continue;
+                if (wouldBeHighThree(sIdx, day, nm)) continue;
+                available.push(nm);
             }
         }
-        return best;
+
+        if (available.length === 0) return null;
+        
+        // 排序：优先选最缺的强度，然后选次数最少的
+        available.sort((a, b) => {
+            let levelA = getLevel(a);
+            let levelB = getLevel(b);
+            let needA = getMostNeededIntensity(sIdx);
+            let needB = getMostNeededIntensity(sIdx);
+            if (levelA === needA && levelB !== needB) return -1;
+            if (levelB === needB && levelA !== needA) return 1;
+            let cntA = counts[sIdx][a] || 0;
+            let cntB = counts[sIdx][b] || 0;
+            return cntA - cntB;
+        });
+        
+        return available[0];
     }
 
     // ================================================================
@@ -1147,18 +1219,17 @@ async function forceFixOverTwo() {
 
     for (let round = 0; round < maxRounds; round++) {
         let currentCounts = getCounts();
+        let currentIntCounts = getIntensityCounts();
         let hasProblem = false;
-        let fixedThisRound = 0;
-
-        // 1. 找第一个 >=3 次的人
         let targetStaff = -1;
         let targetShift = "";
         let targetDay = -1;
+        let problemType = ""; // 'count' 或 'intensity'
 
+        // 1. 优先找 >=3 次的人
         for (let s = 0; s < staffs.length; s++) {
             for (let nm of baseShifts.map(b => b.name)) {
                 if ((currentCounts[s][nm] || 0) >= 3) {
-                    // 找这个岗位的日期（从第3次开始）
                     let days = [];
                     for (let d = 0; d < totalDays; d++) {
                         if (schedule[s][d] === nm && !isLocked(s, d) && !isDividendDay(d)) {
@@ -1168,7 +1239,8 @@ async function forceFixOverTwo() {
                     if (days.length >= 3) {
                         targetStaff = s;
                         targetShift = nm;
-                        targetDay = days[2]; // 第3次的那天
+                        targetDay = days[2];
+                        problemType = 'count';
                         hasProblem = true;
                         break;
                     }
@@ -1177,49 +1249,83 @@ async function forceFixOverTwo() {
             if (hasProblem) break;
         }
 
-        if (!hasProblem) break;
-
-        // ================================================================
-        // 2. 【删除】把目标员工第3次的那天清空
-        // ================================================================
-
-        let oldShift = schedule[targetStaff][targetDay];
-        schedule[targetStaff][targetDay] = "";
-        totalFixes++;
-        fixedThisRound++;
-        fixLogs.push(`🗑️ 删除 ${staffs[targetStaff].name} 第 ${targetDay+1} 天的 [${oldShift.replace(/\n/g,' ')}]（第3次）`);
-
-        // ================================================================
-        // 3. 【填补】帮这个人填一个当天没有的岗位
-        // ================================================================
-
-        let newShift = findAvailableShiftForPerson(targetStaff, targetDay);
-        if (newShift) {
-            schedule[targetStaff][targetDay] = newShift;
-            fixLogs.push(`📥 填补 ${staffs[targetStaff].name} 第 ${targetDay+1} 天 → [${newShift.replace(/\n/g,' ')}]`);
-        } else {
-            // 真的找不到，随便填一个当天没有的
-            let usedToday = new Set();
-            for (let si = 0; si < staffs.length; si++) {
-                let shift = schedule[si][targetDay];
-                if (shift && shift !== "休" && shift !== supportShift.name) {
-                    usedToday.add(shift);
-                }
-            }
-            for (let bS of baseShifts) {
-                if (!usedToday.has(bS.name)) {
-                    schedule[targetStaff][targetDay] = bS.name;
-                    fixLogs.push(`📥 强制填补 ${staffs[targetStaff].name} 第 ${targetDay+1} 天 → [${bS.name.replace(/\n/g,' ')}]`);
-                    break;
+        // 2. 如果没有 >=3 次，找强度不平衡的人
+        if (!hasProblem) {
+            for (let s = 0; s < staffs.length; s++) {
+                if (isIntensityOutOfRange(s)) {
+                    // 找这个人当天可以换的岗位
+                    for (let d = 0; d < totalDays; d++) {
+                        if (isLocked(s, d) || isDividendDay(d)) continue;
+                        let currentShift = schedule[s][d];
+                        if (!currentShift || currentShift === "休" || currentShift === supportShift.name) continue;
+                        
+                        // 检查这个岗位的强度是否过多
+                        let level = getLevel(currentShift);
+                        let levelKey = level === '高' ? 'high' : level === '中' ? 'mid' : 'low';
+                        let targetMax = level === '高' ? 8 : level === '中' ? 9 : 6;
+                        if (currentIntCounts[s][levelKey] > targetMax) {
+                            // 这个岗位的强度超了，尝试换成别的强度
+                            let newShift = findAvailableShiftForPerson(s, d);
+                            if (newShift && newShift !== currentShift) {
+                                targetStaff = s;
+                                targetShift = currentShift;
+                                targetDay = d;
+                                problemType = 'intensity';
+                                hasProblem = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (hasProblem) break;
                 }
             }
         }
 
+        if (!hasProblem) break;
+
         // ================================================================
-        // 4. 【链式反应】检查是否有人因此变成 >=3 次，继续处理
+        // 修复
         // ================================================================
 
-        // 继续下一轮循环，会重新扫描所有 >=3 次的人
+        if (problemType === 'count') {
+            // 删除第3次
+            let oldShift = schedule[targetStaff][targetDay];
+            schedule[targetStaff][targetDay] = "";
+            totalFixes++;
+            fixLogs.push(`🗑️ 删除 ${staffs[targetStaff].name} 第 ${targetDay+1} 天的 [${oldShift.replace(/\n/g,' ')}]（第3次）`);
+
+            // 填补
+            let newShift = findAvailableShiftForPerson(targetStaff, targetDay);
+            if (newShift) {
+                schedule[targetStaff][targetDay] = newShift;
+                fixLogs.push(`📥 填补 ${staffs[targetStaff].name} 第 ${targetDay+1} 天 → [${newShift.replace(/\n/g,' ')}]（强度平衡）`);
+            } else {
+                // 随便填一个当天没有的
+                let usedToday = new Set();
+                for (let si = 0; si < staffs.length; si++) {
+                    let shift = schedule[si][targetDay];
+                    if (shift && shift !== "休" && shift !== supportShift.name) {
+                        usedToday.add(shift);
+                    }
+                }
+                for (let bS of baseShifts) {
+                    if (!usedToday.has(bS.name)) {
+                        schedule[targetStaff][targetDay] = bS.name;
+                        fixLogs.push(`📥 强制填补 ${staffs[targetStaff].name} 第 ${targetDay+1} 天 → [${bS.name.replace(/\n/g,' ')}]`);
+                        break;
+                    }
+                }
+            }
+        } else if (problemType === 'intensity') {
+            // 强度不平衡：替换这一天
+            let oldShift = schedule[targetStaff][targetDay];
+            let newShift = findAvailableShiftForPerson(targetStaff, targetDay);
+            if (newShift && newShift !== oldShift) {
+                schedule[targetStaff][targetDay] = newShift;
+                totalFixes++;
+                fixLogs.push(`⚖️ 强度调整 ${staffs[targetStaff].name} 第 ${targetDay+1} 天 [${oldShift.replace(/\n/g,' ')}] → [${newShift.replace(/\n/g,' ')}]`);
+            }
+        }
     }
 
     // ================================================================
@@ -1227,7 +1333,9 @@ async function forceFixOverTwo() {
     // ================================================================
 
     let finalCounts = getCounts();
+    let finalIntCounts = getIntensityCounts();
     let remainingProblems = [];
+
     for (let s = 0; s < staffs.length; s++) {
         for (let bS of baseShifts) {
             let cnt = finalCounts[s][bS.name] || 0;
@@ -1238,6 +1346,13 @@ async function forceFixOverTwo() {
                 remainingProblems.push(`${staffs[s].name} 在 ${bS.name.replace(/\n/g, ' ')} 是 ${cnt} 次`);
             }
         }
+        // 检查强度
+        let h = finalIntCounts[s].high;
+        let m = finalIntCounts[s].mid;
+        let l = finalIntCounts[s].low;
+        if (h < 6 || h > 8) remainingProblems.push(`${staffs[s].name} 高强度 ${h} 次（目标 6~8）`);
+        if (m < 7 || m > 9) remainingProblems.push(`${staffs[s].name} 中强度 ${m} 次（目标 7~9）`);
+        if (l < 4 || l > 6) remainingProblems.push(`${staffs[s].name} 低强度 ${l} 次（目标 4~6）`);
     }
 
     if (totalFixes > 0 || remainingProblems.length > 0) {
@@ -1254,10 +1369,10 @@ async function forceFixOverTwo() {
         warningBox.innerHTML = msg;
         warningBox.style.display = 'block';
         document.getElementById('status').innerText = `✅ 链式修复了 ${totalFixes} 处！${remainingProblems.length > 0 ? '⚠️ 仍有问题' : ''}`;
-        alert(`✅ 链式修复完成！\n- 共 ${totalFixes} 处操作\n- 不动休假、锁定、分红日、支援\n${remainingProblems.length > 0 ? '\n⚠️ 仍有 ' + remainingProblems.length + ' 处问题，请再点一次。' : '\n🎉 全表已经没有 >=3 次的问题！'}`);
+        alert(`✅ 链式修复完成！\n- 共 ${totalFixes} 处操作\n- 检查岗位次数 + 强度平衡（高:6~8, 中:7~9, 低:4~6）\n${remainingProblems.length > 0 ? '\n⚠️ 仍有 ' + remainingProblems.length + ' 处问题，请再点一次。' : '\n🎉 全表完美！'}`);
     } else {
-        document.getElementById('status').innerText = `✅ 检查完毕，没有发现 >=3 次的问题！`;
-        alert("✅ 没有发现任何 >=3 次的问题！");
+        document.getElementById('status').innerText = `✅ 检查完毕，没有发现问题！`;
+        alert("✅ 没有发现任何 >=3 次或强度不平衡的问题！");
     }
 }
   
