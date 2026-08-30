@@ -1584,9 +1584,8 @@ async function getAllHistoryMonthsData() {
       cloneCell.style.padding = "6px";
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
-      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
+            let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
       cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
-    });
     const htmlWrapper = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
       <head><meta charset="utf-8"><style>td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; } br { mso-data-placement: same-cell; }</style></head>
