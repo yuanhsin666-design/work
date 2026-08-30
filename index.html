@@ -1026,50 +1026,97 @@ async function getAllHistoryMonthsData() {
   async function copyTableWithStyles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
+
     const cloneTable = table.cloneNode(true);
+
+    // 如果是排班表且处于手动编辑模式，把 select 的值转为文本
     if (tableId === 'scheduleTable' && isManualEditMode) {
-      const selects = table.querySelectorAll('select.shift-select');
-      const totalDays = getDaysInMonth(parseInt(document.getElementById('yearSelect').value), parseInt(document.getElementById('monthSelect').value));
-      staffs.forEach((_, sIdx) => {
-        for (let d = 0; d < totalDays; d++) {
-          const select = selects[sIdx * totalDays + d];
-          if (select) {
-            const val = select.options[select.selectedIndex].text;
-            const targetTd = cloneTable.querySelectorAll('tbody tr')[sIdx].querySelectorAll('td')[d + 1];
-            if (targetTd) targetTd.innerText = (val.includes('-- 未安排 --')) ? '' : val;
-          }
-        }
-      });
+        const selects = table.querySelectorAll('select.shift-select');
+        const totalDays = getDaysInMonth(parseInt(document.getElementById('yearSelect').value), parseInt(document.getElementById('monthSelect').value));
+        staffs.forEach((_, sIdx) => {
+            for (let d = 0; d < totalDays; d++) {
+                const select = selects[sIdx * totalDays + d];
+                if (select) {
+                    const val = select.options[select.selectedIndex].text;
+                    const targetTd = cloneTable.querySelectorAll('tbody tr')[sIdx].querySelectorAll('td')[d + 1];
+                    if (targetTd) targetTd.innerText = (val.includes('-- 未安排 --')) ? '' : val;
+                }
+            }
+        });
     }
-    const origCells = table.querySelectorAll('th, td');
-    const cloneCells = cloneTable.querySelectorAll('th, td');
-    origCells.forEach((origCell, index) => {
-      const computed = window.getComputedStyle(origCell);
-      const cloneCell = cloneCells[index];
-      if (!cloneCell) return;
-      cloneCell.style.backgroundColor = computed.backgroundColor;
-      cloneCell.style.color = computed.color;
-      cloneCell.style.fontWeight = computed.fontWeight;
-      cloneCell.style.border = "1px solid #ccc";
-      cloneCell.style.padding = "6px";
-      cloneCell.style.textAlign = "center";
-      cloneCell.style.fontSize = "12px";
-      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
-      cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
+
+    // 遍历所有格子，把 \n 换行转成 Excel 认识的 <br>
+    const allCells = cloneTable.querySelectorAll('th, td');
+    allCells.forEach(cell => {
+        // 保留原有样式
+        const computed = window.getComputedStyle(cell);
+        cell.style.backgroundColor = computed.backgroundColor;
+        cell.style.color = computed.color;
+        cell.style.fontWeight = computed.fontWeight;
+        cell.style.border = "1px solid #ccc";
+        cell.style.padding = "6px";
+        cell.style.textAlign = "center";
+        cell.style.fontSize = "12px";
+        cell.style.whiteSpace = "pre-wrap";
+        cell.style.wordBreak = "break-word";
+
+        // 【核心】把 \n 换行替换成 <br>，让 Excel 能识别
+        let text = cell.innerText || cell.textContent || "";
+        // 移除 🔒 图标
+        text = text.replace(/🔒/g, '').trim();
+        // 把 \n 替换成 <br>
+        text = text.replace(/\n/g, '<br>');
+        cell.innerHTML = text;
     });
+
+    // 构建 Excel 用的 HTML 包装器
     const htmlWrapper = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="utf-8"><style>td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; } br { mso-data-placement: same-cell; }</style></head>
-      <body>${cloneTable.outerHTML}</body></html>`;
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+            <meta charset="utf-8">
+            <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+            <style>
+                td, th {
+                    mso-number-format: '\\@';
+                    white-space: pre-wrap !important;
+                    vertical-align: middle;
+                    text-align: center;
+                    border: 1px solid #ccc;
+                    padding: 4px 6px;
+                }
+                br { mso-data-placement: same-cell; }
+                table { border-collapse: collapse; }
+            </style>
+        </head>
+        <body>${cloneTable.outerHTML}</body>
+        </html>`;
+
     try {
-      if (navigator.clipboard && window.ClipboardItem) {
-        const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
-        const blobText = new Blob([cloneTable.innerText], { type: "text/plain" });
-        await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
-        alert("✅ 已复制表格！直接在 Excel 中按 Ctrl+V 粘贴即可！");
-      }
-    } catch (err) { alert("复制失败，请重试。"); }
-  }
+        if (navigator.clipboard && window.ClipboardItem) {
+            const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
+            const blobText = new Blob([cloneTable.innerText], { type: "text/plain" });
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    "text/html": blobHtml,
+                    "text/plain": blobText
+                })
+            ]);
+            alert("✅ 已复制表格！直接在 Excel 中按 Ctrl+V 粘贴即可！");
+        } else {
+            // 备用方案：用 textarea
+            const textarea = document.createElement('textarea');
+            textarea.value = cloneTable.innerText;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            alert("✅ 已复制表格（纯文本模式）");
+        }
+    } catch (err) {
+        console.error(err);
+        alert("复制失败，请重试。");
+    }
+}
 
   function getShiftCategory(shiftName) {
     if (!shiftName || shiftName === "休" || shiftName === supportShift.name) return "";
