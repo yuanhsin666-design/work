@@ -120,7 +120,6 @@
     <button class="warning-btn" onclick="validateZeroCounts()">🚨 校验岗位0次</button>
     <button class="success" onclick="autoFixCounts()">⚖️ 修复次数平摊</button>
     <button class="danger" onclick="resetCurrentMonthData()">🗑️ 重置当月数据</button>
-    <button class="danger" onclick="forceFixThreeTimes()">🔧 强制修复3次问题</button>
     <span id="status" style="color: #666; font-size: 13px; font-weight: bold;"></span>
   </div>
   <div id="warningLog" class="log-box"></div>
@@ -963,17 +962,7 @@
 
 let tempSchedule = sanitizeSchedule(schedule);
 lastGeneratedSchedule = tempSchedule;
-
-// 如果问题很多，直接调用核心排班算法重新生成
-let allProblems = remainingErrors.length;
-if (allProblems > 0) {
-    // 重新执行排班（会保留锁定的格子）
-    await generateSchedule();
-    document.getElementById('status').innerText = `🔄 检测到 ${allProblems} 处问题，已重新执行排班！`;
-    return;
-} else {
-    await fillEmptyCells();
-}
+await fillEmptyCells();
 
     let finalSchedule = lastGeneratedSchedule;
     let finalCounts = Array.from({ length: staffs.length }, () => ({}));
@@ -1015,150 +1004,7 @@ if (allProblems > 0) {
     saveDataToLocal();
     renderAll();
   }
-// 🔧 强制修复3次问题
-async function forceFixThreeTimes() {
-    if (!lastGeneratedSchedule) {
-        return alert("当前没有排班数据，请先执行排班！");
-    }
 
-    const totalDays = getDaysInMonth(
-        parseInt(document.getElementById('yearSelect').value),
-        parseInt(document.getElementById('monthSelect').value)
-    );
-
-    let schedule = lastGeneratedSchedule.map(row => [...row]);
-    let fixedCount = 0;
-    let fixLogs = [];
-
-    // 找出所有3次的人
-    function getCounts() {
-        let counts = Array.from({ length: staffs.length }, () => ({}));
-        for (let s = 0; s < staffs.length; s++) {
-            for (let d = 0; d < totalDays; d++) {
-                let shift = schedule[s][d];
-                if (shift && shift !== "休" && shift !== supportShift.name) {
-                    counts[s][shift] = (counts[s][shift] || 0) + 1;
-                }
-            }
-        }
-        return counts;
-    }
-
-    function isLocked(s, d) {
-        return lockedMap[s] && lockedMap[s][d];
-    }
-
-    let currentCounts = getCounts();
-    let threeTimesList = [];
-
-    // 收集所有3次的问题
-    for (let s = 0; s < staffs.length; s++) {
-        for (let nm of baseShifts.map(b => b.name)) {
-            let cnt = currentCounts[s][nm] || 0;
-            if (cnt >= 3) {
-                threeTimesList.push({ sIdx: s, shiftName: nm, count: cnt });
-            }
-        }
-    }
-
-    if (threeTimesList.length === 0) {
-        alert("✅ 没有发现任何3次问题！");
-        return;
-    }
-
-    // 对每个3次的问题，找到第3次的那天，换成当天缺失的岗位
-    for (let item of threeTimesList) {
-        let { sIdx, shiftName } = item;
-
-        // 找这个人这个岗位的所有日期
-        let daysWithShift = [];
-        for (let d = 0; d < totalDays; d++) {
-            if (schedule[sIdx][d] === shiftName && !isLocked(sIdx, d)) {
-                daysWithShift.push(d);
-            }
-        }
-
-        // 从第3次开始处理
-        for (let i = 2; i < daysWithShift.length; i++) {
-            let day = daysWithShift[i];
-            if (isLocked(sIdx, day)) continue;
-
-            // 找当天缺失的岗位
-            let usedToday = new Set();
-            for (let s = 0; s < staffs.length; s++) {
-                let shift = schedule[s][day];
-                if (shift && shift !== "休" && shift !== supportShift.name) {
-                    usedToday.add(shift);
-                }
-            }
-
-            let availableShifts = [];
-            let counts = getCounts();
-            for (let shift of baseShifts) {
-                let nm = shift.name;
-                if (!usedToday.has(nm) && (counts[sIdx][nm] || 0) < 2) {
-                    // 检查是否连排
-                    let wouldAdjacent = false;
-                    if (day > 0) {
-                        let prev = schedule[sIdx][day - 1];
-                        if (prev && prev !== "休" && (prev === nm || getShiftCategory(prev) === getShiftCategory(nm))) {
-                            wouldAdjacent = true;
-                        }
-                    }
-                    if (day < totalDays - 1) {
-                        let next = schedule[sIdx][day + 1];
-                        if (next && next !== "休" && (next === nm || getShiftCategory(next) === getShiftCategory(nm))) {
-                            wouldAdjacent = true;
-                        }
-                    }
-                    if (!wouldAdjacent) {
-                        availableShifts.push(nm);
-                    }
-                }
-            }
-
-            if (availableShifts.length > 0) {
-                // 选次数最少的
-                let bestShift = availableShifts[0];
-                let bestCount = counts[sIdx][bestShift] || 0;
-                for (let nm of availableShifts) {
-                    let cnt = counts[sIdx][nm] || 0;
-                    if (cnt < bestCount) {
-                        bestCount = cnt;
-                        bestShift = nm;
-                    }
-                }
-
-                let oldShift = schedule[sIdx][day];
-                schedule[sIdx][day] = bestShift;
-                fixedCount++;
-                fixLogs.push(`🔧 第 ${day+1} 天：${staffs[sIdx].name} [${oldShift.replace(/\n/g,' ')}] → [${bestShift.replace(/\n/g,' ')}] (3次→2次)`);
-            } else {
-                // 实在找不到合适的，就改成"休"
-                schedule[sIdx][day] = "休";
-                fixedCount++;
-                fixLogs.push(`🔧 第 ${day+1} 天：${staffs[sIdx].name} [${shiftName.replace(/\n/g,' ')}] → [休] (强制清空)`);
-            }
-        }
-    }
-
-    // 保存并刷新
-    if (fixedCount > 0) {
-        lastGeneratedSchedule = sanitizeSchedule(schedule);
-        // 再调用一次 fillEmptyCells 填补空位
-        await fillEmptyCells();
-        renderAll();
-        saveDataToLocal();
-
-        const warningBox = document.getElementById('warningLog');
-        warningBox.innerHTML = `<b>✅ 强制修复完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
-        warningBox.style.display = 'block';
-        document.getElementById('status').innerText = `✅ 强制修复了 ${fixedCount} 处3次问题！`;
-        alert(`✅ 强制修复完成！\n- 修复了 ${fixedCount} 处3次问题\n- 所有岗位现在应该是 1~2 次了！`);
-    } else {
-        alert("✅ 没有发现需要修复的问题！");
-    }
-}
   
   // ========== 填补空格子（全月回溯版） ==========
   async function fillEmptyCells() {
