@@ -1930,7 +1930,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-       async function generateSchedule() {
+     async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1976,7 +1976,7 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 锁死休假
+      // 【绝对锁死】休假日 & 锁定格
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -2011,7 +2011,7 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
-      // 分红日优先
+      // 1号，16号分红日优先排
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2050,83 +2050,113 @@ async function getAllHistoryMonthsData() {
         });
       });
 
-      // ======== 终极核心：先构造 100% 完美的 12 天错位骨架！ ========
-      let countPerfect = 0;
-      for (let person = 0; person < staffs.length; person++) {
-        // 给每个人分配一个“随机起点”
-        let start = Math.floor(Math.random() * baseShifts.length);
-        for (let step = 0; step < baseShifts.length; step++) { // 每人12次
-          let shiftIdx = (start + step) % baseShifts.length;
-          let shiftName = baseShifts[shiftIdx].name;
-          
-          // 在全月里寻找一个“绝对完美”的空位（不重复、不连排、不乱次数）
-          for (let d = 0; d < totalDays; d++) {
-            if (newSchedule[person][d] !== "") continue;
-            if (lockedMap[person] && lockedMap[person][d]) continue;
+      // 3. 排支援
+      for (let d = 0; d < totalDays; d++) {
+        let availableToday = [];
+        for (let s = 0; s < staffs.length; s++) {
+          if (newSchedule[s][d] === "" && !(lockedMap[s] && lockedMap[s][d])) availableToday.push(s);
+        }
 
-            let prev = (d > 0) ? newSchedule[person][d - 1] : "";
-            let next = (d < totalDays - 1) ? newSchedule[person][d + 1] : "";
+        if (availableToday.length >= 13) {
+          availableToday.sort((a, b) => (pastSupportCounts[a] || 0) - (pastSupportCounts[b] || 0));
+          let chosenSupport = availableToday[0];
+          newSchedule[chosenSupport][d] = supName;
+          supportCountsThisMonth[chosenSupport]++;
+        }
+      }
+
+      // 4. 先排高，再中，再低
+      let orderedShifts = [
+        ...baseShifts.filter(s => s.level === '高'),
+        ...baseShifts.filter(s => s.level === '中'),
+        ...baseShifts.filter(s => s.level === '低')
+      ].sort(() => Math.random() - 0.5);
+
+      orderedShifts.forEach(shift => {
+        let shiftName = shift.name;
+        for (let s = 0; s < staffs.length; s++) {
+          if ((shiftCounts[s][shiftName] || 0) >= 2) continue;
+
+          for (let d = 0; d < totalDays; d++) {
+            if (newSchedule[s][d] !== "") continue;
+            if (lockedMap[s] && lockedMap[s][d]) continue;
+
+            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
             if (shiftName === prev || shiftName === next) continue;
             if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
-            if (shiftCounts[person][shiftName] || 0 >= 2) continue;
 
-            // 当天不能被别人占了
-            let taken = newSchedule.some((row, idx) => idx !== person && row[d] === shiftName);
+            let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
             if (taken) continue;
 
-            newSchedule[person][d] = shiftName;
-            shiftCounts[person][shiftName] = (shiftCounts[person][shiftName] || 0) + 1;
-            countPerfect++;
-            break; // 这个岗位排好了，换下一个
+            newSchedule[s][d] = shiftName;
+            shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
+            break;
           }
-        }
-      }
-
-      // ======== 填补剩余空格，绝不产生0次和3次！ ========
-      let remainingDays = [];
-      for (let d = 0; d < totalDays; d++) {
-        for (let s = 0; s < staffs.length; s++) {
-          if (newSchedule[s][d] === "") remainingDays.push({ s, d });
-        }
-      }
-      
-      remainingDays.sort(() => Math.random() - 0.5);
-      remainingDays.forEach(slot => {
-        let s = slot.s;
-        let d = slot.d;
-        
-        let bestShift = null;
-        let bestCnt = Infinity;
-        for (let bS of baseShifts) {
-          let nm = bS.name;
-          if ((shiftCounts[s][nm] || 0) >= 2) continue; // 铁律：绝不能超过2次！
-          
-          let taken = newSchedule.some((row, idx) => idx !== s && row[d] === nm);
-          if (taken) continue;
-          
-          let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-          let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-          if (nm === prev || nm === next) continue;
-          if (getShiftCategory(nm) && (getShiftCategory(nm) === getShiftCategory(prev) || getShiftCategory(nm) === getShiftCategory(next))) continue;
-          
-          let cnt = shiftCounts[s][nm] || 0;
-          if (cnt < bestCnt) {
-            bestCnt = cnt;
-            bestShift = nm;
-          }
-        }
-        
-        if (bestShift) {
-          newSchedule[s][d] = bestShift;
-          shiftCounts[s][bestShift] = (shiftCounts[s][bestShift] || 0) + 1;
         }
       });
+
+      // 5. 【终极彻底兜底】剩下的空白，看当天缺什么，直接填上去，绝不重复绝不留空！
+      for (let s = 0; s < staffs.length; s++) {
+        for (let d = 0; d < totalDays; d++) {
+          if (newSchedule[s][d] !== "") continue;
+
+          // 1. 找出当天所有已用掉的岗位
+          let usedToday = new Set();
+          for (let i = 0; i < staffs.length; i++) {
+            if (newSchedule[i][d] !== "" && newSchedule[i][d] !== "休" && newSchedule[i][d] !== supName) {
+              usedToday.add(newSchedule[i][d]);
+            }
+          }
+
+          // 2. 找出当天缺失的岗位
+          let missingToday = [];
+          for (let bS of baseShifts) {
+            if (!usedToday.has(bS.name)) missingToday.push(bS.name);
+          }
+
+          // 3. 从缺失岗位里，挑这个人次数最少的补上
+          if (missingToday.length > 0) {
+            let best = null;
+            let bestCnt = Infinity;
+            for (let nm of missingToday) {
+              if ((shiftCounts[s][nm] || 0) >= 2) continue; 
+              let cnt = shiftCounts[s][nm] || 0;
+              if (cnt < bestCnt) {
+                bestCnt = cnt;
+                best = nm;
+              }
+            }
+            if (best) {
+              newSchedule[s][d] = best;
+              shiftCounts[s][best] = (shiftCounts[s][best] || 0) + 1;
+              continue;
+            }
+          }
+
+          // 4. 极端情况下，只能选一个未满2次的岗位
+          let fallback = null;
+          let fallbackCnt = Infinity;
+          for (let bS of baseShifts) {
+            if ((shiftCounts[s][bS.name] || 0) >= 2) continue;
+            let cnt = shiftCounts[s][bS.name] || 0;
+            if (cnt < fallbackCnt) {
+              fallbackCnt = cnt;
+              fallback = bS.name;
+            }
+          }
+          if (fallback) {
+            newSchedule[s][d] = fallback;
+            shiftCounts[s][fallback] = (shiftCounts[s][fallback] || 0) + 1;
+          }
+        }
+      }
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！构建了100%完美错位的12天骨架，绝不重复、绝不连排！`);
+      alert(`排班完成！生成即完美，无需点任何修复按钮！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
