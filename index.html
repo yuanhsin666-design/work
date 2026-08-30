@@ -2128,51 +2128,40 @@ async function generateSchedule() {
         });
       });
 
-            // 3. 【严格支援分配】平均分配，绝不连续给同一个人！
+           // 3. 【终极支援分配】谁的跨月累计少，谁优先排！
       for (let d = 0; d < totalDays; d++) {
         let availableToday = [];
-        // 找出当天上班且当天还没有排任何岗位的人
         for (let s = 0; s < staffs.length; s++) {
           if (newSchedule[s][d] === "" && !(lockedMap[s] && lockedMap[s][d])) availableToday.push(s);
         }
 
-        // 只有当人数足够（超过13人上班）才考虑支援
         if (availableToday.length >= 13) {
-          // 1. 优先找跨月累计次数最少的人（比如海绵是0次，妮妮是4次，海绵必须优先！）
-          availableToday.sort((a, b) => {
-            let totalA = pastSupportCounts[a] || 0;
-            let totalB = pastSupportCounts[b] || 0;
-            if (totalA !== totalB) return totalA - totalB;
-            // 如果跨月次数一样，再看当月已经拿过几次支援
-            return (supportCountsThisMonth[a] || 0) - (supportCountsThisMonth[b] || 0);
-          });
+          // 1. 先按“跨月累计次数”从少到多排序！
+          availableToday.sort((a, b) => (pastSupportCounts[a] || 0) - (pastSupportCounts[b] || 0));
 
-          // 2. 找一个跨月最少、且当月还没做过支援的人（绝不连续！）
+          // 2. 找一个人：跨月累计最少，且当月没做过，且前一天不是支援的！
           let chosenSupport = -1;
           for (let s of availableToday) {
-            // 如果这个人前一天也是支援，绝对不能选！
-            let prevIsSup = (d > 0) ? (newSchedule[s][d - 1] === supName) : false;
-            if (prevIsSup) continue; 
-            
-            // 如果这个人在当月已经拿过2次支援了，也跳过（防止妮妮那样拿4天）
-            if ((supportCountsThisMonth[s] || 0) >= 2) continue; 
+            if ((pastSupportCounts[s] || 0) >= 1) continue; // ★ 关键：跨月已经拿过1次及以上的，绝对不再排！
+            if ((supportCountsThisMonth[s] || 0) >= 1) continue; // 当月也不能多排！
+            if (d > 0 && newSchedule[s][d - 1] === supName) continue; // 昨天支援的，今天也不排！
 
-            // 选这个人！
             chosenSupport = s;
             break;
           }
 
-          // 如果上面实在找不到了（极少数情况），只能退而求其次选一个当月只拿过1次的
+          // 3. 如果上面找不到（比如所有人跨月都超过1次了），只能找跨月最少的这一个人排1次
           if (chosenSupport === -1) {
+            // 确保只能在极少数情况下使用，且不能是连续两天
             for (let s of availableToday) {
-              if ((supportCountsThisMonth[s] || 0) <= 1) {
-                chosenSupport = s;
-                break;
-              }
+              if (d > 0 && newSchedule[s][d - 1] === supName) continue;
+              if ((supportCountsThisMonth[s] || 0) >= 1) continue;
+              chosenSupport = s;
+              break;
             }
           }
 
-          // 最后落定
+          // 4. 最后落定
           if (chosenSupport !== -1) {
             newSchedule[chosenSupport][d] = supName;
             supportCountsThisMonth[chosenSupport]++;
