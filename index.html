@@ -1005,7 +1005,7 @@ await fillEmptyCells();
     saveDataToLocal();
     renderAll();
   }
-// 🔧 强制修复所有 >=3 次的问题（全局回溯版）
+// 🔧 强制修复所有 >=3 次的问题（纯替换版，不用交换）
 async function forceFixOverTwo() {
     if (!lastGeneratedSchedule) {
         return alert("当前没有排班数据，请先执行排班！");
@@ -1087,17 +1087,17 @@ async function forceFixOverTwo() {
         return counts;
     }
 
-    // ---- 全局回溯主循环 ----
+    // ---- 主循环：一直修到没有 >=3 次 ----
     let globalRound = 0;
-    const MAX_GLOBAL_ROUNDS = 200;
+    const MAX_ROUNDS = 100;
 
-    while (globalRound < MAX_GLOBAL_ROUNDS) {
+    while (globalRound < MAX_ROUNDS) {
         globalRound++;
         let currentCounts = getCounts();
         let hasProblem = false;
-        let roundFixed = 0;
+        let fixedThisRound = 0;
 
-        // 检查是否存在 >=3 次的岗位
+        // 检查是否还有 >=3 次
         for (let s = 0; s < staffs.length; s++) {
             for (let nm of baseShifts.map(b => b.name)) {
                 if ((currentCounts[s][nm] || 0) >= 3) {
@@ -1108,9 +1108,9 @@ async function forceFixOverTwo() {
             if (hasProblem) break;
         }
 
-        if (!hasProblem) break; // 没有问题了，退出循环
+        if (!hasProblem) break;
 
-        // ---- 尝试修复 ----
+        // ---- 修复：只做替换，不做交换 ----
         for (let s = 0; s < staffs.length; s++) {
             for (let nm of baseShifts.map(b => b.name)) {
                 let cnt = currentCounts[s][nm] || 0;
@@ -1124,7 +1124,7 @@ async function forceFixOverTwo() {
                     }
                 }
 
-                // 从第3次开始处理
+                // 从第3次开始，逐个替换
                 for (let i = 2; i < daysWithShift.length; i++) {
                     let day = daysWithShift[i];
                     if (isLocked(s, day) || isDividendDay(day)) continue;
@@ -1138,7 +1138,7 @@ async function forceFixOverTwo() {
                         }
                     }
 
-                    // 找可替换的岗位（当天没有、这个人没满2次、不连排）
+                    // 找可替换的岗位：当天没有、这个人没满2次、不连排
                     let available = [];
                     for (let bS of baseShifts) {
                         let newShift = bS.name;
@@ -1164,65 +1164,34 @@ async function forceFixOverTwo() {
                         let oldShift = schedule[s][day];
                         schedule[s][day] = best;
                         totalFixes++;
-                        roundFixed++;
+                        fixedThisRound++;
                         fixLogs.push(`🔧 第 ${day+1} 天：${staffs[s].name} [${oldShift.replace(/\n/g,' ')}] (${cnt}次→${cnt-1}次) → [${best.replace(/\n/g,' ')}]`);
                         
-                        // 【关键】立即跳出，重新统计
+                        // 修了一个就重新统计
                         break;
                     } else {
-                        // 没得换，尝试跟别人交换
-                        let swapped = false;
-                        for (let otherS = 0; otherS < staffs.length; otherS++) {
-                            if (otherS === s) continue;
-                            let otherShift = schedule[otherS][day];
-                            if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
-                            if (otherShift === nm) continue;
-                            if (isLocked(otherS, day)) continue;
-
-                            let oldS = schedule[s][day];
-                            let oldOther = schedule[otherS][day];
-                            schedule[s][day] = oldOther;
-                            schedule[otherS][day] = oldS;
-
-                            let valid = true;
-                            if (wouldBeAdjacent(s, day, oldOther)) valid = false;
-                            if (wouldBeAdjacent(otherS, day, oldS)) valid = false;
-                            if (wouldBeHighThree(s, day, oldOther)) valid = false;
-                            if (wouldBeHighThree(otherS, day, oldS)) valid = false;
-
-                            let seen = new Set();
-                            for (let si = 0; si < staffs.length; si++) {
-                                let sh = schedule[si][day];
-                                if (sh && sh !== "休" && sh !== supportShift.name) {
-                                    if (seen.has(sh)) valid = false;
-                                    seen.add(sh);
-                                }
-                            }
-
-                            if (valid) {
+                        // 实在没得换，就找一个当天没有的岗位强行替换（不管次数）
+                        for (let bS of baseShifts) {
+                            if (!usedToday.has(bS.name)) {
+                                let oldShift = schedule[s][day];
+                                schedule[s][day] = bS.name;
                                 totalFixes++;
-                                roundFixed++;
-                                fixLogs.push(`🔄 第 ${day+1} 天：${staffs[s].name} [${oldS.replace(/\n/g,' ')}] ↔ ${staffs[otherS].name} [${oldOther.replace(/\n/g,' ')}]`);
-                                swapped = true;
+                                fixedThisRound++;
+                                fixLogs.push(`⚡ 第 ${day+1} 天：${staffs[s].name} [${oldShift.replace(/\n/g,' ')}] → [${bS.name.replace(/\n/g,' ')}] (强制替换)`);
                                 break;
-                            } else {
-                                schedule[s][day] = oldS;
-                                schedule[otherS][day] = oldOther;
                             }
                         }
-                        if (swapped) break;
+                        break;
                     }
                 }
-                // 如果这一轮有修复，跳出岗位循环，重新开始全局扫描
-                if (roundFixed > 0) break;
+                if (fixedThisRound > 0) break;
             }
-            if (roundFixed > 0) break;
+            if (fixedThisRound > 0) break;
         }
 
-        // 如果这一轮没有任何修复，但还是有问题，强行打断（防止死循环）
-        if (roundFixed === 0 && hasProblem) {
-            console.warn("⚠️ 第 " + globalRound + " 轮无法修复，仍有问题，继续尝试...");
-            // 加一个随机扰动：随机选一个 >=3 的人，把他第3次的那天清空
+        // 如果这一轮没有任何修复，但还是有问题，强制打断
+        if (fixedThisRound === 0 && hasProblem) {
+            // 强行找一个 >=3 的人，把他第3次的那天改成"当天没有的岗位"
             for (let s = 0; s < staffs.length; s++) {
                 for (let nm of baseShifts.map(b => b.name)) {
                     let cnt = (getCounts()[s] || {})[nm] || 0;
@@ -1236,7 +1205,6 @@ async function forceFixOverTwo() {
                         if (days.length >= 3) {
                             let day = days[2];
                             let oldShift = schedule[s][day];
-                            // 找一个当天没有的岗位强行填入（不检查次数，打破僵局）
                             let usedToday = new Set();
                             for (let si = 0; si < staffs.length; si++) {
                                 let shift = schedule[si][day];
@@ -1248,7 +1216,7 @@ async function forceFixOverTwo() {
                                 if (!usedToday.has(bS.name)) {
                                     schedule[s][day] = bS.name;
                                     totalFixes++;
-                                    fixLogs.push(`⚡ 第 ${day+1} 天：${staffs[s].name} [${oldShift.replace(/\n/g,' ')}] → [${bS.name.replace(/\n/g,' ')}] (破局强制)`);
+                                    fixLogs.push(`💥 第 ${day+1} 天：${staffs[s].name} [${oldShift.replace(/\n/g,' ')}] → [${bS.name.replace(/\n/g,' ')}] (破局强制)`);
                                     break;
                                 }
                             }
@@ -1282,14 +1250,15 @@ async function forceFixOverTwo() {
         saveDataToLocal();
 
         const warningBox = document.getElementById('warningLog');
-        let msg = `<b>✅ 强制修复完成（共 ${totalFixes} 处交换/替换）：</b><br>` + fixLogs.join('<br>');
+        let msg = `<b>✅ 强制修复完成（共 ${totalFixes} 处替换）：</b><br>` + fixLogs.join('<br>');
         if (remainingProblems.length > 0) {
-            msg += `<br><br><b>⚠️ 仍有 ${remainingProblems.length} 处问题（请再点一次修复，或检查排班数据）：</b><br>` + remainingProblems.join('<br>');
+            msg += `<br><br><b>⚠️ 仍有 ${remainingProblems.length} 处问题：</b><br>` + remainingProblems.join('<br>');
+            msg += `<br>💡 请再点一次「强制修复>=3次问题」按钮。`;
         }
         warningBox.innerHTML = msg;
         warningBox.style.display = 'block';
         document.getElementById('status').innerText = `✅ 强制修复了 ${totalFixes} 处！${remainingProblems.length > 0 ? '⚠️ 仍有问题' : ''}`;
-        alert(`✅ 强制修复完成！\n- 共 ${totalFixes} 处交换/替换\n- 不动休假、锁定、分红日、支援\n${remainingProblems.length > 0 ? '\n⚠️ 仍有 ' + remainingProblems.length + ' 处问题，请再点一次修复。' : '\n🎉 全表已经没有 >=3 次的问题！'}`);
+        alert(`✅ 强制修复完成！\n- 共 ${totalFixes} 处替换\n- 不动休假、锁定、分红日、支援\n${remainingProblems.length > 0 ? '\n⚠️ 仍有 ' + remainingProblems.length + ' 处问题，请再点一次修复。' : '\n🎉 全表已经没有 >=3 次的问题！'}`);
     } else {
         document.getElementById('status').innerText = `✅ 检查完毕，没有发现 >=3 次的问题！`;
         alert("✅ 没有发现任何 >=3 次的问题！");
