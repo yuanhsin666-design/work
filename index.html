@@ -690,7 +690,7 @@
           `;
         } else {
           let cleanContent = getDisplayShiftName(cellContent);
-          let displayTxt = cleanContent.replace(/\n/g, '<br>');
+          let displayTxt = cleanContent.replace(/\n/g, '<\n>');
           html += `<td id="${cellId}" class="${cellClass} cell-clickable" onclick="toggleCellLock(${sIdx}, ${day - 1})">${displayTxt}</td>`;
         }
       }
