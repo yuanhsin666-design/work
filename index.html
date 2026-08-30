@@ -2723,44 +2723,31 @@ async function generateSchedule() {
         }
 
         // 🆕 找一个可以放这个岗位的人（参照强度汇总表平衡高中低）
-        function findCandidate(day, shiftName) {
-            let shiftObj = baseShifts.find(s => s.name === shiftName);
-            let targetLevel = shiftObj ? shiftObj.level : "";
-            
-            let candidates = [];
-            for (let s = 0; s < staffs.length; s++) {
-                if (newSchedule[s][day] !== "") continue;
-                if (lockedMap[s] && lockedMap[s][day]) continue;
-                if (isMaxed(s, shiftName)) continue;
-                if (checkAdjacent(s, day, shiftName)) continue;
-                if (checkHighThree(s, day, shiftName)) continue;
-                if (!checkIntensityBalance(s, day, shiftName)) continue;
-                candidates.push(s);
-            }
-            if (candidates.length === 0) return -1;
-            
-            // 排序：先按强度平衡得分（高/中/低都要平衡）
-            candidates.sort((a, b) => {
-                // 1. 先看目标强度的平衡度（低于平均的优先）
-                let scoreA = getIntensityBalanceScore(a, targetLevel);
-                let scoreB = getIntensityBalanceScore(b, targetLevel);
-                if (scoreA !== scoreB) return scoreB - scoreA;
-                
-                // 2. 再看这个岗位的次数（少的优先）
-                let cntA = shiftCounts[a][shiftName] || 0;
-                let cntB = shiftCounts[b][shiftName] || 0;
-                if (cntA !== cntB) return cntA - cntB;
-                
-                // 3. 再看总上班天数（少的优先）
-                let totalA = 0, totalB = 0;
-                for (let nm of shiftNames) {
-                    totalA += (shiftCounts[a][nm] || 0);
-                    totalB += (shiftCounts[b][nm] || 0);
-                }
-                return totalA - totalB;
-            });
-            return candidates[0];
-        }
+function findCandidate(day, shiftName) {
+    let shiftObj = baseShifts.find(s => s.name === shiftName);
+    let targetLevel = shiftObj ? shiftObj.level : "";
+    
+    let candidates = [];
+    for (let s = 0; s < staffs.length; s++) {
+        if (newSchedule[s][day] !== "") continue;
+        if (lockedMap[s] && lockedMap[s][day]) continue;
+        if (isMaxed(s, shiftName)) continue;
+        if (checkAdjacent(s, day, shiftName)) continue;
+        if (checkHighThree(s, day, shiftName)) continue;
+        if (!checkIntensityBalance(s, day, shiftName)) continue;
+        candidates.push(s);
+    }
+    if (candidates.length === 0) return -1;
+    
+    // 【重点】排序：只按这个岗位的次数排序，少的优先
+    candidates.sort((a, b) => {
+        let cntA = shiftCounts[a][shiftName] || 0;
+        let cntB = shiftCounts[b][shiftName] || 0;
+        return cntA - cntB;  // 次数少的排前面
+    });
+    
+    return candidates[0];
+}
 
         // ================================================================
         // 【第一遍】12个岗位各排一次
