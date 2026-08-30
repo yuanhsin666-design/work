@@ -963,7 +963,7 @@ function validateAdjacentShifts() {
         alert(`校验完成！当月没有发现任何岗位连排现象。`);
     }
 }
-// ========== 修复连排岗位（只互换，不替换） ==========
+// ========== 修复连排岗位（只互换 + 记录无法修复的格子） ==========
 async function autoFixAdjacentShifts() {
     if (!lastGeneratedSchedule) {
         return alert("当前没有排班数据，请先执行排班！");
@@ -975,9 +975,11 @@ async function autoFixAdjacentShifts() {
 
     let schedule = lastGeneratedSchedule.map(row => [...row]);
     let fixedCount = 0;
+    let skipCount = 0;
     let fixLogs = [];
+    let skipLogs = [];
 
-    // ---- 辅助函数 ----
+    // ---- 辅助函数（完全对齐校验函数） ----
     function isLocked(s, d) {
         return lockedMap[s] && lockedMap[s][d];
     }
@@ -996,30 +998,34 @@ async function autoFixAdjacentShifts() {
         return getLevel(shiftName) === '高';
     }
 
-    // 检查某员工某天是否连排
-    function isAdjacent(sIdx, day) {
-        let shift = schedule[sIdx][day];
-        if (!shift || shift === "休" || shift === supportShift.name) return false;
-        let category = getShiftCategory(shift);
+    function hasAdjacentIssue(sIdx, day) {
+        let currentShift = schedule[sIdx][day];
+        if (!currentShift || currentShift === "休" || currentShift === supportShift.name) return false;
+        let currentCategory = getShiftCategory(currentShift);
 
         if (day > 0) {
-            let prev = schedule[sIdx][day - 1];
-            if (prev && prev !== "休" && prev !== supportShift.name) {
-                if (prev === shift) return true;
-                if (getShiftCategory(prev) === category) return true;
+            let prevShift = schedule[sIdx][day - 1];
+            if (prevShift && prevShift !== "休" && prevShift !== supportShift.name) {
+                let prevCategory = getShiftCategory(prevShift);
+                if (prevCategory && currentCategory && prevCategory === currentCategory) {
+                    return true;
+                }
             }
         }
+
         if (day < totalDays - 1) {
-            let next = schedule[sIdx][day + 1];
-            if (next && next !== "休" && next !== supportShift.name) {
-                if (next === shift) return true;
-                if (getShiftCategory(next) === category) return true;
+            let nextShift = schedule[sIdx][day + 1];
+            if (nextShift && nextShift !== "休" && nextShift !== supportShift.name) {
+                let nextCategory = getShiftCategory(nextShift);
+                if (nextCategory && currentCategory && nextCategory === currentCategory) {
+                    return true;
+                }
             }
         }
+
         return false;
     }
 
-    // 检查高强度是否连3天
     function isHighThree(sIdx, day) {
         let shift = schedule[sIdx][day];
         if (!isHigh(shift)) return false;
@@ -1036,7 +1042,6 @@ async function autoFixAdjacentShifts() {
         return prevHigh && nextHigh;
     }
 
-    // 检查某天某岗位是否已被占用
     function isShiftTaken(day, shiftName) {
         for (let s = 0; s < staffs.length; s++) {
             if (schedule[s][day] === shiftName) return true;
@@ -1054,10 +1059,9 @@ async function autoFixAdjacentShifts() {
                 let currentShift = schedule[s][d];
                 if (!currentShift || currentShift === "休" || currentShift === supportShift.name) continue;
 
-                // 检查是否连排
-                if (!isAdjacent(s, d)) continue;
+                if (!hasAdjacentIssue(s, d)) continue;
 
-                // ✅ 方案1：只尝试跟同一天别人互换（不替换）
+                // ✅ 尝试跟同一天别人互换
                 let swapped = false;
                 for (let otherS = 0; otherS < staffs.length; otherS++) {
                     if (otherS === s) continue;
@@ -1066,37 +1070,39 @@ async function autoFixAdjacentShifts() {
                     if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
                     if (otherShift === currentShift) continue;
 
-                    // 模拟交换
                     let oldS = schedule[s][d];
                     let oldOther = schedule[otherS][d];
                     schedule[s][d] = oldOther;
                     schedule[otherS][d] = oldS;
 
-                    // 验证交换后是否还有连排
                     let valid = true;
-                    if (isAdjacent(s, d)) valid = false;
-                    if (isAdjacent(otherS, d)) valid = false;
+                    if (hasAdjacentIssue(s, d)) valid = false;
+                    if (hasAdjacentIssue(otherS, d)) valid = false;
                     if (isHighThree(s, d)) valid = false;
                     if (isHighThree(otherS, d)) valid = false;
-                    // 检查当天是否有重复岗位
                     if (isShiftTaken(d, oldOther) && oldOther !== oldS) valid = false;
                     if (isShiftTaken(d, oldS) && oldS !== oldOther) valid = false;
 
                     if (valid) {
                         fixedCount++;
                         fixedThisRound++;
-                        fixLogs.push(`🔄 第 ${d+1} 天：${staffs[s].name} [${oldS.replace(/\n/g,' ')}] ↔ ${staffs[otherS].name} [${oldOther.replace(/\n/g,' ')}]（互换修复连排）`);
+                        let cleanCurrent = currentShift.replace(/\n/g, ' ');
+                        let cleanOther = otherShift.replace(/\n/g, ' ');
+                        fixLogs.push(`🔄 第 ${d+1} 天：${staffs[s].name} [${cleanCurrent}] ↔ ${staffs[otherS].name} [${cleanOther}]`);
                         swapped = true;
                         break;
                     } else {
-                        // 换回来
                         schedule[s][d] = oldS;
                         schedule[otherS][d] = oldOther;
                     }
                 }
 
-                // ❌ 方案2已删除：不替换岗位，只互换
-                // 如果互换不成功，放弃修复这一格，交给下一轮
+                // ✅ 找不到互换的人 → 记录并跳过（方案B）
+                if (!swapped) {
+                    skipCount++;
+                    let cleanCurrent = currentShift.replace(/\n/g, ' ');
+                    skipLogs.push(`⚠️ 第 ${d+1} 天：${staffs[s].name} [${cleanCurrent}] 连排，找不到可互换的人，已跳过`);
+                }
             }
         }
 
@@ -1104,37 +1110,44 @@ async function autoFixAdjacentShifts() {
     }
 
     // ---- 保存并刷新 ----
-    if (fixedCount > 0) {
-        lastGeneratedSchedule = sanitizeSchedule(schedule);
-        renderAll();
-        saveDataToLocal();
+    if (fixedCount > 0 || skipCount > 0) {
+        // 只要有变动就保存
+        if (fixedCount > 0) {
+            lastGeneratedSchedule = sanitizeSchedule(schedule);
+            renderAll();
+            saveDataToLocal();
+        }
 
         const warningBox = document.getElementById('warningLog');
-        warningBox.innerHTML = `<b>✅ 连排修复完成（共 ${fixedCount} 处互换）：</b><br>` + fixLogs.join('<br>');
-        warningBox.style.display = 'block';
-        document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处连排！`;
-        alert(`✅ 修复完成！已通过互换修复 ${fixedCount} 处连排。\n\n保证：\n• 不破坏休假、锁定、分红日\n• 不改变任何人的岗位次数（平摊保留）\n• 不造成新的连排`);
-    } else {
-        // 检查是否还有连排
-        let hasAdjacent = false;
-        for (let s = 0; s < staffs.length; s++) {
-            for (let d = 0; d < totalDays; d++) {
-                if (isAdjacent(s, d)) {
-                    hasAdjacent = true;
-                    break;
-                }
-            }
-            if (hasAdjacent) break;
+        let msg = '';
+
+        if (fixedCount > 0) {
+            msg += `<b>✅ 连排修复完成（共修复 ${fixedCount} 处互换）：</b><br>`;
+            msg += fixLogs.join('<br>');
         }
 
-        if (hasAdjacent) {
-            document.getElementById('status').innerText = `⚠️ 仍有连排，但无法通过互换修复（可能被锁定或当天没有可互换的人）`;
-            alert("⚠️ 仍有连排无法修复。\n\n可能原因：\n• 连排的格子被锁定\n• 当天找不到可以互换的人\n• 互换后会造成新的连排\n\n建议：手动调整或解锁相关格子后重试。");
-        } else {
-            document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无连排！`;
-            alert("✅ 排班非常完美！当前没有任何岗位连排的情况。");
+        if (skipCount > 0) {
+            if (fixedCount > 0) msg += '<br><br>';
+            msg += `<b>⚠️ 以下 ${skipCount} 处连排无法自动修复（找不到可互换的人）：</b><br>`;
+            msg += skipLogs.join('<br>');
+            msg += `<br><br>💡 建议：<br>• 手动调整这些格子<br>• 或解锁相关格子后重新执行修复`;
         }
+
+        warningBox.innerHTML = msg;
+        warningBox.style.display = 'block';
+
+        if (skipCount > 0) {
+            document.getElementById('status').innerText = `⚠️ 修复 ${fixedCount} 处，${skipCount} 处无法修复（请查看下方提醒）`;
+            alert(`⚠️ 修复完成！\n- 已修复 ${fixedCount} 处连排\n- ${skipCount} 处无法修复（请查看下方提醒框）`);
+        } else {
+            document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处连排！`;
+            alert(`✅ 修复完成！已通过互换修复 ${fixedCount} 处连排。`);
+        }
+    } else {
+        document.getElementById('status').innerText = `✅ 检查完毕，无需修复，排班无连排！`;
+        alert("✅ 排班非常完美！当前没有任何岗位连排的情况。");
     }
+}
 }
   async function renderHighIntensityTable(scheduleData = null) {
     let container = document.getElementById('highIntensityTable');
