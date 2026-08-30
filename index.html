@@ -326,18 +326,53 @@
 
   async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
-    if (confirm(`确定要重置 [${monthKey}] 月份的数据吗？`)) {
-      currentMonthRests = {};
-      lastGeneratedSchedule = null;
-      initLockedMap(true);
-      document.getElementById('cloudUrlInput').value = "";
-      localStorage.removeItem(`auto_schedule_month_${monthKey}`);
-      try { await supabaseClient.from('schedules').delete().eq('month_key', monthKey); } catch (err) {}
-      renderAll();
-      document.getElementById('status').innerText = `🗑️ 已重置 [${monthKey}] 的数据！`;
-      alert(`[${monthKey}] 月份数据已成功重置！`);
+    if (confirm(`确定要重置 [${monthKey}] 月份的工作表排班内容吗？\n\n【注意】\n• 已导入的休假日 → 保留\n• 已锁定的格子 → 保留\n• 锁定格子的内容 → 保留\n\n【会清空】\n• 所有【未锁定】的格子内容`)) {
+
+        const year = parseInt(document.getElementById('yearSelect').value);
+        const month = parseInt(document.getElementById('monthSelect').value);
+        const totalDays = getDaysInMonth(year, month);
+
+        // 1. 保留休假 + 锁定格子 + 锁定内容
+        //    先初始化一个空白表
+        let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+
+        // 2. 如果之前有排班数据，把锁定的格子内容抄回来
+        if (lastGeneratedSchedule && lastGeneratedSchedule.length === staffs.length) {
+            for (let s = 0; s < staffs.length; s++) {
+                for (let d = 0; d < totalDays; d++) {
+                    // ✅ 锁定的格子 → 保留内容
+                    if (lockedMap[s] && lockedMap[s][d]) {
+                        newSchedule[s][d] = lastGeneratedSchedule[s][d] || "";
+                    }
+                }
+            }
+        }
+
+        // 3. 休假日 → 保留（在 renderTable 时会从 currentMonthRests 读，不用写进 newSchedule）
+        //    但为了数据一致性，我们把休假也写进去
+        for (let s = 0; s < staffs.length; s++) {
+            const staffRests = (currentMonthRests && currentMonthRests[s]) ? currentMonthRests[s] : [];
+            for (let d = 0; d < totalDays; d++) {
+                const day = d + 1;
+                // 如果是休假，且该格子没有被锁定（或被锁定但内容为空），填入"休"
+                if (staffRests.includes(day)) {
+                    // 如果锁定格子已经有内容，优先保留锁定内容
+                    if (!(lockedMap[s] && lockedMap[s][d] && newSchedule[s][d])) {
+                        newSchedule[s][d] = "休";
+                    }
+                }
+            }
+        }
+
+        // 4. 保存
+        lastGeneratedSchedule = sanitizeSchedule(newSchedule);
+        await saveDataToLocal();
+        renderAll();
+
+        document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 工作表排班（锁定内容、休假日已保留）！`;
+        alert(`[${monthKey}] 月份工作表已成功重置！\n\n【保留的数据】\n• 所有员工的休假日\n• 所有员工锁定的格子及内容\n• 云端链接\n\n【已清空的数据】\n• 所有【未锁定】的排班岗位内容`);
     }
-  }
+}
 
   function parseCSV(text) {
     let lines = text.split(/\r\n|\n/);
