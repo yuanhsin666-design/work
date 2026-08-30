@@ -865,7 +865,7 @@ if (fixedCount > 0) {
     }
   }
 
-  // 🚨 校验岗位0次
+   // 🚨 校验岗位0次（绝不修改岗位名称，直接用原始字符串比对！）
   function validateZeroCounts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -873,19 +873,30 @@ if (fixedCount > 0) {
     const warningBox = document.getElementById('warningLog');
     let zeroLogs = [];
 
+    // 用原始的名字建一个统计表
+    let trueNames = baseShifts.map(s => s.name);
+
     staffs.forEach((staff, sIdx) => {
+      // 因为岗位名里带 \n，我们用对象来统计
       let counts = {};
-      baseShifts.forEach(s => counts[s.name] = 0);
+      trueNames.forEach(name => counts[name] = 0);
+
       if (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) {
         lastGeneratedSchedule[sIdx].forEach(shift => {
-          if (shift && shift !== "休" && shift !== supportShift.name && counts[shift] !== undefined) {
-            counts[shift]++;
+          // 绝不转换 shift，直接用 shift 去对象里找！
+          if (shift && shift !== "休" && shift !== supportShift.name) {
+            // 这是关键：如果排班表里的 shift 和 trueNames 里的名字完全一致，就加1！
+            if (counts.hasOwnProperty(shift)) {
+              counts[shift]++;
+            }
           }
         });
       }
-      baseShifts.forEach(s => {
-        if (counts[s.name] === 0) {
-          zeroLogs.push(`👤 <b>${staff.name}</b> 在岗位 [<b>${s.name.replace(/\n/g, ' ')}</b>] 全月 <b>0次</b>！`);
+
+      trueNames.forEach(name => {
+        if (counts[name] === 0) {
+          // 这里仅仅为了显示好看，才把换行换成空格，绝不影响比对！
+          zeroLogs.push(`👤 <b>${staff.name}</b> 在岗位 [<b>${name.replace(/\n/g, ' ')}</b>] 全月 <b>0次</b>！`);
         }
       });
     });
