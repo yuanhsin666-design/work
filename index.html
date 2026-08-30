@@ -2203,7 +2203,7 @@ async function generateSchedule() {
         }
       }
 
-      // 4. 【核心发牌】每放一个格子，都查连排、查重复、查超次！
+      // 4. 【核心发牌】每放一个格子，必须严格查连排、查重复、查超次，否则 continue 跳过！
       for (let round = 0; round < 2; round++) {
         let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
         shuffledShifts.forEach(shift => {
@@ -2216,24 +2216,29 @@ async function generateSchedule() {
               if (newSchedule[s][d] !== "") continue;
               if (lockedMap[s] && lockedMap[s][d]) continue;
               
-              // 检查当天空位是否已有该岗位（防重复）
-              let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
-              if (taken) continue;
+              // 【最严格的 4 道检查，全部通过才放！】
               
-              // 检查前后是否连排（防连排）
+              // 1. 防重复：当天不能有人做这个岗位
+              let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
+              if (taken) continue; 
+              
+              // 2. 防连排：前后不能是同岗位/同类别
               let prev = (d > 0) ? newSchedule[s][d - 1] : "";
               let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
               if (shiftName === prev || shiftName === next) continue;
               if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
               
-              // 检查高强度连3天（防高强度）
+              // 3. 防高强度连3天
               if (shift.level === '高') {
                 let prevLevel = (d > 0) ? (baseShifts.find(b => b.name === prev)?.level) : "";
                 let nextLevel = (d < totalDays - 1) ? (baseShifts.find(b => b.name === next)?.level) : "";
                 if (prevLevel === '高' && nextLevel === '高') continue;
               }
 
-              // 全部通过！才放下去！
+              // 4. 防超次：绝对不超 2 次
+              if ((shiftCounts[s][shiftName] || 0) >= 2) continue;
+
+              // 如果全部通过，才真正放下去！
               newSchedule[s][d] = shiftName;
               shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
               break;
@@ -2242,7 +2247,7 @@ async function generateSchedule() {
         });
       }
 
-      // 5. 【终极填空】找当天缺什么，且不连排、不重复、不超次，才补！
+      // 5. 【终极填空】当天缺什么岗位，且在“防连排、防重复、防超次”的情况下才补！
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] !== "") continue;
@@ -2286,7 +2291,7 @@ async function generateSchedule() {
         }
       }
 
-      // 6. 强制排最后剩下的极小空缺，选一个未满2次且不连排的岗位！
+      // 6. 最后防空白：选一个未满2次且绝不产生连排的岗位
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] === "") {
@@ -2297,6 +2302,8 @@ async function generateSchedule() {
               let prev = (d > 0) ? newSchedule[s][d - 1] : "";
               let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
               if (bS.name === prev || bS.name === next) continue;
+              if (getShiftCategory(bS.name) && (getShiftCategory(bS.name) === getShiftCategory(prev) || getShiftCategory(bS.name) === getShiftCategory(next))) continue;
+
               let cnt = shiftCounts[s][bS.name] || 0;
               if (cnt < fallbackCnt) {
                 fallbackCnt = cnt;
@@ -2315,7 +2322,7 @@ async function generateSchedule() {
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！有严格校验防连排、防重复、防超次！`);
+      alert(`排班完成！严格校验防连排、防重复、防超次！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
