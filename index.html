@@ -2798,15 +2798,19 @@ async function generateSchedule() {
                 if (!hasEmptySlot(day)) continue;
 
                 let bestStaff = findCandidate(day, shiftName);
-                if (bestStaff === -1) continue;
+if (bestStaff === -1) continue;
 
-                newSchedule[bestStaff][day] = shiftName;
-                shiftCounts[bestStaff][shiftName] = (shiftCounts[bestStaff][shiftName] || 0) + 1;
-                // 更新强度计数
-                if (shiftLevel === '高') intensityCounts[bestStaff].high++;
-                else if (shiftLevel === '中') intensityCounts[bestStaff].mid++;
-                else if (shiftLevel === '低') intensityCounts[bestStaff].low++;
-                placed++;
+// 放之前检查：这个人这个岗位已经几次了？
+let currentCount = shiftCounts[bestStaff][shiftName] || 0;
+if (currentCount >= 2) {
+    continue;
+}
+newSchedule[bestStaff][day] = shiftName;
+shiftCounts[bestStaff][shiftName] = currentCount + 1;
+if (shiftLevel === '高') intensityCounts[bestStaff].high++;
+else if (shiftLevel === '中') intensityCounts[bestStaff].mid++;
+else if (shiftLevel === '低') intensityCounts[bestStaff].low++;
+placed++;
             }
         }
 
@@ -2831,14 +2835,19 @@ async function generateSchedule() {
                 if (!hasEmptySlot(day)) continue;
 
                 let bestStaff = findCandidate(day, shiftName);
-                if (bestStaff === -1) continue;
+if (bestStaff === -1) continue;
 
-                newSchedule[bestStaff][day] = shiftName;
-                shiftCounts[bestStaff][shiftName] = (shiftCounts[bestStaff][shiftName] || 0) + 1;
-                if (shiftLevel === '高') intensityCounts[bestStaff].high++;
-                else if (shiftLevel === '中') intensityCounts[bestStaff].mid++;
-                else if (shiftLevel === '低') intensityCounts[bestStaff].low++;
-                placed++;
+// 放之前检查：这个人这个岗位已经几次了？
+let currentCount = shiftCounts[bestStaff][shiftName] || 0;
+if (currentCount >= 2) {
+    continue;
+}
+newSchedule[bestStaff][day] = shiftName;
+shiftCounts[bestStaff][shiftName] = currentCount + 1;
+if (shiftLevel === '高') intensityCounts[bestStaff].high++;
+else if (shiftLevel === '中') intensityCounts[bestStaff].mid++;
+else if (shiftLevel === '低') intensityCounts[bestStaff].low++;
+placed++;
             }
         }
 
@@ -2863,14 +2872,19 @@ async function generateSchedule() {
                 if (!hasEmptySlot(day)) continue;
 
                 let bestStaff = findCandidate(day, shiftName);
-                if (bestStaff === -1) continue;
+if (bestStaff === -1) continue;
 
-                newSchedule[bestStaff][day] = shiftName;
-                shiftCounts[bestStaff][shiftName] = (shiftCounts[bestStaff][shiftName] || 0) + 1;
-                if (shiftLevel === '高') intensityCounts[bestStaff].high++;
-                else if (shiftLevel === '中') intensityCounts[bestStaff].mid++;
-                else if (shiftLevel === '低') intensityCounts[bestStaff].low++;
-                placed++;
+// 放之前检查：这个人这个岗位已经几次了？
+let currentCount = shiftCounts[bestStaff][shiftName] || 0;
+if (currentCount >= 2) {
+    continue;
+}
+newSchedule[bestStaff][day] = shiftName;
+shiftCounts[bestStaff][shiftName] = currentCount + 1;
+if (shiftLevel === '高') intensityCounts[bestStaff].high++;
+else if (shiftLevel === '中') intensityCounts[bestStaff].mid++;
+else if (shiftLevel === '低') intensityCounts[bestStaff].low++;
+placed++;
             }
         }
 
