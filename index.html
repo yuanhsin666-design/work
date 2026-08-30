@@ -1931,7 +1931,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-  async function generateSchedule() {
+async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -2012,7 +2012,7 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
-      // 2. 先固定 1号/16号分红日
+      // 2. 分红日优先
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2051,7 +2051,7 @@ async function getAllHistoryMonthsData() {
         });
       });
 
-      // 3. 固定支援
+      // 3. 支援
       for (let d = 0; d < totalDays; d++) {
         let availableToday = [];
         for (let s = 0; s < staffs.length; s++) {
@@ -2065,44 +2065,17 @@ async function getAllHistoryMonthsData() {
         }
       }
 
-      // 4. 【先发第一轮牌】一个岗位一个岗位地填，每个人每个岗位保底1次！
+      // 4. 核心发牌：一个岗位一个岗位全月发！
       let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
       shuffledShifts.forEach(shift => {
         let shiftName = shift.name;
-        for (let s = 0; s < staffs.length; s++) {
-          // 只要拿过1次，这轮就跳过，为了发下一轮
-          if ((shiftCounts[s][shiftName] || 0) >= 1) continue;
-
-          // 在全月里找这个人能放这个岗位的空位
-          for (let d = 0; d < totalDays; d++) {
-            if (newSchedule[s][d] !== "") continue;
-            if (lockedMap[s] && lockedMap[s][d]) continue;
-
-            // 防连排
-            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-            if (shiftName === prev || shiftName === next) continue;
-            if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
-            
-            // 防重复
-            let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
-            if (taken) continue;
-
-            newSchedule[s][d] = shiftName;
-            shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
-            break;
-          }
-        }
-      });
-
-      // 5. 【第二、三轮】把剩余的、没填满的岗位补满，绝对不超过2次！
-      for (let round = 0; round < 2; round++) {
-        let shuffledShifts2 = [...baseShifts].sort(() => Math.random() - 0.5);
-        shuffledShifts2.forEach(shift => {
-          let shiftName = shift.name;
+        
+        // 每个岗位准备发一轮
+        for (let round = 0; round < 2; round++) { // 最多每人2次
           for (let s = 0; s < staffs.length; s++) {
             if ((shiftCounts[s][shiftName] || 0) >= 2) continue;
 
+            // 全月乱跳找位置
             for (let d = 0; d < totalDays; d++) {
               if (newSchedule[s][d] !== "") continue;
               if (lockedMap[s] && lockedMap[s][d]) continue;
@@ -2111,7 +2084,7 @@ async function getAllHistoryMonthsData() {
               let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
               if (shiftName === prev || shiftName === next) continue;
               if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
-              
+
               let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
               if (taken) continue;
 
@@ -2120,58 +2093,70 @@ async function getAllHistoryMonthsData() {
               break;
             }
           }
-        });
+        }
+      });
+
+      // 5. 绝对无空！检查每一天缺了哪个岗位，立刻全月补上！
+      for (let d = 0; d < totalDays; d++) {
+        // 检查当天有没有12个岗位都排齐了（除休、支援外）
+        let usedToday = new Set();
+        let availableToday = [];
+        for (let i = 0; i < staffs.length; i++) {
+          if (newSchedule[i][d] !== "" && newSchedule[i][d] !== "休") {
+            usedToday.add(newSchedule[i][d]);
+          } else if (newSchedule[i][d] === "") {
+            availableToday.push(i);
+          }
+        }
+
+        // 如果当天缺岗位，就找谁来补
+        if (usedToday.size < baseShifts.length && availableToday.length > 0) {
+          for (let s of availableToday) {
+            if (newSchedule[s][d] !== "") continue;
+            
+            let missingShifts = [];
+            for (let bS of baseShifts) {
+              if (!usedToday.has(bS.name)) missingShifts.push(bS.name);
+            }
+
+            if (missingShifts.length > 0) {
+              let best = null;
+              let bestCnt = Infinity;
+              for (let nm of missingShifts) {
+                if ((shiftCounts[s][nm] || 0) >= 2) continue;
+                let cnt = shiftCounts[s][nm] || 0;
+                if (cnt < bestCnt) {
+                  bestCnt = cnt;
+                  best = nm;
+                }
+              }
+              
+              // 如果没有人能补（全超过2次），找个次数最少的人补上！
+              if (!best) {
+                for (let nm of missingShifts) {
+                  let cnt = shiftCounts[s][nm] || 0;
+                  if (cnt < bestCnt) {
+                    bestCnt = cnt;
+                    best = nm;
+                  }
+                }
+              }
+
+              if (best) {
+                newSchedule[s][d] = best;
+                shiftCounts[s][best] = (shiftCounts[s][best] || 0) + 1;
+                usedToday.add(best);
+              }
+            }
+          }
+        }
       }
 
-      // 6. 【终极填空】绝对不出现空白！看当天缺什么岗位，直接补上！
+      // 6. 最后强制清理：如果还有空白，变成固定岗位！
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] !== "") continue;
-
-          let usedToday = new Set();
-          for (let i = 0; i < staffs.length; i++) {
-            if (newSchedule[i][d] !== "" && newSchedule[i][d] !== "休" && newSchedule[i][d] !== supName) {
-              usedToday.add(newSchedule[i][d]);
-            }
-          }
-
-          let missingToday = [];
-          for (let bS of baseShifts) {
-            if (!usedToday.has(bS.name)) missingToday.push(bS.name);
-          }
-
-          if (missingToday.length > 0) {
-            let best = null;
-            let bestCnt = Infinity;
-            for (let nm of missingToday) {
-              if ((shiftCounts[s][nm] || 0) >= 2) continue; 
-              let cnt = shiftCounts[s][nm] || 0;
-              if (cnt < bestCnt) {
-                bestCnt = cnt;
-                best = nm;
-              }
-            }
-            if (best) {
-              newSchedule[s][d] = best;
-              shiftCounts[s][best] = (shiftCounts[s][best] || 0) + 1;
-              continue;
-            }
-          }
-
-          let fallback = null;
-          let fallbackCnt = Infinity;
-          for (let bS of baseShifts) {
-            if ((shiftCounts[s][bS.name] || 0) >= 2) continue;
-            let cnt = shiftCounts[s][bS.name] || 0;
-            if (cnt < fallbackCnt) {
-              fallbackCnt = cnt;
-              fallback = bS.name;
-            }
-          }
-          if (fallback) {
-            newSchedule[s][d] = fallback;
-            shiftCounts[s][fallback] = (shiftCounts[s][fallback] || 0) + 1;
-          }
+          newSchedule[s][d] = baseShifts[0].name; // 绝不空白！
         }
       }
 
@@ -2179,7 +2164,7 @@ async function getAllHistoryMonthsData() {
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！先发第一轮保底，再补第二轮，绝对无空白！`);
+      alert(`排班完成！已按岗位发牌，发完会检查每天是否有遗漏岗位并补齐，绝无空白！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
