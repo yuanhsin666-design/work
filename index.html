@@ -1194,6 +1194,7 @@ function validateAdjacentShifts() {
     }
 }
 // ========== 修复连排岗位（连续两天局部调整） ==========
+// ========== 修复连排岗位（全局回溯版） ==========
 async function autoFixAdjacentShifts() {
     if (!lastGeneratedSchedule) {
         return alert("当前没有排班数据，请先执行排班！");
@@ -1230,13 +1231,12 @@ async function autoFixAdjacentShifts() {
         return found ? found.level === '高' : false;
     }
 
-    // 检查某人某天是否连排（只看相邻两天）
+    // 检查某人某天是否连排
     function hasAdjacentIssue(sIdx, day) {
         let currentShift = schedule[sIdx][day];
         if (!currentShift || currentShift === "休" || currentShift === supportShift.name) return false;
         let currentCategory = getCategory(currentShift);
 
-        // 只检查前一天和后一天，不跳着看
         if (day > 0) {
             let prevShift = schedule[sIdx][day - 1];
             if (prevShift && prevShift !== "休" && prevShift !== supportShift.name) {
@@ -1283,7 +1283,6 @@ async function autoFixAdjacentShifts() {
         return false;
     }
 
-    // 检查某人某天放某岗位是否会高强度连3天
     function wouldBeHighThree(sIdx, day, shiftName) {
         if (!isHigh(shiftName)) return false;
         let prevHigh = false;
@@ -1299,7 +1298,6 @@ async function autoFixAdjacentShifts() {
         return prevHigh && nextHigh;
     }
 
-    // 检查某人某岗位是否已达2次上限
     function isMaxed(sIdx, shiftName) {
         let count = 0;
         for (let d = 0; d < totalDays; d++) {
@@ -1308,8 +1306,142 @@ async function autoFixAdjacentShifts() {
         return count >= 2;
     }
 
-    // ---- 核心：只修有问题的连排格子 ----
-    for (let round = 0; round < 50; round++) {
+    // ================================================================
+    // 核心：找出可以互换的完整路径（全局回溯）
+    // ================================================================
+
+    // 检查交换后是否完全安全
+    function isSwapSafe(s1, d1, s2, d2) {
+        // 不能动锁定和分红日
+        if (isLocked(s1, d1) || isLocked(s2, d2)) return false;
+        if (isDividendDay(d1) || isDividendDay(d2)) return false;
+
+        let shift1 = schedule[s1][d1];
+        let shift2 = schedule[s2][d2];
+        if (!shift1 || !shift2) return false;
+        if (shift1 === "休" || shift1 === supportShift.name) return false;
+        if (shift2 === "休" || shift2 === supportShift.name) return false;
+        if (shift1 === shift2) return false;
+
+        // 检查：s1拿shift2会不会有问题
+        if (isMaxed(s1, shift2)) return false;
+        if (wouldBeAdjacent(s1, d1, shift2)) return false;
+        if (wouldBeHighThree(s1, d1, shift2)) return false;
+
+        // 检查：s2拿shift1会不会有问题
+        if (isMaxed(s2, shift2)) return false;
+        if (wouldBeAdjacent(s2, d2, shift1)) return false;
+        if (wouldBeHighThree(s2, d2, shift1)) return false;
+
+        // 检查：交换后当天是否重复（只检查涉及的两天）
+        // 模拟交换
+        let tempSchedule = schedule.map(row => [...row]);
+        tempSchedule[s1][d1] = shift2;
+        tempSchedule[s2][d2] = shift1;
+
+        let seen1 = new Set();
+        let seen2 = new Set();
+        for (let si = 0; si < staffs.length; si++) {
+            let sh1 = tempSchedule[si][d1];
+            let sh2 = tempSchedule[si][d2];
+            if (sh1 && sh1 !== "休" && sh1 !== supportShift.name) {
+                if (seen1.has(sh1)) return false;
+                seen1.add(sh1);
+            }
+            if (sh2 && sh2 !== "休" && sh2 !== supportShift.name) {
+                if (seen2.has(sh2)) return false;
+                seen2.add(sh2);
+            }
+        }
+
+        return true;
+    }
+
+    // ---- 找"最短"的互换链 ----
+    function findSwapPath(originalS, originalD) {
+        // 先尝试当天互换（最快）
+        for (let otherS = 0; otherS < staffs.length; otherS++) {
+            if (otherS === originalS) continue;
+            if (isSwapSafe(originalS, originalD, otherS, originalD)) {
+                return [{ s: originalS, d: originalD }, { s: otherS, d: originalD }];
+            }
+        }
+
+        // 如果当天不行，找另一天：把originalS的这一天跟别人另一天换
+        for (let otherS = 0; otherS < staffs.length; otherS++) {
+            if (otherS === originalS) continue;
+            for (let otherD = 0; otherD < totalDays; otherD++) {
+                if (otherD === originalD) continue;
+                if (isSwapSafe(originalS, originalD, otherS, otherD)) {
+                    return [{ s: originalS, d: originalD }, { s: otherS, d: otherD }];
+                }
+            }
+        }
+
+        // 还是不行，试试看有没有人能"接盘"：A换给B，B再换给C
+        // （链式：A的第1天 → B的第2天，B的第2天 → C的第3天）
+        for (let b = 0; b < staffs.length; b++) {
+            if (b === originalS) continue;
+            for (let d2 = 0; d2 < totalDays; d2++) {
+                if (d2 === originalD) continue;
+                if (isLocked(b, d2) || isDividendDay(d2)) continue;
+                let bShift = schedule[b][d2];
+                if (!bShift || bShift === "休" || bShift === supportShift.name) continue;
+
+                // 检查A拿B的岗位是否安全
+                if (isMaxed(originalS, bShift)) continue;
+                if (wouldBeAdjacent(originalS, originalD, bShift)) continue;
+                if (wouldBeHighThree(originalS, originalD, bShift)) continue;
+
+                // 检查B拿A的岗位是否安全（B在另一天）
+                let aShift = schedule[originalS][originalD];
+                if (isMaxed(b, aShift)) continue;
+                if (wouldBeAdjacent(b, d2, aShift)) continue;
+                if (wouldBeHighThree(b, d2, aShift)) continue;
+
+                // 检查这两天的重复
+                let tempSchedule = schedule.map(row => [...row]);
+                tempSchedule[originalS][originalD] = bShift;
+                tempSchedule[b][d2] = aShift;
+
+                let seen1 = new Set();
+                let seen2 = new Set();
+                let valid = true;
+                for (let si = 0; si < staffs.length; si++) {
+                    let sh1 = tempSchedule[si][originalD];
+                    let sh2 = tempSchedule[si][d2];
+                    if (sh1 && sh1 !== "休" && sh1 !== supportShift.name) {
+                        if (seen1.has(sh1)) valid = false;
+                        seen1.add(sh1);
+                    }
+                    if (sh2 && sh2 !== "休" && sh2 !== supportShift.name) {
+                        if (seen2.has(sh2)) valid = false;
+                        seen2.add(sh2);
+                    }
+                }
+                if (!valid) continue;
+
+                // 检查B自己有没有连排问题（在d2）
+                if (hasAdjacentIssue(b, d2)) continue;
+
+                // 检查A自己有没有连排问题（在originalD）
+                if (hasAdjacentIssue(originalS, originalD)) continue;
+
+                return [
+                    { s: originalS, d: originalD, newShift: bShift },
+                    { s: b, d: d2, newShift: aShift }
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    // ================================================================
+    // 主循环
+    // ================================================================
+
+    for (let round = 0; round < 30; round++) {
         let fixedThisRound = 0;
 
         for (let s = 0; s < staffs.length; s++) {
@@ -1318,94 +1450,31 @@ async function autoFixAdjacentShifts() {
                 let currentShift = schedule[s][d];
                 if (!currentShift || currentShift === "休" || currentShift === supportShift.name) continue;
 
+                // 只修有连排问题的格子
                 if (!hasAdjacentIssue(s, d)) continue;
 
-                // ========================================
-                // 方案1：跟同一天别人互换
-                // ========================================
-                let swapped = false;
-                for (let otherS = 0; otherS < staffs.length; otherS++) {
-                    if (otherS === s) continue;
-                    if (isLocked(otherS, d)) continue;
+                // 找互换路径
+                let path = findSwapPath(s, d);
 
-                    let otherShift = schedule[otherS][d];
-                    if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
-                    if (otherShift === currentShift) continue;
-
-                    // 模拟交换
-                    let oldS = schedule[s][d];
-                    let oldOther = schedule[otherS][d];
-                    schedule[s][d] = oldOther;
-                    schedule[otherS][d] = oldS;
-
-                    // 验证：交换后两边都不连排
-                    let valid = true;
-                    if (hasAdjacentIssue(s, d)) valid = false;
-                    if (hasAdjacentIssue(otherS, d)) valid = false;
-                    if (wouldBeHighThree(s, d, oldOther)) valid = false;
-                    if (wouldBeHighThree(otherS, d, oldS)) valid = false;
-                    if (isMaxed(s, oldOther)) valid = false;
-                    if (isMaxed(otherS, oldS)) valid = false;
-                    if (hasDuplicateOnDay(d)) valid = false;
-
-                    if (valid) {
-                        fixedCount++;
-                        fixedThisRound++;
-                        fixLogs.push(`🔄 第 ${d+1} 天：${staffs[s].name} [${oldS.replace(/\n/g,' ')}] ↔ ${staffs[otherS].name} [${oldOther.replace(/\n/g,' ')}]`);
-                        swapped = true;
-                        break;
-                    } else {
-                        schedule[s][d] = oldS;
-                        schedule[otherS][d] = oldOther;
-                    }
-                }
-
-                if (swapped) continue;
-
-                // ========================================
-                // 方案2：把当前格子换成另一个岗位
-                // ========================================
-                let replaced = false;
-                let usedToday = new Set();
-                for (let si = 0; si < staffs.length; si++) {
-                    let shift = schedule[si][d];
-                    if (shift && shift !== "休" && shift !== supportShift.name) {
-                        usedToday.add(shift);
-                    }
-                }
-
-                let candidates = [];
-                for (let bS of baseShifts) {
-                    let nm = bS.name;
-                    if (usedToday.has(nm)) continue;           // 当天不能重复
-                    if (isMaxed(s, nm)) continue;               // 不能超2次
-                    if (wouldBeAdjacent(s, d, nm)) continue;    // 不能造成新连排
-                    if (wouldBeHighThree(s, d, nm)) continue;   // 不能高强度连3天
-                    candidates.push(nm);
-                }
-
-                if (candidates.length > 0) {
-                    // 选次数最少的
-                    let counts = {};
-                    for (let i = 0; i < totalDays; i++) {
-                        let shift = schedule[s][i];
-                        if (shift && shift !== "休" && shift !== supportShift.name) {
-                            counts[shift] = (counts[shift] || 0) + 1;
+                if (path) {
+                    // 执行交换
+                    for (let step of path) {
+                        if (step.newShift !== undefined) {
+                            schedule[step.s][step.d] = step.newShift;
                         }
                     }
-                    candidates.sort((a, b) => (counts[a] || 0) - (counts[b] || 0));
-                    let newShift = candidates[0];
-
-                    let oldShift = schedule[s][d];
-                    schedule[s][d] = newShift;
                     fixedCount++;
                     fixedThisRound++;
-                    fixLogs.push(`🔄 第 ${d+1} 天：${staffs[s].name} [${oldShift.replace(/\n/g,' ')}] → [${newShift.replace(/\n/g,' ')}]`);
-                    replaced = true;
-                }
-
-                if (!replaced) {
-                    skipLogs.push(`⚠️ 第 ${d+1} 天：${staffs[s].name} [${currentShift.replace(/\n/g,' ')}] 连排，找不到安全修复方式`);
+                    let logMsg = `🔄 回溯互换修复 ${staffs[s].name} 第 ${d+1} 天`;
+                    if (path.length > 1) {
+                        logMsg += ` ↔ ${staffs[path[1].s].name}`;
+                        if (path[0].d !== path[1].d) {
+                            logMsg += ` (第 ${path[1].d+1} 天)`;
+                        }
+                    }
+                    fixLogs.push(logMsg);
+                } else {
+                    skipLogs.push(`⚠️ 第 ${d+1} 天：${staffs[s].name} [${currentShift.replace(/\n/g,' ')}] 连排，找不到安全互换路径`);
                 }
             }
         }
@@ -1428,7 +1497,7 @@ async function autoFixAdjacentShifts() {
         }
         if (skipLogs.length > 0) {
             if (fixedCount > 0) msg += '<br><br>';
-            msg += `<b>⚠️ 以下连排无法自动修复，请手动调整：</b><br>` + skipLogs.join('<br>');
+            msg += `<b>⚠️ 以下 ${skipLogs.length} 处连排无法自动修复，请手动调整：</b><br>` + skipLogs.join('<br>');
         }
         warningBox.innerHTML = msg;
         warningBox.style.display = 'block';
