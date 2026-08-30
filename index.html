@@ -2075,11 +2075,19 @@ async function getAllHistoryMonthsData() {
             if (newSchedule[s][d] !== "") continue;
             if (lockedMap[s] && lockedMap[s][d]) continue;
 
+                        // 绝对防连排：不能同岗位，也不能同类别
             let prev = (d > 0) ? newSchedule[s][d - 1] : "";
             let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
             if (shiftName === prev || shiftName === next) continue;
             if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
 
+            // ★ 核心补漏：绝对不能连续三天高强度！
+            if (shift.level === '高') {
+              let prevLevel = (d > 0) ? (baseShifts.find(b => b.name === prev)?.level) : "";
+              let nextLevel = (d < totalDays - 1) ? (baseShifts.find(b => b.name === next)?.level) : "";
+              if (prevLevel === '高' && nextLevel === '高') continue;
+              // 前一天和后一天都是高强度，绝对不排！
+            }
             let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
             if (taken) continue;
 
@@ -2090,7 +2098,7 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 【第四步 终极绝对无空】看当天缺什么岗位，直接补上！
+          // 4. 【终极绝对无空】用缺失岗位补空，但必须防连排和高强度连三！
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] !== "") continue;
@@ -2112,6 +2120,24 @@ async function getAllHistoryMonthsData() {
             let bestCnt = Infinity;
             for (let nm of missingToday) {
               if ((shiftCounts[s][nm] || 0) >= 2) continue; 
+
+              // ★ 找到这个岗位对应的强度
+              let shiftObj = baseShifts.find(b => b.name === nm);
+              let level = shiftObj ? shiftObj.level : "";
+
+              // ★ 防连排
+              let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+              let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+              if (nm === prev || nm === next) continue;
+              if (getShiftCategory(nm) && (getShiftCategory(nm) === getShiftCategory(prev) || getShiftCategory(nm) === getShiftCategory(next))) continue;
+
+              // ★ 防高强度连续三天
+              if (level === '高') {
+                let prevLevel = (d > 0) ? (baseShifts.find(b => b.name === prev)?.level) : "";
+                let nextLevel = (d < totalDays - 1) ? (baseShifts.find(b => b.name === next)?.level) : "";
+                if (prevLevel === '高' && nextLevel === '高') continue;
+              }
+
               let cnt = shiftCounts[s][nm] || 0;
               if (cnt < bestCnt) {
                 bestCnt = cnt;
@@ -2125,14 +2151,28 @@ async function getAllHistoryMonthsData() {
             }
           }
 
+          // 极端兜底：如果连缺失岗位都因为规则被卡死，找一个当前不连排、不超2次、且不是高强度连续的岗位
           let fallback = null;
           let fallbackCnt = Infinity;
           for (let bS of baseShifts) {
-            if ((shiftCounts[s][bS.name] || 0) >= 2) continue;
-            let cnt = shiftCounts[s][bS.name] || 0;
+            let nm = bS.name;
+            if ((shiftCounts[s][nm] || 0) >= 2) continue;
+
+            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+            if (nm === prev || nm === next) continue;
+            if (getShiftCategory(nm) && (getShiftCategory(nm) === getShiftCategory(prev) || getShiftCategory(nm) === getShiftCategory(next))) continue;
+
+            if (bS.level === '高') {
+              let prevLevel = (d > 0) ? (baseShifts.find(b => b.name === prev)?.level) : "";
+              let nextLevel = (d < totalDays - 1) ? (baseShifts.find(b => b.name === next)?.level) : "";
+              if (prevLevel === '高' && nextLevel === '高') continue;
+            }
+
+            let cnt = shiftCounts[s][nm] || 0;
             if (cnt < fallbackCnt) {
               fallbackCnt = cnt;
-              fallback = bS.name;
+              fallback = nm;
             }
           }
           if (fallback) {
