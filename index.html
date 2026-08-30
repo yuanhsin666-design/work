@@ -1930,7 +1930,7 @@ async function getAllHistoryMonthsData() {
     return uniqueRounds;
   }
 
-     async function generateSchedule() {
+    async function generateSchedule() {
     const warningBox = document.getElementById('warningLog');
     warningBox.style.display = 'none';
     warningBox.innerHTML = '';
@@ -1976,7 +1976,7 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 【绝对锁死】休假日 & 锁定格
+      // 【绝对锁死】休假日 & 锁定格（绝不修改！）
       for (let day = 1; day <= totalDays; day++) {
         const dayIdx = day - 1;
         staffs.forEach((_, sIdx) => {
@@ -2011,7 +2011,7 @@ async function getAllHistoryMonthsData() {
         userLastAssignedDividendRound[sIdx] = lastRoundIndexForSpecificShift;
       });
 
-      // 1号，16号分红日优先排
+      // 【第一步】1号/16号分红日先排
       [1, 16].forEach(dividendDay => {
         if (dividendDay > totalDays) return;
         let dayIdx = dividendDay - 1;
@@ -2050,13 +2050,12 @@ async function getAllHistoryMonthsData() {
         });
       });
 
-      // 3. 排支援
+      // 【第二步】排支援
       for (let d = 0; d < totalDays; d++) {
         let availableToday = [];
         for (let s = 0; s < staffs.length; s++) {
           if (newSchedule[s][d] === "" && !(lockedMap[s] && lockedMap[s][d])) availableToday.push(s);
         }
-
         if (availableToday.length >= 13) {
           availableToday.sort((a, b) => (pastSupportCounts[a] || 0) - (pastSupportCounts[b] || 0));
           let chosenSupport = availableToday[0];
@@ -2065,13 +2064,8 @@ async function getAllHistoryMonthsData() {
         }
       }
 
-      // 4. 先排高，再中，再低
-      let orderedShifts = [
-        ...baseShifts.filter(s => s.level === '高'),
-        ...baseShifts.filter(s => s.level === '中'),
-        ...baseShifts.filter(s => s.level === '低')
-      ].sort(() => Math.random() - 0.5);
-
+      // 【第三步】先安排高，再中，再低
+      let orderedShifts = [...baseShifts].sort(() => Math.random() - 0.5);
       orderedShifts.forEach(shift => {
         let shiftName = shift.name;
         for (let s = 0; s < staffs.length; s++) {
@@ -2096,12 +2090,11 @@ async function getAllHistoryMonthsData() {
         }
       });
 
-      // 5. 【终极彻底兜底】剩下的空白，看当天缺什么，直接填上去，绝不重复绝不留空！
+      // 【第四步 终极绝对无空】看当天缺什么岗位，直接补上！
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] !== "") continue;
 
-          // 1. 找出当天所有已用掉的岗位
           let usedToday = new Set();
           for (let i = 0; i < staffs.length; i++) {
             if (newSchedule[i][d] !== "" && newSchedule[i][d] !== "休" && newSchedule[i][d] !== supName) {
@@ -2109,13 +2102,11 @@ async function getAllHistoryMonthsData() {
             }
           }
 
-          // 2. 找出当天缺失的岗位
           let missingToday = [];
           for (let bS of baseShifts) {
             if (!usedToday.has(bS.name)) missingToday.push(bS.name);
           }
 
-          // 3. 从缺失岗位里，挑这个人次数最少的补上
           if (missingToday.length > 0) {
             let best = null;
             let bestCnt = Infinity;
@@ -2134,7 +2125,6 @@ async function getAllHistoryMonthsData() {
             }
           }
 
-          // 4. 极端情况下，只能选一个未满2次的岗位
           let fallback = null;
           let fallbackCnt = Infinity;
           for (let bS of baseShifts) {
@@ -2156,7 +2146,7 @@ async function getAllHistoryMonthsData() {
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！生成即完美，无需点任何修复按钮！`);
+      alert(`排班完成！执行即完美，无需修复！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
