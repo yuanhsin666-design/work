@@ -2241,12 +2241,12 @@ async function generateSchedule() {
         const supName = supportShift.name;
         const shiftNames = baseShifts.map(s => s.name);
 
-        // ---------- 1. 初始化 ----------
+        // 1. 初始化
         let newSchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
         let shiftCounts = Array.from({ length: staffs.length }, () => ({}));
         let supportCountsThisMonth = Array.from({ length: staffs.length }, () => 0);
 
-        // ---------- 2. 加载历史数据 ----------
+        // 2. 加载历史数据
         let allHistoryData = await getAllHistoryMonthsData();
         let currentKey = getMonthKey();
         allHistoryData[currentKey] = newSchedule;
@@ -2277,7 +2277,7 @@ async function generateSchedule() {
             }
         });
 
-        // ---------- 3. 【最高优先级】锁死休假、锁定 ----------
+        // 3. 最高优先级：锁死休假和锁定
         for (let day = 1; day <= totalDays; day++) {
             const dayIdx = day - 1;
             staffs.forEach((_, sIdx) => {
@@ -2293,7 +2293,7 @@ async function generateSchedule() {
             });
         }
 
-        // ---------- 4. 【次优先级】分红日 ----------
+        // 4. 次优先级：分红日
         let allRounds = getSortedDividendRounds(allHistoryData, currentKey);
         staffs.forEach((_, sIdx) => {
             let lastRoundIndexForSpecificShift = {};
@@ -2351,7 +2351,7 @@ async function generateSchedule() {
             });
         });
 
-        // ---------- 5. 【次优先级】支援（给跨月0次的人） ----------
+        // 5. 次优先级：支援
         for (let d = 0; d < totalDays; d++) {
             let availableToday = [];
             for (let s = 0; s < staffs.length; s++) {
@@ -2383,10 +2383,10 @@ async function generateSchedule() {
         }
 
         // ================================================================
-        // 【核心逻辑】一次只看一个岗位，全月乱跳着找空位
+        // 6. 核心动作：一次只看一个岗位，全月乱跳着找空位
         // ================================================================
 
-        // 辅助函数：检查某天某岗位是否已有（不重复）
+        // 检查当天是否已有这个岗位（防重复）
         function isShiftTaken(day, shiftName) {
             for (let s = 0; s < staffs.length; s++) {
                 if (newSchedule[s][day] === shiftName) return true;
@@ -2394,7 +2394,7 @@ async function generateSchedule() {
             return false;
         }
 
-        // 辅助函数：检查某人某天放某岗位是否连排
+        // 检查是否连排（相同岗位或同类岗位）
         function checkAdjacent(sIdx, day, shiftName) {
             if (day > 0) {
                 let prev = newSchedule[sIdx][day - 1];
@@ -2413,7 +2413,7 @@ async function generateSchedule() {
             return false;
         }
 
-        // 辅助函数：检查高强度是否连3天
+        // 检查高强度是否连3天
         function checkHighThree(sIdx, day, shiftName) {
             let shiftObj = baseShifts.find(s => s.name === shiftName);
             if (!shiftObj || shiftObj.level !== '高') return false;
@@ -2422,12 +2422,12 @@ async function generateSchedule() {
             return (prevLevel === '高' && nextLevel === '高');
         }
 
-        // 辅助函数：检查某员工某岗位是否已达2次上限
+        // 检查某员工某岗位是否已达2次上限
         function isMaxed(sIdx, shiftName) {
             return (shiftCounts[sIdx][shiftName] || 0) >= 2;
         }
 
-        // 辅助函数：检查某天是否还有空位可填
+        // 检查某天是否还有空位
         function hasEmptySlot(day) {
             for (let s = 0; s < staffs.length; s++) {
                 if (newSchedule[s][day] === "" && !(lockedMap[s] && lockedMap[s][day])) {
@@ -2437,18 +2437,14 @@ async function generateSchedule() {
             return false;
         }
 
-        // 辅助函数：找一个可以放这个岗位的人（优先给没做过的人）
+        // 找一个可以放这个岗位的人（优先给没做过的人）
         function findCandidate(day, shiftName) {
             let candidates = [];
             for (let s = 0; s < staffs.length; s++) {
-                // 不能是休假/锁定/已有内容
                 if (newSchedule[s][day] !== "") continue;
                 if (lockedMap[s] && lockedMap[s][day]) continue;
-                // 不能超2次
                 if (isMaxed(s, shiftName)) continue;
-                // 不能连排
                 if (checkAdjacent(s, day, shiftName)) continue;
-                // 不能高强度连3天
                 if (checkHighThree(s, day, shiftName)) continue;
                 candidates.push(s);
             }
@@ -2466,31 +2462,24 @@ async function generateSchedule() {
         // 【第一遍】12个岗位各排一次
         // ================================================================
 
-        // 打乱岗位顺序，一次只看一个岗位
         let shuffledShifts1 = [...baseShifts].sort(() => Math.random() - 0.5);
 
         for (let shift of shuffledShifts1) {
             let shiftName = shift.name;
             let placed = 0;
             let attempts = 0;
-            let maxAttempts = 2000;
+            let maxAttempts = 3000;
 
             while (placed < staffs.length && attempts < maxAttempts) {
                 attempts++;
-                // 全月乱跳选一天
                 let day = Math.floor(Math.random() * totalDays);
 
-                // 检查：当天不能已经有这个岗位（不重复）
                 if (isShiftTaken(day, shiftName)) continue;
-
-                // 检查：当天必须还有空位
                 if (!hasEmptySlot(day)) continue;
 
-                // 找最佳人选
                 let bestStaff = findCandidate(day, shiftName);
                 if (bestStaff === -1) continue;
 
-                // 放下去
                 newSchedule[bestStaff][day] = shiftName;
                 shiftCounts[bestStaff][shiftName] = (shiftCounts[bestStaff][shiftName] || 0) + 1;
                 placed++;
@@ -2507,7 +2496,7 @@ async function generateSchedule() {
             let shiftName = shift.name;
             let placed = 0;
             let attempts = 0;
-            let maxAttempts = 2000;
+            let maxAttempts = 3000;
 
             while (placed < staffs.length && attempts < maxAttempts) {
                 attempts++;
@@ -2535,7 +2524,7 @@ async function generateSchedule() {
             let shiftName = shift.name;
             let placed = 0;
             let attempts = 0;
-            let maxAttempts = 2000;
+            let maxAttempts = 3000;
 
             while (placed < staffs.length && attempts < maxAttempts) {
                 attempts++;
@@ -2554,7 +2543,7 @@ async function generateSchedule() {
         }
 
         // ================================================================
-        // 【绝对不留空白】最后硬填
+        // 7. 绝对不留空白
         // ================================================================
 
         for (let d = 0; d < totalDays; d++) {
@@ -2600,12 +2589,13 @@ async function generateSchedule() {
             }
         }
 
-        // ---------- 保存 ----------
+        // 8. 保存
         lastGeneratedSchedule = sanitizeSchedule(newSchedule);
         renderAll();
         saveDataToLocal();
         document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-        alert(`排班完成！`);
+        alert(`排班完成！一次只看一个岗位，全月乱跳填空，无空白，无重复，无连排！`);
+
     } catch (err) {
         console.error(err);
         alert("排班发生错误：" + err.message);
