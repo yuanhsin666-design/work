@@ -2157,45 +2157,52 @@ async function generateSchedule() {
         });
       });
 
-      // ================= 【最核心的支援排班】绝对优先！给跨月累计0次的人！ =================
+      // ================= 【绝对优先支援】给跨月累计0次的人！ =================
+      let needFirstSupport = [];
+      for (let s = 0; s < staffs.length; s++) {
+        if ((pastSupportCounts[s] || 0) === 0) {
+          needFirstSupport.push(s);
+        }
+      }
+      needFirstSupport.sort(() => Math.random() - 0.5);
+
       for (let d = 0; d < totalDays; d++) {
         let availableToday = [];
         for (let s = 0; s < staffs.length; s++) {
           if (newSchedule[s][d] === "" && !(lockedMap[s] && lockedMap[s][d])) availableToday.push(s);
         }
         if (availableToday.length >= 13) {
-          // 1. 强制排序：跨月累计次数越少越优先！
-          availableToday.sort((a, b) => {
-            let totalA = pastSupportCounts[a] || 0;
-            let totalB = pastSupportCounts[b] || 0;
-            if (totalA !== totalB) return totalA - totalB;
-            return (supportCountsThisMonth[a] || 0) - (supportCountsThisMonth[b] || 0);
-          });
-
           let chosenSupport = -1;
-          // 2. 绝对铁律：必须且只能选 跨月累计0次 且 当月没拿过 的人！
+          // 1. 绝对优先：跨月累计为0、且当月没拿过支援的人！
           for (let s of availableToday) {
-            if ((pastSupportCounts[s] || 0) >= 1) continue; // 跨月拿过1次就绝对不要！
-            if ((supportCountsThisMonth[s] || 0) >= 1) continue; // 当月拿过也绝对不要！
-            if (d > 0 && newSchedule[s][d - 1] === supName) continue; // 昨天支援了，今天不选！
+            if ((pastSupportCounts[s] || 0) !== 0) continue; 
+            if ((supportCountsThisMonth[s] || 0) >= 1) continue; 
+            if (d > 0 && newSchedule[s][d - 1] === supName) continue; 
             chosenSupport = s;
             break;
           }
-
-          // 3. 如果跨月累计都是1次了，才勉强找当月没排过的（但绝不连续）
+          // 2. 如果跨月0次的人都排完了，才允许跨月1次的人排第二次！
           if (chosenSupport === -1) {
-            for (let s of availableToday) {
-              if (d > 0 && newSchedule[s][d - 1] === supName) continue;
-              if ((supportCountsThisMonth[s] || 0) >= 1) continue;
-              chosenSupport = s;
-              break;
+            let zeroDone = true;
+            for (let s of needFirstSupport) {
+              if ((pastSupportCounts[s] || 0) === 0) {
+                zeroDone = false;
+                break;
+              }
+            }
+            if (zeroDone) {
+              for (let s of availableToday) {
+                if (d > 0 && newSchedule[s][d - 1] === supName) continue;
+                if ((supportCountsThisMonth[s] || 0) >= 2) continue; 
+                chosenSupport = s;
+                break;
+              }
             }
           }
-
           if (chosenSupport !== -1) {
             newSchedule[chosenSupport][d] = supName;
             supportCountsThisMonth[chosenSupport]++;
-            pastSupportCounts[chosenSupport]++; // 立刻更新，防止再次被选！
+            pastSupportCounts[chosenSupport]++; 
           }
         }
       }
@@ -2263,33 +2270,11 @@ async function generateSchedule() {
         }
       }
 
-      // 6. 【绝对保底】最后哪怕还有极个别空位，绝对找个未满2次且当天没人的岗位填上！
-      for (let s = 0; s < staffs.length; s++) {
-        for (let d = 0; d < totalDays; d++) {
-          if (newSchedule[s][d] === "") {
-            let fallback = null;
-            let fallbackCnt = Infinity;
-            for (let bS of baseShifts) {
-              if ((shiftCounts[s][bS.name] || 0) >= 2) continue;
-              let cnt = shiftCounts[s][bS.name] || 0;
-              if (cnt < fallbackCnt) {
-                fallbackCnt = cnt;
-                fallback = bS.name;
-              }
-            }
-            if (fallback) {
-              newSchedule[s][d] = fallback;
-              shiftCounts[s][fallback] = (shiftCounts[s][fallback] || 0) + 1;
-            }
-          }
-        }
-      }
-
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！绝对优先支援给0次的人，绝不留空，绝不连排！`);
+      alert(`排班完成！优先给跨月0次的人支援，绝不超次！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
