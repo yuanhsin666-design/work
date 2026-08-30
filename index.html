@@ -960,9 +960,19 @@
 
     document.getElementById('status').innerText = `🔧 已清空 ${clearedCount} 个超次格子，开始重新填补...`;
 
-    let tempSchedule = sanitizeSchedule(schedule);
-    lastGeneratedSchedule = tempSchedule;
+let tempSchedule = sanitizeSchedule(schedule);
+lastGeneratedSchedule = tempSchedule;
+
+// 如果问题很多，直接调用核心排班算法重新生成
+let allProblems = remainingErrors.length;
+if (allProblems > 0) {
+    // 重新执行排班（会保留锁定的格子）
+    await generateSchedule();
+    document.getElementById('status').innerText = `🔄 检测到 ${allProblems} 处问题，已重新执行排班！`;
+    return;
+} else {
     await fillEmptyCells();
+}
 
     let finalSchedule = lastGeneratedSchedule;
     let finalCounts = Array.from({ length: staffs.length }, () => ({}));
