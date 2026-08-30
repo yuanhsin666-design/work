@@ -878,7 +878,7 @@ if (fixedCount > 0) {
     }
   }
 
-  // ⚖️ 空缺漂流安全版（绝不产生空白，严格按全月规则填补）
+ // ⚖️ 修复次数平摊（真正去修0次和3次，且修完如实报告！）
   async function autoFixCounts() {
     if (!lastGeneratedSchedule) return alert("当前没有排班数据，请先执行排班！");
 
@@ -903,10 +903,11 @@ if (fixedCount > 0) {
       }
       return counts;
     }
-
+    
     let currentCounts = getCounts();
     let baseNames = baseShifts.map(s => s.name);
 
+    // 检查某天是否有重复
     function isDaySafe(schedule, d) {
       let seen = {};
       for (let s = 0; s < schedule.length; s++) {
@@ -919,6 +920,7 @@ if (fixedCount > 0) {
       return true;
     }
 
+    // 检查某人不连排
     function isNoAdjacent(schedule, s, d) {
       let shift = schedule[s][d];
       if (!shift || shift === "休") return true;
@@ -937,79 +939,130 @@ if (fixedCount > 0) {
       return !(lockedMap[s] && lockedMap[s][d]);
     }
 
-    let moved = true;
-    let safety = 0;
-    while (moved && safety < 500) {
-      moved = false;
-      safety++;
+    // 1. 先全月扫一遍：把3次以上的人砍掉，补到0次的人身上！
+    for (let nm of baseNames) {
+      let moved = true;
+      let safety = 0;
+      while (moved && safety < 100) {
+        moved = false;
+        safety++;
 
-      for (let nm of baseNames) {
-        let donors = [];
+        // 找3次的人，和0次的人
         for (let s = 0; s < staffs.length; s++) {
-          if ((currentCounts[s][nm] || 0) >= 3) donors.push(s);
-        }
-        if (donors.length === 0) continue;
+          if ((currentCounts[s][nm] || 0) <= 2) continue;
 
-        outer:
-        for (let donor of donors) {
-          for (let d = 0; d < totalDays; d++) {
-            if (schedule[donor][d] !== nm) continue;
-            if (!isLockSafe(donor, d)) continue;
+          // 找0次的人接收
+          for (let rcv = 0; rcv < staffs.length; rcv++) {
+            if (rcv === s || (currentCounts[rcv][nm] || 0) !== 0) continue;
+            if (schedule[rcv][nm] !== undefined) continue;
 
-            // 备份原状态
-            let oldShift = schedule[donor][d];
-            
-            // 【尝试1】：看看能不能直接找到全月某一天，对方拿2次且当天有空，直接单向给它
-            let receiver = -1;
-            let receiverDay = -1;
-            for (let s = 0; s < staffs.length; s++) {
-              if (s === donor) continue;
-              if ((currentCounts[s][nm] || 0) >= 2) continue; // 只给0次或1次的人
+            // 在全月找一天，3次的人给0次的人，且不重复、不连排！
+            for (let d = 0; d < totalDays; d++) {
+              if (schedule[s][d] !== nm) continue;
+              if (schedule[rcv][d] === "休" || schedule[rcv][d] === supportShift.name) continue;
+              if (!isLockSafe(s, d) || !isLockSafe(rcv, d)) continue;
               
-              for (let dd = 0; dd < totalDays; dd++) {
-                if (schedule[s][dd] !== "") continue; // 必须当天有空位
-                if (!isLockSafe(s, dd)) continue;
-                
-                // 模拟测试：nm 给 s，看看是否不重复、不连排
-                schedule[s][dd] = nm;
-                if (isDaySafe(schedule, dd) && isNoAdjacent(schedule, s, dd)) {
-                  schedule[donor][d] = "休"; // 为防空白，先写成休
-                  currentCounts[donor][nm]--;
-                  currentCounts[s][nm]++;
-                  
-                  fixedCount++;
-                  fixLogs.push(`📅 <b>第 ${d + 1} 天</b>：直接补位！<b>${staffs[donor].name}</b> 的 [${nm.replace(/\n/g,'')}] 补给了 <b>${staffs[s].name}</b> 的第 ${dd + 1} 天！`);
-                  moved = true;
-                  break outer;
-                } else {
-                  schedule[s][dd] = "";
-                }
+              // 检查接收者当天原本做什么
+              let rcvOldShift = schedule[rcv][d];
+              if ((currentCounts[rcv][rcvOldShift] || 0) <= 1) continue;
+
+              // 模拟交换
+              let oldS = schedule[s][d];
+              let oldRcv = schedule[rcv][d];
+              schedule[s][d] = oldRcv;
+              schedule[rcv][d] = oldS;
+
+              if (isDaySafe(schedule, d) && isNoAdjacent(schedule, s, d) && isNoAdjacent(schedule, rcv, d)) {
+                currentCounts[s][nm]--;
+                currentCounts[s][rcvOldShift]++;
+                currentCounts[rcv][rcvOldShift]--;
+                currentCounts[rcv][nm]++;
+
+                fixedCount++;
+                fixLogs.push(`📅 第 ${d+1} 天：将 ${staffs[s].name} 的 [${nm.replace(/\n/g,'')}] 给了 ${staffs[rcv].name}`);
+                moved = true;
+                break;
+              } else {
+                schedule[s][d] = oldS;
+                schedule[rcv][d] = oldRcv;
               }
             }
+            if (moved) break;
           }
+          if (moved) break;
         }
       }
     }
 
-    if (fixedCount > 0) {
-      // 安全保护：凡是出现了空白的格子，强制填上“休”，绝不出现空白！
+    // 2. 再全月扫一遍：确保没有空白、没有0次（如果填补不了，就随便用次数最少且不连排的岗位补上）
+    for (let d = 0; d < totalDays; d++) {
       for (let s = 0; s < staffs.length; s++) {
-        for (let d = 0; d < totalDays; d++) {
-          if (schedule[s][d] === "") schedule[s][d] = "休";
+        if (schedule[s][d] !== "") continue;
+        
+        // 找当天缺什么，补什么
+        let usedToday = new Set();
+        for (let i = 0; i < staffs.length; i++) {
+          if (schedule[i][d] !== "" && schedule[i][d] !== "休") usedToday.add(schedule[i][d]);
+        }
+        
+        let best = null;
+        let bestCnt = Infinity;
+        for (let bS of baseShifts) {
+          let nm = bS.name;
+          if ((currentCounts[s][nm] || 0) >= 2) continue;
+          if (usedToday.has(nm)) continue;
+          let prev = (d > 0) ? schedule[s][d - 1] : "";
+          let next = (d < totalDays - 1) ? schedule[s][d + 1] : "";
+          if (nm === prev || nm === next) continue;
+          if (getShiftCategory(nm) && (getShiftCategory(nm) === getShiftCategory(prev) || getShiftCategory(nm) === getShiftCategory(next))) continue;
+          let cnt = currentCounts[s][nm] || 0;
+          if (cnt < bestCnt) {
+            bestCnt = cnt;
+            best = nm;
+          }
+        }
+        
+        if (best) {
+          schedule[s][d] = best;
+          currentCounts[s][best] = (currentCounts[s][best] || 0) + 1;
+          fixedCount++;
+          fixLogs.push(`📅 第 ${d+1} 天：填补了 ${staffs[s].name} 的空缺`);
         }
       }
+    }
 
+    // 3. 【终极如实校验】修复完成后，必须真实统计还有没有问题！
+    let remainingErrors = [];
+    for (let s = 0; s < staffs.length; s++) {
+      for (let bS of baseShifts) {
+        let cnt = currentCounts[s][bS.name] || 0;
+        if (cnt === 0) remainingErrors.push(`${staffs[s].name} 在 ${bS.name.replace(/\n/g, ' ')} 依然是 0 次`);
+        if (cnt > 2) remainingErrors.push(`${staffs[s].name} 在 ${bS.name.replace(/\n/g, ' ')} 依然是 ${cnt} 次`);
+      }
+    }
+
+    if (fixedCount > 0) {
       lastGeneratedSchedule = sanitizeSchedule(schedule);
       renderAll();
       saveDataToLocal();
       const warningBox = document.getElementById('warningLog');
-      warningBox.innerHTML = `<b>✅ 空缺漂流完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
+      warningBox.innerHTML = `<b>✅ 修复了 ${fixedCount} 处：</b><br>` + fixLogs.join('<br>');
       warningBox.style.display = 'block';
-      document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处平摊问题！`;
-      alert(`完成！这次绝对没有空白！采取的是更稳妥的“直接补位法”，且绝不影响排班规则！`);
+      document.getElementById('status').innerText = `✅ 已自动修复 ${fixedCount} 处！`;
+      
+      if (remainingErrors.length > 0) {
+        alert(`修复了 ${fixedCount} 处！但仍有 ${remainingErrors.length} 处没修复好：\n${remainingErrors.join('\n')}\n请再点一次修复！`);
+      } else {
+        alert(`修复了 ${fixedCount} 处！现在真的是完美的1~2次了！`);
+      }
+
     } else {
-      document.getElementById('status').innerText = `✅ 检查完毕，无需修复，次数分布完美！`;
-      alert("排班非常完美！当前所有人员所有岗位次数都是 1 次或 2 次。");
+      document.getElementById('status').innerText = `✅ 检查完毕！`;
+      if (remainingErrors.length > 0) {
+        alert(`系统检测到有 ${remainingErrors.length} 处错误，但无法自动完美修复，请尝试重新执行排班！\n错误：${remainingErrors.join('\n')}`);
+      } else {
+        alert("排班非常完美！当前真的没有任何问题了，不需要再修！");
+      }
     }
   }
   
