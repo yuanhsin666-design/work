@@ -1556,7 +1556,10 @@ async function getAllHistoryMonthsData() {
   async function copyTableWithStyles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
+    
+    // 【终极方案】直接用原始 HTML 克隆，绝不使用 innerText！
     const cloneTable = table.cloneNode(true);
+    
     if (tableId === 'scheduleTable' && isManualEditMode) {
       const selects = table.querySelectorAll('select.shift-select');
       const totalDays = getDaysInMonth(parseInt(document.getElementById('yearSelect').value), parseInt(document.getElementById('monthSelect').value));
@@ -1571,12 +1574,16 @@ async function getAllHistoryMonthsData() {
         }
       });
     }
+
+    // 遍历每一个格子，绝对强制用 `<br>` 换行！
     const origCells = table.querySelectorAll('th, td');
     const cloneCells = cloneTable.querySelectorAll('th, td');
     origCells.forEach((origCell, index) => {
       const computed = window.getComputedStyle(origCell);
       const cloneCell = cloneCells[index];
       if (!cloneCell) return;
+      
+      // 复制原样式
       cloneCell.style.backgroundColor = computed.backgroundColor;
       cloneCell.style.color = computed.color;
       cloneCell.style.fontWeight = computed.fontWeight;
@@ -1584,15 +1591,25 @@ async function getAllHistoryMonthsData() {
       cloneCell.style.padding = "6px";
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
-      
-      // 【一定要用这一段，绝对不把 \n 换成空格，而是变成 Excel 强制换行标签！】
-      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
-      cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
+
+      // 【核心秘诀】读取原始 HTML，找到网页里原本存在的换行标签 <br>，然后强制替换成 Excel 认识的方式！
+      let rawHtml = origCell.innerHTML; 
+      // 如果原始 HTML 里有 <br>，在 Excel 里就是直式！
+      let excelHtml = rawHtml.replace(/🔒/g, '')
+                             .replace(/<br\s*\/?>/gi, '<br style="mso-data-placement:same-cell;">')
+                             .replace(/<div>/gi, '<br style="mso-data-placement:same-cell;">');
+      cloneCell.innerHTML = excelHtml;
     });
+
+    // 构建给 Excel 用的 HTML 包装器
     const htmlWrapper = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="utf-8"><style>td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; } br { mso-data-placement: same-cell; }</style></head>
+      <head><meta charset="utf-8"><style>
+        td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; }
+        br { mso-data-placement: same-cell; }
+      </style></head>
       <body>${cloneTable.outerHTML}</body></html>`;
+
     try {
       if (navigator.clipboard && window.ClipboardItem) {
         const blobHtml = new Blob([htmlWrapper], { type: "text/html" });
