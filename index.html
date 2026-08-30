@@ -2203,7 +2203,7 @@ async function generateSchedule() {
         }
       }
 
-      // 4. 【核心发牌】每放一个格子，必须严格查连排、查重复、查超次，否则 continue 跳过！
+      // 4. 【核心发牌 + 绝对防呆防连排防重复防超次】
       for (let round = 0; round < 2; round++) {
         let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
         shuffledShifts.forEach(shift => {
@@ -2216,13 +2216,11 @@ async function generateSchedule() {
               if (newSchedule[s][d] !== "") continue;
               if (lockedMap[s] && lockedMap[s][d]) continue;
               
-              // 【最严格的 4 道检查，全部通过才放！】
-              
-              // 1. 防重复：当天不能有人做这个岗位
+              // 1. 防重复：当天绝对不能有人做这个岗位
               let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
               if (taken) continue; 
               
-              // 2. 防连排：前后不能是同岗位/同类别
+              // 2. 防连排：前后绝对不能是同岗位/同类别
               let prev = (d > 0) ? newSchedule[s][d - 1] : "";
               let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
               if (shiftName === prev || shiftName === next) continue;
@@ -2247,7 +2245,7 @@ async function generateSchedule() {
         });
       }
 
-      // 5. 【终极填空】当天缺什么岗位，且在“防连排、防重复、防超次”的情况下才补！
+      // 5. 【终极填漏】如果上面因为防呆跳过了导致空位，填漏但绝不破坏规则！
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] !== "") continue;
@@ -2291,38 +2289,14 @@ async function generateSchedule() {
         }
       }
 
-      // 6. 最后防空白：选一个未满2次且绝不产生连排的岗位
-      for (let s = 0; s < staffs.length; s++) {
-        for (let d = 0; d < totalDays; d++) {
-          if (newSchedule[s][d] === "") {
-            let fallback = null;
-            let fallbackCnt = Infinity;
-            for (let bS of baseShifts) {
-              if ((shiftCounts[s][bS.name] || 0) >= 2) continue;
-              let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-              let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-              if (bS.name === prev || bS.name === next) continue;
-              if (getShiftCategory(bS.name) && (getShiftCategory(bS.name) === getShiftCategory(prev) || getShiftCategory(bS.name) === getShiftCategory(next))) continue;
-
-              let cnt = shiftCounts[s][bS.name] || 0;
-              if (cnt < fallbackCnt) {
-                fallbackCnt = cnt;
-                fallback = bS.name;
-              }
-            }
-            if (fallback) {
-              newSchedule[s][d] = fallback;
-              shiftCounts[s][fallback] = (shiftCounts[s][fallback] || 0) + 1;
-            }
-          }
-        }
-      }
+      // 6. 如果有任何漏排，宁可让其保持空白，也绝不产生重复连排！
+      // (什么都不做，让“校验”按钮去找出漏排）
 
       lastGeneratedSchedule = sanitizeSchedule(newSchedule);
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！严格校验防连排、防重复、防超次！`);
+      alert(`排班完成！严格防重复、防连排、防超次！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
