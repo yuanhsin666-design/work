@@ -1584,8 +1584,9 @@ async function getAllHistoryMonthsData() {
       cloneCell.style.padding = "6px";
       cloneCell.style.textAlign = "center";
       cloneCell.style.fontSize = "12px";
-            let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
+      let cellText = (cloneCell.innerText || cloneCell.textContent).replace(/🔒/g, '').trim();
       cloneCell.innerHTML = cellText.replace(/\n/g, '<br style="mso-data-placement:same-cell;">');
+    });
     const htmlWrapper = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
       <head><meta charset="utf-8"><style>td, th { mso-number-format: '\\@'; white-space: normal; vertical-align: middle; text-align: center; } br { mso-data-placement: same-cell; }</style></head>
@@ -2137,33 +2138,32 @@ async function generateSchedule() {
         });
       });
 
-            // 3. 排支援（只排本月累计0次、且跨月最少的！）
+      // 3. 排支援（谁跨月累计少谁优先！）
       for (let d = 0; d < totalDays; d++) {
         let availableToday = [];
         for (let s = 0; s < staffs.length; s++) {
           if (newSchedule[s][d] === "" && !(lockedMap[s] && lockedMap[s][d])) availableToday.push(s);
         }
         if (availableToday.length >= 13) {
-          // 先把跨月累计少的排在前面
-          availableToday.sort((a, b) => {
-            let totalA = pastSupportCounts[a] || 0;
-            let totalB = pastSupportCounts[b] || 0;
-            if (totalA !== totalB) return totalA - totalB;
-            return (supportCountsThisMonth[a] || 0) - (supportCountsThisMonth[b] || 0);
-          });
-
+          availableToday.sort((a, b) => (pastSupportCounts[a] || 0) - (pastSupportCounts[b] || 0));
           let chosenSupport = -1;
           for (let s of availableToday) {
-            if ((supportCountsThisMonth[s] || 0) >= 1) continue; // 本月已经排过支援的，绝对不排！
-            if (d > 0 && newSchedule[s][d - 1] === supName) continue; // 昨天支援的，今天不排！
+            if ((pastSupportCounts[s] || 0) >= 1) continue;
+            if ((supportCountsThisMonth[s] || 0) >= 1) continue;
+            if (d > 0 && newSchedule[s][d - 1] === supName) continue;
             chosenSupport = s;
             break;
           }
-
+          if (chosenSupport === -1) {
+            for (let s of availableToday) {
+              if (d > 0 && newSchedule[s][d - 1] === supName) continue;
+              chosenSupport = s;
+              break;
+            }
+          }
           if (chosenSupport !== -1) {
             newSchedule[chosenSupport][d] = supName;
             supportCountsThisMonth[chosenSupport]++;
-            pastSupportCounts[chosenSupport]++; // 同步增加跨月累计，防止明天又排他！
           }
         }
       }
