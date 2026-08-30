@@ -327,15 +327,25 @@
     return true;
   }
 
-   async function resetCurrentMonthData() {
+      async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
-    if (confirm(`确定要重置 [${monthKey}] 月份的工作岗位吗？\n（注意：将清空排班，但保留所有休假日期和云端链接）`)) {
+    if (confirm(`确定要重置 [${monthKey}] 月份的工作岗位吗？\n（注意：将清空排班，但【保留所有休假日期、锁定格子和云端链接】）`)) {
       lastGeneratedSchedule = null;
-      initLockedMap(true); 
+      
+      // 【关键修改】不调用 initLockedMap(true)，所以锁定的格子不会被清空！
+      // 如果当前 lockedMap 还是空的，我们才初始化它（且保持原来的大小）
+      if (!lockedMap || lockedMap.length !== staffs.length) {
+        const totalDays = getDaysInMonth(
+          parseInt(document.getElementById('yearSelect').value),
+          parseInt(document.getElementById('monthSelect').value)
+        );
+        lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+      }
+
       await saveDataToLocal();
       renderAll();
-      document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 的工作岗位（保留休假）！`;
-      alert(`[${monthKey}] 月份的工作岗位已成功重置！\n\n【保留的数据】\n• 所有员工的休假日\n• 云端链接\n\n【已清空的数据】\n• 所有人的排班工作岗位`);
+      document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 的工作岗位（保留休假和锁定）！`;
+      alert(`[${monthKey}] 月份的工作岗位已成功重置！\n\n【保留的数据】\n• 所有员工的休假日\n• 所有锁定的格子\n• 云端链接\n\n【已清空的数据】\n• 所有人的排班工作岗位`);
     }
   }
 
@@ -2104,17 +2114,55 @@ async function generateSchedule() {
         });
       });
 
-      // 3. 支援
+            // 3. 【严格支援分配】平均分配，绝不连续给同一个人！
       for (let d = 0; d < totalDays; d++) {
         let availableToday = [];
+        // 找出当天上班且当天还没有排任何岗位的人
         for (let s = 0; s < staffs.length; s++) {
           if (newSchedule[s][d] === "" && !(lockedMap[s] && lockedMap[s][d])) availableToday.push(s);
         }
+
+        // 只有当人数足够（超过13人上班）才考虑支援
         if (availableToday.length >= 13) {
-          availableToday.sort((a, b) => (pastSupportCounts[a] || 0) - (pastSupportCounts[b] || 0));
-          let chosenSupport = availableToday[0];
-          newSchedule[chosenSupport][d] = supName;
-          supportCountsThisMonth[chosenSupport]++;
+          // 1. 优先找跨月累计次数最少的人（比如海绵是0次，妮妮是4次，海绵必须优先！）
+          availableToday.sort((a, b) => {
+            let totalA = pastSupportCounts[a] || 0;
+            let totalB = pastSupportCounts[b] || 0;
+            if (totalA !== totalB) return totalA - totalB;
+            // 如果跨月次数一样，再看当月已经拿过几次支援
+            return (supportCountsThisMonth[a] || 0) - (supportCountsThisMonth[b] || 0);
+          });
+
+          // 2. 找一个跨月最少、且当月还没做过支援的人（绝不连续！）
+          let chosenSupport = -1;
+          for (let s of availableToday) {
+            // 如果这个人前一天也是支援，绝对不能选！
+            let prevIsSup = (d > 0) ? (newSchedule[s][d - 1] === supName) : false;
+            if (prevIsSup) continue; 
+            
+            // 如果这个人在当月已经拿过2次支援了，也跳过（防止妮妮那样拿4天）
+            if ((supportCountsThisMonth[s] || 0) >= 2) continue; 
+
+            // 选这个人！
+            chosenSupport = s;
+            break;
+          }
+
+          // 如果上面实在找不到了（极少数情况），只能退而求其次选一个当月只拿过1次的
+          if (chosenSupport === -1) {
+            for (let s of availableToday) {
+              if ((supportCountsThisMonth[s] || 0) <= 1) {
+                chosenSupport = s;
+                break;
+              }
+            }
+          }
+
+          // 最后落定
+          if (chosenSupport !== -1) {
+            newSchedule[chosenSupport][d] = supName;
+            supportCountsThisMonth[chosenSupport]++;
+          }
         }
       }
 
