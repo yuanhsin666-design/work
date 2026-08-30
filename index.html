@@ -865,7 +865,7 @@ if (fixedCount > 0) {
     }
   }
 
-   // 🚨 校验岗位0次（绝不修改岗位名称，直接用原始字符串比对！）
+  // 🚨 校验岗位0次（绝对不看错名字，排了什么就查什么！）
   function validateZeroCounts() {
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
@@ -873,19 +873,18 @@ if (fixedCount > 0) {
     const warningBox = document.getElementById('warningLog');
     let zeroLogs = [];
 
-    // 用原始的名字建一个统计表
-    let trueNames = baseShifts.map(s => s.name);
+    // 直接把页面上的岗位名（可能带\n换行）拿出来
+    let shiftNames = baseShifts.map(s => s.name);
 
     staffs.forEach((staff, sIdx) => {
-      // 因为岗位名里带 \n，我们用对象来统计
+      // 初始化统计表
       let counts = {};
-      trueNames.forEach(name => counts[name] = 0);
+      shiftNames.forEach(nm => counts[nm] = 0);
 
       if (lastGeneratedSchedule && lastGeneratedSchedule[sIdx]) {
         lastGeneratedSchedule[sIdx].forEach(shift => {
-          // 绝不转换 shift，直接用 shift 去对象里找！
+          // 只要格子里的内容和我们的岗位名【完全一模一样】，就加1次！
           if (shift && shift !== "休" && shift !== supportShift.name) {
-            // 这是关键：如果排班表里的 shift 和 trueNames 里的名字完全一致，就加1！
             if (counts.hasOwnProperty(shift)) {
               counts[shift]++;
             }
@@ -893,10 +892,10 @@ if (fixedCount > 0) {
         });
       }
 
-      trueNames.forEach(name => {
-        if (counts[name] === 0) {
-          // 这里仅仅为了显示好看，才把换行换成空格，绝不影响比对！
-          zeroLogs.push(`👤 <b>${staff.name}</b> 在岗位 [<b>${name.replace(/\n/g, ' ')}</b>] 全月 <b>0次</b>！`);
+      shiftNames.forEach(nm => {
+        if (counts[nm] === 0) {
+          // 换行只是为了显示成空格，不影响后台
+          zeroLogs.push(`👤 <b>${staff.name}</b> 在岗位 [<b>${nm.replace(/\n/g, ' ')}</b>] 全月 <b>0次</b>！`);
         }
       });
     });
