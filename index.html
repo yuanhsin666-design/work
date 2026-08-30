@@ -1193,7 +1193,7 @@ function validateAdjacentShifts() {
         alert(`校验完成！当月没有发现任何岗位连排现象。`);
     }
 }
-  // ========== 修复连排岗位（链式互换版） ==========
+// ========== 修复连排岗位（连续两天局部调整） ==========
 async function autoFixAdjacentShifts() {
     if (!lastGeneratedSchedule) {
         return alert("当前没有排班数据，请先执行排班！");
@@ -1206,9 +1206,9 @@ async function autoFixAdjacentShifts() {
     let schedule = lastGeneratedSchedule.map(row => [...row]);
     let fixedCount = 0;
     let fixLogs = [];
-    let skipCount = 0;
     let skipLogs = [];
-    let maxRounds = 100;
+
+    // ---- 辅助函数 ----
 
     function isLocked(s, d) {
         return lockedMap[s] && lockedMap[s][d];
@@ -1230,11 +1230,13 @@ async function autoFixAdjacentShifts() {
         return found ? found.level === '高' : false;
     }
 
+    // 检查某人某天是否连排（只看相邻两天）
     function hasAdjacentIssue(sIdx, day) {
         let currentShift = schedule[sIdx][day];
         if (!currentShift || currentShift === "休" || currentShift === supportShift.name) return false;
         let currentCategory = getCategory(currentShift);
 
+        // 只检查前一天和后一天，不跳着看
         if (day > 0) {
             let prevShift = schedule[sIdx][day - 1];
             if (prevShift && prevShift !== "休" && prevShift !== supportShift.name) {
@@ -1250,37 +1252,20 @@ async function autoFixAdjacentShifts() {
         return false;
     }
 
-    function isShiftTaken(day, shiftName) {
+    // 检查当天是否有重复岗位
+    function hasDuplicateOnDay(day) {
+        let seen = new Set();
         for (let s = 0; s < staffs.length; s++) {
-            if (schedule[s][day] === shiftName) return true;
+            let shift = schedule[s][day];
+            if (shift && shift !== "休" && shift !== supportShift.name) {
+                if (seen.has(shift)) return true;
+                seen.add(shift);
+            }
         }
         return false;
     }
 
-    function isMaxed(sIdx, shiftName) {
-        let count = 0;
-        for (let d = 0; d < totalDays; d++) {
-            if (schedule[sIdx][d] === shiftName) count++;
-        }
-        return count >= 2;
-    }
-
-    function isHighThree(sIdx, day) {
-        let shift = schedule[sIdx][day];
-        if (!isHigh(shift)) return false;
-        let prevHigh = false;
-        let nextHigh = false;
-        if (day > 0) {
-            let prev = schedule[sIdx][day - 1];
-            if (isHigh(prev)) prevHigh = true;
-        }
-        if (day < totalDays - 1) {
-            let next = schedule[sIdx][day + 1];
-            if (isHigh(next)) nextHigh = true;
-        }
-        return prevHigh && nextHigh;
-    }
-
+    // 检查某人某天放某岗位是否会连排
     function wouldBeAdjacent(sIdx, day, shiftName) {
         let newCategory = getCategory(shiftName);
         if (day > 0) {
@@ -1298,6 +1283,7 @@ async function autoFixAdjacentShifts() {
         return false;
     }
 
+    // 检查某人某天放某岗位是否会高强度连3天
     function wouldBeHighThree(sIdx, day, shiftName) {
         if (!isHigh(shiftName)) return false;
         let prevHigh = false;
@@ -1313,95 +1299,17 @@ async function autoFixAdjacentShifts() {
         return prevHigh && nextHigh;
     }
 
-    function findSwapChain(sIdx, day) {
-        let currentShift = schedule[sIdx][day];
-        if (!currentShift || currentShift === "休" || currentShift === supportShift.name) return null;
-
-        for (let otherS = 0; otherS < staffs.length; otherS++) {
-            if (otherS === sIdx) continue;
-            if (isLocked(otherS, day)) continue;
-            let otherShift = schedule[otherS][day];
-            if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
-            if (otherShift === currentShift) continue;
-
-            if (!wouldBeAdjacent(otherS, day, currentShift) && 
-                !wouldBeAdjacent(sIdx, day, otherShift) &&
-                !wouldBeHighThree(otherS, day, currentShift) &&
-                !wouldBeHighThree(sIdx, day, otherShift) &&
-                !isMaxed(otherS, currentShift) &&
-                !isMaxed(sIdx, otherShift)) {
-                
-                let tempSchedule = schedule.map(row => [...row]);
-                tempSchedule[sIdx][day] = otherShift;
-                tempSchedule[otherS][day] = currentShift;
-                let seen = new Set();
-                let duplicate = false;
-                for (let si = 0; si < staffs.length; si++) {
-                    let sh = tempSchedule[si][day];
-                    if (sh && sh !== "休" && sh !== supportShift.name) {
-                        if (seen.has(sh)) { duplicate = true; break; }
-                        seen.add(sh);
-                    }
-                }
-                if (!duplicate) {
-                    return [{ staffIdx: sIdx, day: day, shift: otherShift }, { staffIdx: otherS, day: day, shift: currentShift }];
-                }
-            }
+    // 检查某人某岗位是否已达2次上限
+    function isMaxed(sIdx, shiftName) {
+        let count = 0;
+        for (let d = 0; d < totalDays; d++) {
+            if (schedule[sIdx][d] === shiftName) count++;
         }
-
-        for (let otherS = 0; otherS < staffs.length; otherS++) {
-            if (otherS === sIdx) continue;
-            if (isLocked(otherS, day)) continue;
-            let otherShift = schedule[otherS][day];
-            if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
-
-            for (let otherDay = 0; otherDay < totalDays; otherDay++) {
-                if (otherDay === day) continue;
-                if (isLocked(otherS, otherDay)) continue;
-                let otherDayShift = schedule[otherS][otherDay];
-                if (!otherDayShift || otherDayShift === "休" || otherDayShift === supportShift.name) continue;
-
-                if (!wouldBeAdjacent(sIdx, day, otherDayShift) &&
-                    !wouldBeHighThree(sIdx, day, otherDayShift) &&
-                    !isMaxed(sIdx, otherDayShift) &&
-                    !wouldBeAdjacent(otherS, otherDay, otherShift) &&
-                    !wouldBeHighThree(otherS, otherDay, otherShift) &&
-                    !isMaxed(otherS, otherShift)) {
-                    
-                    return [
-                        { staffIdx: sIdx, day: day, shift: otherDayShift },
-                        { staffIdx: otherS, day: otherDay, shift: otherShift },
-                        { staffIdx: otherS, day: day, shift: otherDayShift }
-                    ];
-                }
-
-                if (!wouldBeAdjacent(sIdx, day, otherDayShift) &&
-                    !wouldBeHighThree(sIdx, day, otherDayShift) &&
-                    !isMaxed(sIdx, otherDayShift) &&
-                    !wouldBeAdjacent(otherS, otherDay, currentShift) &&
-                    !wouldBeHighThree(otherS, otherDay, currentShift) &&
-                    !isMaxed(otherS, currentShift)) {
-                    
-                    return [
-                        { staffIdx: sIdx, day: day, shift: otherDayShift },
-                        { staffIdx: otherS, day: otherDay, shift: currentShift },
-                        { staffIdx: otherS, day: day, shift: otherDayShift }
-                    ];
-                }
-            }
-        }
-
-        return null;
+        return count >= 2;
     }
 
-    function applyChain(chain) {
-        for (let step of chain) {
-            schedule[step.staffIdx][step.day] = step.shift;
-        }
-        return chain.length;
-    }
-
-    for (let round = 0; round < maxRounds; round++) {
+    // ---- 核心：只修有问题的连排格子 ----
+    for (let round = 0; round < 50; round++) {
         let fixedThisRound = 0;
 
         for (let s = 0; s < staffs.length; s++) {
@@ -1412,15 +1320,92 @@ async function autoFixAdjacentShifts() {
 
                 if (!hasAdjacentIssue(s, d)) continue;
 
-                let chain = findSwapChain(s, d);
-                if (chain) {
-                    applyChain(chain);
+                // ========================================
+                // 方案1：跟同一天别人互换
+                // ========================================
+                let swapped = false;
+                for (let otherS = 0; otherS < staffs.length; otherS++) {
+                    if (otherS === s) continue;
+                    if (isLocked(otherS, d)) continue;
+
+                    let otherShift = schedule[otherS][d];
+                    if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
+                    if (otherShift === currentShift) continue;
+
+                    // 模拟交换
+                    let oldS = schedule[s][d];
+                    let oldOther = schedule[otherS][d];
+                    schedule[s][d] = oldOther;
+                    schedule[otherS][d] = oldS;
+
+                    // 验证：交换后两边都不连排
+                    let valid = true;
+                    if (hasAdjacentIssue(s, d)) valid = false;
+                    if (hasAdjacentIssue(otherS, d)) valid = false;
+                    if (wouldBeHighThree(s, d, oldOther)) valid = false;
+                    if (wouldBeHighThree(otherS, d, oldS)) valid = false;
+                    if (isMaxed(s, oldOther)) valid = false;
+                    if (isMaxed(otherS, oldS)) valid = false;
+                    if (hasDuplicateOnDay(d)) valid = false;
+
+                    if (valid) {
+                        fixedCount++;
+                        fixedThisRound++;
+                        fixLogs.push(`🔄 第 ${d+1} 天：${staffs[s].name} [${oldS.replace(/\n/g,' ')}] ↔ ${staffs[otherS].name} [${oldOther.replace(/\n/g,' ')}]`);
+                        swapped = true;
+                        break;
+                    } else {
+                        schedule[s][d] = oldS;
+                        schedule[otherS][d] = oldOther;
+                    }
+                }
+
+                if (swapped) continue;
+
+                // ========================================
+                // 方案2：把当前格子换成另一个岗位
+                // ========================================
+                let replaced = false;
+                let usedToday = new Set();
+                for (let si = 0; si < staffs.length; si++) {
+                    let shift = schedule[si][d];
+                    if (shift && shift !== "休" && shift !== supportShift.name) {
+                        usedToday.add(shift);
+                    }
+                }
+
+                let candidates = [];
+                for (let bS of baseShifts) {
+                    let nm = bS.name;
+                    if (usedToday.has(nm)) continue;           // 当天不能重复
+                    if (isMaxed(s, nm)) continue;               // 不能超2次
+                    if (wouldBeAdjacent(s, d, nm)) continue;    // 不能造成新连排
+                    if (wouldBeHighThree(s, d, nm)) continue;   // 不能高强度连3天
+                    candidates.push(nm);
+                }
+
+                if (candidates.length > 0) {
+                    // 选次数最少的
+                    let counts = {};
+                    for (let i = 0; i < totalDays; i++) {
+                        let shift = schedule[s][i];
+                        if (shift && shift !== "休" && shift !== supportShift.name) {
+                            counts[shift] = (counts[shift] || 0) + 1;
+                        }
+                    }
+                    candidates.sort((a, b) => (counts[a] || 0) - (counts[b] || 0));
+                    let newShift = candidates[0];
+
+                    let oldShift = schedule[s][d];
+                    schedule[s][d] = newShift;
                     fixedCount++;
                     fixedThisRound++;
-                    fixLogs.push(`🔄 链式互换修复 ${staffs[s].name} 第 ${d+1} 天`);
-                } else {
-                    skipCount++;
-                    skipLogs.push(`⚠️ 第 ${d+1} 天：${staffs[s].name} [${currentShift.replace(/\n/g,' ')}] 连排，找不到安全互换路径`);
+                    fixLogs.push(`🔄 第 ${d+1} 天：${staffs[s].name} [${oldShift.replace(/\n/g,' ')}] → [${newShift.replace(/\n/g,' ')}]`);
+                    replaced = true;
+                }
+
+                if (!replaced) {
+                    skipLogs.push(`⚠️ 第 ${d+1} 天：${staffs[s].name} [${currentShift.replace(/\n/g,' ')}] 连排，找不到安全修复方式`);
                 }
             }
         }
@@ -1428,7 +1413,8 @@ async function autoFixAdjacentShifts() {
         if (fixedThisRound === 0) break;
     }
 
-    if (fixedCount > 0 || skipCount > 0) {
+    // ---- 保存并刷新 ----
+    if (fixedCount > 0 || skipLogs.length > 0) {
         if (fixedCount > 0) {
             lastGeneratedSchedule = sanitizeSchedule(schedule);
             renderAll();
@@ -1437,24 +1423,19 @@ async function autoFixAdjacentShifts() {
 
         const warningBox = document.getElementById('warningLog');
         let msg = '';
-
         if (fixedCount > 0) {
-            msg += `<b>✅ 链式修复完成（共修复 ${fixedCount} 处）：</b><br>`;
-            msg += fixLogs.join('<br>');
+            msg += `<b>✅ 连排修复完成（共修复 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
         }
-
-        if (skipCount > 0) {
+        if (skipLogs.length > 0) {
             if (fixedCount > 0) msg += '<br><br>';
-            msg += `<b>⚠️ 以下 ${skipCount} 处连排无法自动修复：</b><br>`;
-            msg += skipLogs.join('<br>');
+            msg += `<b>⚠️ 以下连排无法自动修复，请手动调整：</b><br>` + skipLogs.join('<br>');
         }
-
         warningBox.innerHTML = msg;
         warningBox.style.display = 'block';
 
-        if (skipCount > 0) {
-            document.getElementById('status').innerText = `⚠️ 修复 ${fixedCount} 处，${skipCount} 处无法修复`;
-            alert(`⚠️ 修复完成！\n- 已修复 ${fixedCount} 处\n- ${skipCount} 处无法修复（请查看下方提醒）`);
+        if (skipLogs.length > 0) {
+            document.getElementById('status').innerText = `⚠️ 修复 ${fixedCount} 处，${skipLogs.length} 处需手动调整`;
+            alert(`⚠️ 修复完成！\n- 已修复 ${fixedCount} 处\n- ${skipLogs.length} 处无法自动修复，请查看下方提醒手动调整。`);
         } else {
             document.getElementById('status').innerText = `✅ 已修复 ${fixedCount} 处连排！`;
             alert(`✅ 修复完成！已修复 ${fixedCount} 处连排。`);
