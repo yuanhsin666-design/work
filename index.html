@@ -1004,7 +1004,215 @@ await fillEmptyCells();
     saveDataToLocal();
     renderAll();
   }
+// 🔧 强制修复所有 >=3 次的问题（不动休假、锁定、分红日、支援）
+async function forceFixOverTwo() {
+    if (!lastGeneratedSchedule) {
+        return alert("当前没有排班数据，请先执行排班！");
+    }
 
+    const totalDays = getDaysInMonth(
+        parseInt(document.getElementById('yearSelect').value),
+        parseInt(document.getElementById('monthSelect').value)
+    );
+
+    let schedule = lastGeneratedSchedule.map(row => [...row]);
+    let fixedCount = 0;
+    let fixLogs = [];
+
+    function getLevel(shiftName) {
+        if (!shiftName || shiftName === "休" || shiftName === supportShift.name) return "";
+        let found = baseShifts.find(s => s.name === shiftName);
+        return found ? found.level : "";
+    }
+
+    function isHigh(shiftName) {
+        return getLevel(shiftName) === '高';
+    }
+
+    function isLocked(s, d) {
+        return lockedMap[s] && lockedMap[s][d];
+    }
+
+    function isDividendDay(d) {
+        return (d === 0 || d === 15);
+    }
+
+    function getShiftCategoryName(shiftName) {
+        if (!shiftName || shiftName === "休" || shiftName === supportShift.name) return "";
+        let lines = shiftName.split('\n');
+        return lines[0].trim().toUpperCase();
+    }
+
+    function wouldBeAdjacent(sIdx, day, shiftName) {
+        if (day > 0) {
+            let prev = schedule[sIdx][day - 1];
+            if (prev && prev !== "休" && prev !== supportShift.name) {
+                if (prev === shiftName) return true;
+                if (getShiftCategoryName(prev) === getShiftCategoryName(shiftName)) return true;
+            }
+        }
+        if (day < totalDays - 1) {
+            let next = schedule[sIdx][day + 1];
+            if (next && next !== "休" && next !== supportShift.name) {
+                if (next === shiftName) return true;
+                if (getShiftCategoryName(next) === getShiftCategoryName(shiftName)) return true;
+            }
+        }
+        return false;
+    }
+
+    function wouldBeHighThree(sIdx, day, shiftName) {
+        if (!isHigh(shiftName)) return false;
+        let consecutiveBefore = 0;
+        for (let d = day - 1; d >= 0; d--) {
+            let prev = schedule[sIdx][d];
+            if (isHigh(prev)) consecutiveBefore++;
+            else break;
+        }
+        return consecutiveBefore >= 2;
+    }
+
+    function getCounts() {
+        let counts = Array.from({ length: staffs.length }, () => ({}));
+        for (let s = 0; s < staffs.length; s++) {
+            for (let d = 0; d < totalDays; d++) {
+                let shift = schedule[s][d];
+                if (shift && shift !== "休" && shift !== supportShift.name) {
+                    counts[s][shift] = (counts[s][shift] || 0) + 1;
+                }
+            }
+        }
+        return counts;
+    }
+
+    let currentCounts = getCounts();
+    let hasProblem = true;
+    let round = 0;
+
+    while (hasProblem && round < 50) {
+        hasProblem = false;
+        round++;
+        currentCounts = getCounts();
+
+        for (let s = 0; s < staffs.length; s++) {
+            for (let nm of baseShifts.map(b => b.name)) {
+                let cnt = currentCounts[s][nm] || 0;
+                if (cnt < 3) continue;
+
+                hasProblem = true;
+
+                let daysWithShift = [];
+                for (let d = 0; d < totalDays; d++) {
+                    if (schedule[s][d] === nm && !isLocked(s, d) && !isDividendDay(d)) {
+                        daysWithShift.push(d);
+                    }
+                }
+
+                // 从第3次开始，逐一处理
+                for (let i = 2; i < daysWithShift.length; i++) {
+                    let day = daysWithShift[i];
+                    if (isLocked(s, day) || isDividendDay(day)) continue;
+
+                    // 找当天缺什么岗位
+                    let usedToday = new Set();
+                    for (let staffIdx = 0; staffIdx < staffs.length; staffIdx++) {
+                        let shift = schedule[staffIdx][day];
+                        if (shift && shift !== "休" && shift !== supportShift.name) {
+                            usedToday.add(shift);
+                        }
+                    }
+
+                    // 找可替换的岗位（当天没有、这个人没满2次、不连排）
+                    let available = [];
+                    for (let bS of baseShifts) {
+                        let newShift = bS.name;
+                        if (usedToday.has(newShift)) continue;
+                        if ((currentCounts[s][newShift] || 0) >= 2) continue;
+                        if (wouldBeAdjacent(s, day, newShift)) continue;
+                        if (wouldBeHighThree(s, day, newShift)) continue;
+                        available.push(newShift);
+                    }
+
+                    if (available.length > 0) {
+                        let best = available[0];
+                        let bestCnt = currentCounts[s][best] || 0;
+                        for (let a of available) {
+                            let c = currentCounts[s][a] || 0;
+                            if (c < bestCnt) {
+                                bestCnt = c;
+                                best = a;
+                            }
+                        }
+
+                        let oldShift = schedule[s][day];
+                        schedule[s][day] = best;
+                        currentCounts[s][oldShift]--;
+                        currentCounts[s][best] = (currentCounts[s][best] || 0) + 1;
+                        fixedCount++;
+                        fixLogs.push(`🔧 第 ${day+1} 天：${staffs[s].name} [${oldShift.replace(/\n/g,' ')}] (${cnt}次→${cnt-1}次) → [${best.replace(/\n/g,' ')}]`);
+                    } else {
+                        // 没得换，跟别人交换
+                        for (let otherS = 0; otherS < staffs.length; otherS++) {
+                            if (otherS === s) continue;
+                            let otherShift = schedule[otherS][day];
+                            if (!otherShift || otherShift === "休" || otherShift === supportShift.name) continue;
+                            if (otherShift === nm) continue;
+                            if (isLocked(otherS, day)) continue;
+
+                            let oldS = schedule[s][day];
+                            let oldOther = schedule[otherS][day];
+                            schedule[s][day] = oldOther;
+                            schedule[otherS][day] = oldS;
+
+                            let valid = true;
+                            if (wouldBeAdjacent(s, day, oldOther)) valid = false;
+                            if (wouldBeAdjacent(otherS, day, oldS)) valid = false;
+                            if (wouldBeHighThree(s, day, oldOther)) valid = false;
+                            if (wouldBeHighThree(otherS, day, oldS)) valid = false;
+
+                            let seen = new Set();
+                            for (let si = 0; si < staffs.length; si++) {
+                                let sh = schedule[si][day];
+                                if (sh && sh !== "休" && sh !== supportShift.name) {
+                                    if (seen.has(sh)) valid = false;
+                                    seen.add(sh);
+                                }
+                            }
+
+                            if (valid) {
+                                currentCounts[s][oldS]--;
+                                currentCounts[s][oldOther]++;
+                                currentCounts[otherS][oldOther]--;
+                                currentCounts[otherS][oldS]++;
+                                fixedCount++;
+                                fixLogs.push(`🔄 第 ${day+1} 天：${staffs[s].name} [${oldS.replace(/\n/g,' ')}] ↔ ${staffs[otherS].name} [${oldOther.replace(/\n/g,' ')}]`);
+                                break;
+                            } else {
+                                schedule[s][day] = oldS;
+                                schedule[otherS][day] = oldOther;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (fixedCount > 0) {
+        lastGeneratedSchedule = sanitizeSchedule(schedule);
+        renderAll();
+        saveDataToLocal();
+
+        const warningBox = document.getElementById('warningLog');
+        warningBox.innerHTML = `<b>✅ 强制修复完成（共 ${fixedCount} 处）：</b><br>` + fixLogs.join('<br>');
+        warningBox.style.display = 'block';
+        document.getElementById('status').innerText = `✅ 强制修复了 ${fixedCount} 处 >=3次的问题！`;
+        alert(`✅ 强制修复完成！\n- 修复了 ${fixedCount} 处 >=3次的问题\n- 不动休假、锁定、分红日、支援`);
+    } else {
+        document.getElementById('status').innerText = `✅ 检查完毕，没有发现 >=3 次的问题！`;
+        alert("✅ 没有发现任何 >=3 次的问题！");
+    }
+}
   
   // ========== 填补空格子（全月回溯版） ==========
   async function fillEmptyCells() {
