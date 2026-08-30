@@ -327,25 +327,39 @@
     return true;
   }
 
-      async function resetCurrentMonthData() {
+   async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
-    if (confirm(`确定要重置 [${monthKey}] 月份的工作岗位吗？\n（注意：将清空排班，但【保留所有休假日期、锁定格子和云端链接】）`)) {
-      lastGeneratedSchedule = null;
+    if (confirm(`确定要重置 [${monthKey}] 月份的工作岗位吗？\n（注意：将清空未锁定的排班，但【绝对保留锁定的格子内容】、休假日和云端链接）`)) {
       
-      // 【关键修改】不调用 initLockedMap(true)，所以锁定的格子不会被清空！
-      // 如果当前 lockedMap 还是空的，我们才初始化它（且保持原来的大小）
-      if (!lockedMap || lockedMap.length !== staffs.length) {
-        const totalDays = getDaysInMonth(
-          parseInt(document.getElementById('yearSelect').value),
-          parseInt(document.getElementById('monthSelect').value)
-        );
-        lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+      // 1. 先拿到当前排班的数据（如果有的话）
+      let currentSched = lastGeneratedSchedule;
+
+      // 2. 初始化全表为空白（如果不是这个月，也需要正确的尺寸）
+      const totalDays = getDaysInMonth(
+        parseInt(document.getElementById('yearSelect').value),
+        parseInt(document.getElementById('monthSelect').value)
+      );
+      let newEmptySchedule = Array.from({ length: staffs.length }, () => Array(totalDays).fill(""));
+
+      // 3. 如果当前有排班数据，只把【未锁定】的格子清空，【锁定】的格子原样保留！
+      if (currentSched && currentSched.length === staffs.length) {
+        for (let s = 0; s < staffs.length; s++) {
+          for (let d = 0; d < totalDays; d++) {
+            // 如果是锁定的格子，把原来的内容抄回来！
+            if (lockedMap[s] && lockedMap[s][d]) {
+              newEmptySchedule[s][d] = currentSched[s][d] || "休";
+            }
+          }
+        }
       }
+
+      // 4. 让保留后的表直接成为新的排班表
+      lastGeneratedSchedule = sanitizeSchedule(newEmptySchedule);
 
       await saveDataToLocal();
       renderAll();
-      document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 的工作岗位（保留休假和锁定）！`;
-      alert(`[${monthKey}] 月份的工作岗位已成功重置！\n\n【保留的数据】\n• 所有员工的休假日\n• 所有锁定的格子\n• 云端链接\n\n【已清空的数据】\n• 所有人的排班工作岗位`);
+      document.getElementById('status').innerText = `🧹 已重置 [${monthKey}] 未锁定的工作岗位（锁定内容、休假日已保留）！`;
+      alert(`[${monthKey}] 月份已成功重置！\n\n【保留的数据】\n• 所有员工锁定的格子内容\n• 所有员工的休假日\n• 云端链接\n\n【已清空的数据】\n• 所有【未锁定】的排班工作岗位`);
     }
   }
 
