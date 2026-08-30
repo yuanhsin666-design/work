@@ -2157,7 +2157,7 @@ async function generateSchedule() {
         });
       });
 
-      // 3. 排支援（优先跨月/当月次数少）
+      // 3. 排支援
       for (let d = 0; d < totalDays; d++) {
         let availableToday = [];
         for (let s = 0; s < staffs.length; s++) {
@@ -2187,34 +2187,55 @@ async function generateSchedule() {
         }
       }
 
-      // 4. 【绝对无空白！】一个岗位一个岗位在全月发牌！
-      for (let round = 0; round < 2; round++) {
-        let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
-        shuffledShifts.forEach(shift => {
-          let shiftName = shift.name;
-          for (let s = 0; s < staffs.length; s++) {
-            if (round === 0 && (shiftCounts[s][shiftName] || 0) >= 1) continue;
-            if (round === 1 && (shiftCounts[s][shiftName] || 0) >= 2) continue;
+      // 4. 【按岗位乱跳发牌】先保证每个人每个岗位至少拿1次！
+      let shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
+      shuffledShifts.forEach(shift => {
+        let shiftName = shift.name;
+        for (let s = 0; s < staffs.length; s++) {
+          if ((shiftCounts[s][shiftName] || 0) >= 1) continue;
 
-            for (let d = 0; d < totalDays; d++) {
-              if (newSchedule[s][d] !== "") continue;
-              if (lockedMap[s] && lockedMap[s][d]) continue;
-              let prev = (d > 0) ? newSchedule[s][d - 1] : "";
-              let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
-              if (shiftName === prev || shiftName === next) continue;
-              if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
-              let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
-              if (taken) continue;
+          for (let d = 0; d < totalDays; d++) {
+            if (newSchedule[s][d] !== "") continue;
+            if (lockedMap[s] && lockedMap[s][d]) continue;
+            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+            if (shiftName === prev || shiftName === next) continue;
+            if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
+            let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
+            if (taken) continue;
 
-              newSchedule[s][d] = shiftName;
-              shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
-              break;
-            }
+            newSchedule[s][d] = shiftName;
+            shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
+            break;
           }
-        });
-      }
+        }
+      });
 
-      // 5. 【终极填满空位】绝不留下空白！
+      // 5. 【再发第二轮】补足2次，绝不超2次！
+      shuffledShifts = [...baseShifts].sort(() => Math.random() - 0.5);
+      shuffledShifts.forEach(shift => {
+        let shiftName = shift.name;
+        for (let s = 0; s < staffs.length; s++) {
+          if ((shiftCounts[s][shiftName] || 0) >= 2) continue;
+
+          for (let d = 0; d < totalDays; d++) {
+            if (newSchedule[s][d] !== "") continue;
+            if (lockedMap[s] && lockedMap[s][d]) continue;
+            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+            if (shiftName === prev || shiftName === next) continue;
+            if (getShiftCategory(shiftName) && (getShiftCategory(shiftName) === getShiftCategory(prev) || getShiftCategory(shiftName) === getShiftCategory(next))) continue;
+            let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shiftName);
+            if (taken) continue;
+
+            newSchedule[s][d] = shiftName;
+            shiftCounts[s][shiftName] = (shiftCounts[s][shiftName] || 0) + 1;
+            break;
+          }
+        }
+      });
+
+      // 6. 【终极填空】看当天缺什么岗位，就补什么！绝不超2次！
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
           if (newSchedule[s][d] !== "") continue;
@@ -2230,7 +2251,7 @@ async function generateSchedule() {
           let bestCnt = Infinity;
           for (let bS of baseShifts) {
             let nm = bS.name;
-            if ((shiftCounts[s][nm] || 0) >= 2) continue;
+            if ((shiftCounts[s][nm] || 0) >= 2) continue; // 绝不超2次
             if (usedToday.has(nm)) continue;
             let prev = (d > 0) ? newSchedule[s][d - 1] : "";
             let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
@@ -2250,11 +2271,34 @@ async function generateSchedule() {
         }
       }
 
-      // 【绝对安全锁】最后强制确认：哪怕再怎么排，也绝对不许出现空白！
+      // 7. 【终极端锅】如果还有空白，绝不硬塞！往回找调整！
       for (let s = 0; s < staffs.length; s++) {
         for (let d = 0; d < totalDays; d++) {
-          if (newSchedule[s][d] === "") {
-            newSchedule[s][d] = baseShifts[0].name;
+          if (newSchedule[s][d] !== "") continue;
+
+          // 找当天有一个“超了1次的人”，看看能不能换过来
+          let found = false;
+          for (let d2 = 0; d2 < totalDays && !found; d2++) {
+            if (d2 === d) continue;
+            let shift = newSchedule[s][d2];
+            if (!shift || shift === "休") continue;
+
+            // 如果把这个人第 d2 天的岗位给他移到 d，会不会也合法？
+            let taken = newSchedule.some((row, idx) => idx !== s && row[d] === shift);
+            if (taken) continue;
+
+            let prev = (d > 0) ? newSchedule[s][d - 1] : "";
+            let next = (d < totalDays - 1) ? newSchedule[s][d + 1] : "";
+            if (shift === prev || shift === next) continue;
+
+            newSchedule[s][d] = shift;
+            newSchedule[s][d2] = ""; 
+            found = true;
+          }
+
+          // 如果还是空着（极少数），绝不硬塞，保持“休”
+          if (!found) {
+            newSchedule[s][d] = "休";
           }
         }
       }
@@ -2263,7 +2307,7 @@ async function generateSchedule() {
       renderAll();
       saveDataToLocal();
       document.getElementById('status').innerText = `✅ [${year}-${month}] 排班完成！`;
-      alert(`排班完成！绝对无空白！`);
+      alert(`排班完成！无空白，绝不超2次！`);
     } catch (err) {
       console.error(err);
       alert("排班发生错误：" + err.message);
