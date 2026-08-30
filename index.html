@@ -1087,16 +1087,33 @@ async function forceFixOverTwo() {
     }
 
     // 【规则：高强度不能连续三天】
-    function wouldBeHighThree(sIdx, day, shiftName) {
-        if (!isHigh(shiftName)) return false;
-        let consecutiveBefore = 0;
-        for (let d = day - 1; d >= 0; d--) {
-            let prev = schedule[sIdx][d];
-            if (isHigh(prev)) consecutiveBefore++;
-            else break;
-        }
-        return consecutiveBefore >= 2;
+   function wouldBeHighThree(sIdx, day, shiftName) {
+    if (!isHigh(shiftName)) return false;
+    
+    // 检查前面连续高强度天数
+    let consecutiveBefore = 0;
+    for (let d = day - 1; d >= 0; d--) {
+        let prev = schedule[sIdx][d];
+        if (isHigh(prev)) consecutiveBefore++;
+        else break;
     }
+    
+    // 如果前面已经连续2天高强度 → 今天不能再放高强度
+    if (consecutiveBefore >= 2) return true;
+    
+    // 检查后面连续高强度天数（填进去之后会不会跟后面形成3连）
+    let consecutiveAfter = 0;
+    for (let d = day + 1; d < totalDays; d++) {
+        let next = schedule[sIdx][d];
+        if (isHigh(next)) consecutiveAfter++;
+        else break;
+    }
+    
+    // 如果前面1天高强度 + 后面1天高强度 → 今天放高强度会形成3连
+    if (consecutiveBefore >= 1 && consecutiveAfter >= 1) return true;
+    
+    return false;
+}
 
     function getCounts() {
         let counts = Array.from({ length: staffs.length }, () => ({}));
