@@ -36,15 +36,15 @@
     .table-container { overflow-x: auto; max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px; }
     table { border-collapse: collapse; text-align: center; font-size: 12px; width: 100%; }
     th, td { border: 1px solid #ccc; padding: 4px; min-width: 60px; white-space: pre-line; vertical-align: middle; position: relative; }
-    .header-month { background: #0d3b6b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
-.header-day { background: #d5d8dd; cursor: pointer; font-weight: bold; }
-.weekend { color: #c62828; font-weight: bold; background: #ffcdd2; }
-.staff-name { background: #e0e0e0; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 80px; }
+    .header-month { background: #1a4f8b; color: white; font-weight: bold; font-size: 15px; min-width: 70px; }
+    .header-day { background: #f0f0f0; cursor: pointer; }
+    .weekend { color: #d9534f; font-weight: bold; background: #fff0f0; }
+    .staff-name { background: #f9f9f9; font-weight: bold; position: sticky; left: 0; z-index: 5; min-width: 80px; }
 
-.shift-low { background-color: #dcedc8; color: #1b5e20; font-weight: bold; } 
-.shift-mid { background-color: #fff9c4; color: #7c6b00; font-weight: bold; } 
-.shift-high { background-color: #ffcdd2; color: #a02020; font-weight: bold; } 
-.shift-support { background-color: #b2dfdb; color: #006064; font-weight: bold; }
+    .shift-low { background-color: #e8f5e9; color: #1b5e20; } 
+    .shift-mid { background-color: #fffde7; color: #8c6b00; } 
+    .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; } 
+    .shift-support { background-color: #e0f7fa; color: #006064; } 
     .shift-duplicate-error { background-color: #f8d7da !important; color: #842029 !important; border: 2px solid #dc2626 !important; font-weight: bold; }
 
     .shift-select { width: 100%; border: none; background: transparent; text-align: center; text-align-last: center; font-size: 11px; font-weight: inherit; color: inherit; cursor: pointer; padding: 4px 0; outline: none; }
@@ -1723,44 +1723,29 @@ async function getAllHistoryMonthsData() {
             </xml>
             <![endif]-->
             <style>
-<style>
-    td, th {
-        mso-number-format: '\\@';
-        white-space: pre-wrap !important;
-        vertical-align: middle;
-        text-align: center;
-        border: 1px solid #000000;
-        padding: 4px 6px;
-        font-size: 11px;
-    }
-    br { mso-data-placement: same-cell; }
-    table { border-collapse: collapse; }
-    .shift-low { background-color: #dcedc8; color: #1b5e20; font-weight: bold; }
-    .shift-mid { background-color: #fff9c4; color: #7c6b00; font-weight: bold; }
-    .shift-high { background-color: #ffcdd2; color: #a02020; font-weight: bold; }
-    .shift-support { background-color: #b2dfdb; color: #006064; font-weight: bold; }
-    .stat-total { background-color: #d97706; color: #ffffff; font-weight: bold; }
-    .header-month { background-color: #1a4f8b; color: #ffffff; font-weight: bold; }
-    .header-day { background-color: #e8ecf0; font-weight: bold; }
-    .weekend { color: #d9534f; font-weight: bold; background-color: #ffebee; }
-    .staff-name { background-color: #f0f2f5; font-weight: bold; }
-    .locked-header { background-color: #c5cae9 !important; color: #1a237e; font-weight: bold; }
-    .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #0d1b2a; }
-</style>
-    br { mso-data-placement: same-cell; }
-    table { border-collapse: collapse; }
-    .shift-low { background-color: #dcedc8; color: #1b5e20; font-weight: bold; }
-    .shift-mid { background-color: #fff9c4; color: #7c6b00; font-weight: bold; }
-    .shift-high { background-color: #ffcdd2; color: #a02020; font-weight: bold; }
-    .shift-support { background-color: #b2dfdb; color: #006064; font-weight: bold; }
-    .stat-total { background-color: #d97706; color: #ffffff; font-weight: bold; }
-    .header-month { background-color: #1a4f8b; color: #ffffff; font-weight: bold; }
-    .header-day { background-color: #e8ecf0; font-weight: bold; }
-    .weekend { color: #d9534f; font-weight: bold; background-color: #ffebee; }
-    .staff-name { background-color: #f0f2f5; font-weight: bold; }
-    .locked-header { background-color: #c5cae9 !important; color: #1a237e; font-weight: bold; }
-    .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #0d1b2a; }
-</style>
+                td, th {
+                    mso-number-format: '\\@';
+                    white-space: pre-wrap !important;
+                    vertical-align: middle;
+                    text-align: center;
+                    border: 1px solid #ccc;
+                    padding: 4px 6px;
+                    font-size: 11px;
+                }
+                br { mso-data-placement: same-cell; }
+                table { border-collapse: collapse; }
+                .shift-low { background-color: #e8f5e9; color: #1b5e20; }
+                .shift-mid { background-color: #fffde7; color: #8c6b00; }
+                .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; }
+                .shift-support { background-color: #e0f7fa; color: #006064; }
+                .stat-total { background-color: #d97706; color: white; font-weight: bold; }
+                .header-month { background-color: #1a4f8b; color: white; font-weight: bold; }
+                .header-day { background-color: #f0f0f0; }
+                .weekend { color: #d9534f; font-weight: bold; background-color: #fff0f0; }
+                .staff-name { background-color: #f9f9f9; font-weight: bold; }
+                .locked-header { background-color: #cbd5e1 !important; color: #334155; }
+                .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; }
+            </style>
         </head>
         <body>${cloneTable.outerHTML}</body>
         </html>`;
