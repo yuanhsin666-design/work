@@ -125,7 +125,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0;">📅 <span id="currentMonthTitle"></span> 排班工作表预览</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('scheduleTable')">📋 复制整表</button>
+    <button class="copy-btn" onclick="Styles('scheduleTable')">📋 复制整表</button>
   </div>
 
   <div class="lock-controls">
@@ -145,7 +145,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0;">📊 当月员工岗位及强度次数统计</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('statsTable')">📋 复制统计表</button>
+    <button class="copy-btn" onclick="Styles('statsTable')">📋 复制统计表</button>
   </div>
   <div class="table-container">
     <table id="statsTable"></table>
@@ -155,7 +155,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #1a4f8b;">📊 当月人员岗位强度次数汇总表</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('intensitySummaryTable')">📋 复制汇总表</button>
+    <button class="copy-btn" onclick="Styles('intensitySummaryTable')">📋 复制汇总表</button>
   </div>
   <div class="table-container">
     <table id="intensitySummaryTable"></table>
@@ -165,7 +165,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #c62828;">📌 每月 1 号与 16 号分红日人员拿过的岗位与次数明细表 (跨月累计，同一岗位2轮冷却)</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('highIntensityTable')">📋 复制记录表</button>
+    <button class="copy-btn" onclick="Styles('highIntensityTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
     <table id="highIntensityTable"></table>
@@ -175,7 +175,7 @@
 <div class="card">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
     <h3 style="margin:0; color: #006064;">🔵 全员支援岗位记录表 (跨月累计)</h3>
-    <button class="copy-btn" onclick="copyTableWithStyles('supportStaffTable')">📋 复制记录表</button>
+    <button class="copy-btn" onclick="Styles('supportStaffTable')">📋 复制记录表</button>
   </div>
   <div class="table-container">
     <table id="supportStaffTable"></table>
@@ -1648,7 +1648,7 @@ async function getAllHistoryMonthsData() {
     renderSupportStaffTable(lastGeneratedSchedule);
   }
 
-  async function copyTableWithStyles(tableId) {
+  async function Styles(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return alert("表格不存在！");
 
@@ -1722,30 +1722,30 @@ async function getAllHistoryMonthsData() {
                 </x:ExcelWorkbook>
             </xml>
             <![endif]-->
-            <style>
-                td, th {
-                    mso-number-format: '\\@';
-                    white-space: pre-wrap !important;
-                    vertical-align: middle;
-                    text-align: center;
-                    border: 1px solid #ccc;
-                    padding: 4px 6px;
-                    font-size: 11px;
-                }
-                br { mso-data-placement: same-cell; }
-                table { border-collapse: collapse; }
-                .shift-low { background-color: #e8f5e9; color: #1b5e20; }
-                .shift-mid { background-color: #fffde7; color: #8c6b00; }
-                .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; }
-                .shift-support { background-color: #e0f7fa; color: #006064; }
-                .stat-total { background-color: #d97706; color: white; font-weight: bold; }
-                .header-month { background-color: #1a4f8b; color: white; font-weight: bold; }
-                .header-day { background-color: #f0f0f0; }
-                .weekend { color: #d9534f; font-weight: bold; background-color: #fff0f0; }
-                .staff-name { background-color: #f9f9f9; font-weight: bold; }
-                .locked-header { background-color: #cbd5e1 !important; color: #334155; }
-                .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; }
-            </style>
+<style>
+    td, th {
+        mso-number-format: '\\@';
+        white-space: pre-wrap !important;
+        vertical-align: middle;
+        text-align: center;
+        border: 1px solid #999;
+        padding: 4px 6px;
+        font-size: 11px;
+    }
+    br { mso-data-placement: same-cell; }
+    table { border-collapse: collapse; }
+    .shift-low { background-color: #a5d6a7; color: #0d3b1a; font-weight: bold; }
+    .shift-mid { background-color: #ffe082; color: #7c5a00; font-weight: bold; }
+    .shift-high { background-color: #ef9a9a; color: #8e1a1a; font-weight: bold; }
+    .shift-support { background-color: #80deea; color: #004d5e; font-weight: bold; }
+    .stat-total { background-color: #e67e00; color: #ffffff; font-weight: bold; }
+    .header-month { background-color: #0d3b6b; color: #ffffff; font-weight: bold; }
+    .header-day { background-color: #d5d8dd; font-weight: bold; }
+    .weekend { color: #c62828; font-weight: bold; background-color: #ffcdd2; }
+    .staff-name { background-color: #e0e0e0; font-weight: bold; }
+    .locked-header { background-color: #b0bec5 !important; color: #1a237e; font-weight: bold; }
+    .row-daily-total { background-color: #cfd8dc; font-weight: bold; color: #0d1b2a; }
+</style>
         </head>
         <body>${cloneTable.outerHTML}</body>
         </html>`;
