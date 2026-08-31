@@ -1723,15 +1723,30 @@ async function getAllHistoryMonthsData() {
             </xml>
             <![endif]-->
             <style>
+<style>
     td, th {
         mso-number-format: '\\@';
         white-space: pre-wrap !important;
         vertical-align: middle;
         text-align: center;
-        border: 1px solid #ccc;
+        border: 1px solid #666;
         padding: 4px 6px;
         font-size: 11px;
     }
+    br { mso-data-placement: same-cell; }
+    table { border-collapse: collapse; }
+    .shift-low { background-color: #dcedc8; color: #1b5e20; font-weight: bold; }
+    .shift-mid { background-color: #fff9c4; color: #7c6b00; font-weight: bold; }
+    .shift-high { background-color: #ffcdd2; color: #a02020; font-weight: bold; }
+    .shift-support { background-color: #b2dfdb; color: #006064; font-weight: bold; }
+    .stat-total { background-color: #d97706; color: #ffffff; font-weight: bold; }
+    .header-month { background-color: #1a4f8b; color: #ffffff; font-weight: bold; }
+    .header-day { background-color: #e8ecf0; font-weight: bold; }
+    .weekend { color: #d9534f; font-weight: bold; background-color: #ffebee; }
+    .staff-name { background-color: #f0f2f5; font-weight: bold; }
+    .locked-header { background-color: #c5cae9 !important; color: #1a237e; font-weight: bold; }
+    .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #0d1b2a; }
+</style>
     br { mso-data-placement: same-cell; }
     table { border-collapse: collapse; }
     .shift-low { background-color: #dcedc8; color: #1b5e20; font-weight: bold; }
