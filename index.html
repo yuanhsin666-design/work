@@ -1723,29 +1723,29 @@ async function getAllHistoryMonthsData() {
             </xml>
             <![endif]-->
             <style>
-                td, th {
-                    mso-number-format: '\\@';
-                    white-space: pre-wrap !important;
-                    vertical-align: middle;
-                    text-align: center;
-                    border: 1px solid #ccc;
-                    padding: 4px 6px;
-                    font-size: 11px;
-                }
-                br { mso-data-placement: same-cell; }
-                table { border-collapse: collapse; }
-                .shift-low { background-color: #e8f5e9; color: #1b5e20; }
-                .shift-mid { background-color: #fffde7; color: #8c6b00; }
-                .shift-high { background-color: #ffebee; color: #c62828; font-weight: bold; }
-                .shift-support { background-color: #e0f7fa; color: #006064; }
-                .stat-total { background-color: #d97706; color: white; font-weight: bold; }
-                .header-month { background-color: #1a4f8b; color: white; font-weight: bold; }
-                .header-day { background-color: #f0f0f0; }
-                .weekend { color: #d9534f; font-weight: bold; background-color: #fff0f0; }
-                .staff-name { background-color: #f9f9f9; font-weight: bold; }
-                .locked-header { background-color: #cbd5e1 !important; color: #334155; }
-                .row-daily-total { background-color: #e2e8f0; font-weight: bold; color: #1e293b; }
-            </style>
+    td, th {
+        mso-number-format: '\\@';
+        white-space: pre-wrap !important;
+        vertical-align: middle;
+        text-align: center;
+        border: 1px solid #999;
+        padding: 4px 6px;
+        font-size: 11px;
+    }
+    br { mso-data-placement: same-cell; }
+    table { border-collapse: collapse; }
+    .shift-low { background-color: #a5d6a7; color: #0d3b1a; font-weight: bold; }
+    .shift-mid { background-color: #ffe082; color: #7c5a00; font-weight: bold; }
+    .shift-high { background-color: #ef9a9a; color: #8e1a1a; font-weight: bold; }
+    .shift-support { background-color: #80deea; color: #004d5e; font-weight: bold; }
+    .stat-total { background-color: #e67e00; color: #ffffff; font-weight: bold; }
+    .header-month { background-color: #0d3b6b; color: #ffffff; font-weight: bold; }
+    .header-day { background-color: #d5d8dd; font-weight: bold; }
+    .weekend { color: #c62828; font-weight: bold; background-color: #ffcdd2; }
+    .staff-name { background-color: #e0e0e0; font-weight: bold; }
+    .locked-header { background-color: #b0bec5 !important; color: #1a237e; font-weight: bold; }
+    .row-daily-total { background-color: #cfd8dc; font-weight: bold; color: #0d1b2a; }
+</style>
         </head>
         <body>${cloneTable.outerHTML}</body>
         </html>`;
