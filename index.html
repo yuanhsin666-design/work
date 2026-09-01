@@ -553,11 +553,17 @@
     alert(`已移除员工：${removedName}`);
   }
 
-  function clearCurrentMonthRests() {
+function clearCurrentMonthRests() {
+    const monthKey = getMonthKey();
+    if (!confirm(`确定要清空 [${monthKey}] 月份所有员工的休假日吗？\n\n此操作不可复原！`)) {
+        return;
+    }
     currentMonthRests = {};
-    renderAll(); saveDataToLocal();
-    alert(`已清空当前 [${getMonthKey()}] 月份的休假。`);
-  }
+    renderAll();
+    saveDataToLocal();
+    document.getElementById('status').innerText = `🗑️ 已清空 [${monthKey}] 的休假！`;
+    alert(`✅ [${monthKey}] 月份所有员工的休假日已清空！`);
+}
 
   async function onDateChange() {
     await loadDataFromLocal();
