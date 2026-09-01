@@ -558,9 +558,37 @@ function clearCurrentMonthRests() {
     if (!confirm(`确定要清空 [${monthKey}] 月份所有员工的休假日吗？\n\n此操作不可复原！`)) {
         return;
     }
+
+    // 1. 清空内存
     currentMonthRests = {};
-    renderAll();
+
+    // 2. 从 localStorage 清空该月份的休假数据
+    const savedData = localStorage.getItem(`auto_schedule_month_${monthKey}`);
+    if (savedData) {
+        try {
+            const data = JSON.parse(savedData);
+            data.currentMonthRests = {};
+            localStorage.setItem(`auto_schedule_month_${monthKey}`, JSON.stringify(data));
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    // 3. 也把 lastGeneratedSchedule 里的 "休" 全部清掉（如果有的话）
+    if (lastGeneratedSchedule) {
+        for (let s = 0; s < lastGeneratedSchedule.length; s++) {
+            for (let d = 0; d < lastGeneratedSchedule[s].length; d++) {
+                if (lastGeneratedSchedule[s][d] === "休") {
+                    lastGeneratedSchedule[s][d] = "";
+                }
+            }
+        }
+    }
+
+    // 4. 保存 + 重新渲染
     saveDataToLocal();
+    renderAll();
+
     document.getElementById('status').innerText = `🗑️ 已清空 [${monthKey}] 的休假！`;
     alert(`✅ [${monthKey}] 月份所有员工的休假日已清空！`);
 }
