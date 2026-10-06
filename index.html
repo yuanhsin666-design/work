@@ -253,21 +253,24 @@
     saveDataToLocal();
   }
 
-  function saveGlobalConfig() {
-    localStorage.setItem('auto_schedule_global_config_v6', JSON.stringify({ staffs, baseShifts, supportShift }));
-  }
+function saveGlobalConfig() {
+    // 只存岗位设置（岗位是全局的，不随月份变）
+    localStorage.setItem('auto_schedule_global_config_v6', JSON.stringify({ 
+        baseShifts, 
+        supportShift 
+    }));
+}
 
-  function loadGlobalConfig() {
+function loadGlobalConfig() {
     const saved = localStorage.getItem('auto_schedule_global_config_v6');
     if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        if (data.staffs) staffs = data.staffs;
-        if (data.baseShifts) baseShifts = data.baseShifts;
-        if (data.supportShift) supportShift = data.supportShift;
-      } catch(e) { console.error(e); }
+        try {
+            const data = JSON.parse(saved);
+            if (data.baseShifts) baseShifts = data.baseShifts;
+            if (data.supportShift) supportShift = data.supportShift;
+        } catch(e) { console.error(e); }
     }
-  }
+}
 
   function sanitizeSchedule(sched) {
     if (!sched) return null;
@@ -278,51 +281,60 @@
     saveGlobalConfig();
     const monthKey = getMonthKey();
     const monthData = {
-      currentMonthRests: currentMonthRests,
-      lastGeneratedSchedule: sanitizeSchedule(lastGeneratedSchedule),
-      lockedMap: lockedMap,
-      cloudUrl: document.getElementById('cloudUrlInput').value,
-      baseShifts: baseShifts,
-      supportShift: supportShift
+        staffs: staffs,              // ← 新增：把员工名单存进每月数据
+        currentMonthRests: currentMonthRests,
+        lastGeneratedSchedule: sanitizeSchedule(lastGeneratedSchedule),
+        lockedMap: lockedMap,
+        cloudUrl: document.getElementById('cloudUrlInput').value,
+        baseShifts: baseShifts,
+        supportShift: supportShift
     };
     localStorage.setItem(`auto_schedule_month_${monthKey}`, JSON.stringify(monthData));
     try {
-      await supabaseClient.from('schedules').upsert({ month_key: monthKey, data: monthData }, { onConflict: 'month_key' });
+        await supabaseClient.from('schedules').upsert({ month_key: monthKey, data: monthData }, { onConflict: 'month_key' });
     } catch (err) { console.error("Supabase 连线失败：", err); }
-  }
+}
 
-  async function loadDataFromLocal() {
+async function loadDataFromLocal() {
     const monthKey = getMonthKey();
     const year = parseInt(document.getElementById('yearSelect').value);
     const month = parseInt(document.getElementById('monthSelect').value);
     const totalDays = getDaysInMonth(year, month);
     let data = null;
     try {
-      const { data: cloudRes, error } = await supabaseClient.from('schedules').select('data').eq('month_key', monthKey).maybeSingle();
-      if (!error && cloudRes && cloudRes.data) data = cloudRes.data;
+        const { data: cloudRes, error } = await supabaseClient.from('schedules').select('data').eq('month_key', monthKey).maybeSingle();
+        if (!error && cloudRes && cloudRes.data) data = cloudRes.data;
     } catch (err) { console.warn("无法连接云端，改用本地缓存：", err); }
     if (!data) {
-      const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
-      if (savedMonth) { try { data = JSON.parse(savedMonth); } catch(e) { console.error(e); } }
+        const savedMonth = localStorage.getItem(`auto_schedule_month_${monthKey}`);
+        if (savedMonth) { try { data = JSON.parse(savedMonth); } catch(e) { console.error(e); } }
     }
     if (!data) {
-      loadGlobalConfig();
-      currentMonthRests = {};
-      lastGeneratedSchedule = null;
-      lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
-      document.getElementById('cloudUrlInput').value = "";
-      renderShifts();
-      return false;
+        // 这个月还没有数据，用全局默认名单
+        loadGlobalConfig();
+        currentMonthRests = {};
+        lastGeneratedSchedule = null;
+        lockedMap = Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
+        document.getElementById('cloudUrlInput').value = "";
+        renderShifts();
+        return false;
     }
+    
+    // ★ 关键：如果该月份有自己的员工名单，用它覆盖
+    if (data.staffs && Array.isArray(data.staffs)) {
+        staffs = data.staffs;
+    }
+    
     currentMonthRests = data.currentMonthRests || {};
     lastGeneratedSchedule = sanitizeSchedule(data.lastGeneratedSchedule);
     lockedMap = data.lockedMap || Array.from({ length: staffs.length }, () => Array(totalDays).fill(false));
     document.getElementById('cloudUrlInput').value = data.cloudUrl || "";
     if (data.baseShifts) baseShifts = data.baseShifts;
     if (data.supportShift) supportShift = data.supportShift;
+    updateSelect();  // ← 新增：更新下拉菜单
     renderShifts();
     return true;
-  }
+}
 
   async function resetCurrentMonthData() {
     const monthKey = getMonthKey();
