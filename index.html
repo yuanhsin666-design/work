@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>智能动态排班工作表 (分红日高强度两轮冷却完整版)</title>
@@ -96,6 +97,12 @@
       </div>
     </div>
 
+    <div class="form-group" style="grid-column: 1 / -1; margin-top: -10px;">
+  <label>📁 导入 ONLYOFFICE / 本地 Excel 假表：</label>
+  <div style="display: flex; gap: 5px;">
+    <input type="file" id="local-excel-input" accept=".csv, .xlsx" onchange="importLocalRests(this)" style="flex: 1; padding: 6px;">
+  </div>
+</div>
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>🏷️ 岗位与强度设置：</label>
       <div style="display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap;">
@@ -2638,6 +2645,98 @@ allDividendRounds.forEach((r, idx) => {
     }
   }
 
+    async function importLocalRests(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const year = parseInt(document.getElementById('yearSelect').value);
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const totalDays = getDaysInMonth(year, month);
+    const monthKey = getMonthKey();
+    
+    document.getElementById('status').innerText = `⏳ 正在读取本地 Excel...`;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        // 将 Excel 转为二维数组（相当于 CSV 格式）
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+        let dayColumnMap = {};
+        let headerRowIndex = -1;
+
+        // 1. 找日期表头
+        for (let r = 0; r < rows.length; r++) {
+          let row = rows[r];
+          for (let c = 0; c < row.length; c++) {
+            let num = parseInt(row[c]);
+            if (!isNaN(num) && num >= 1 && num <= 31) { 
+                dayColumnMap[c] = num; 
+                headerRowIndex = r; 
+            }
+          }
+          if (headerRowIndex !== -1) break;
+        }
+
+        if (headerRowIndex === -1) {
+          alert("❌ 找不到日期表头，请确认表格上方有 1~31 的数字。");
+          document.getElementById('status').innerText = "❌ 读取失败";
+          return;
+        }
+
+        // 2. 抓取员工休假
+        currentMonthRests = {};
+        let updatedCount = 0;
+
+        for (let r = 0; r < rows.length; r++) {
+          let row = rows[r];
+          if (!row || row.length === 0) continue;
+          
+          let rawName = row[0] ? String(row[0]).replace(/"/g, '').trim() : '';
+          let cleanNameInRow = rawName.replace(/\s+/g, '');
+          if (!cleanNameInRow) continue;
+
+          const sIdx = staffs.findIndex(s => {
+            let cleanStaffName = s.name.replace(/\s+/g, '');
+            return cleanStaffName === cleanNameInRow ||
+                   (cleanStaffName === "孫孫" && cleanNameInRow === "孙孙") ||
+                   (cleanStaffName === "孙孙" && cleanNameInRow === "孫孫") ||
+                   (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||
+                   (cleanStaffName === "翔" && cleanNameInRow === "阿翔");
+          });
+
+          if (sIdx !== -1) {
+            updatedCount++;
+            let rests = [];
+            for (let c = 1; c < row.length; c++) {
+              if (row[c] !== undefined && String(row[c]).trim() === '1') {
+                let day = dayColumnMap[c] || c;
+                if (day >= 1 && day <= totalDays) rests.push(day);
+              }
+            }
+            currentMonthRests[sIdx] = Array.from(new Set(rests));
+          }
+        }
+
+        // 3. 保存与渲染
+        renderAll();
+        await saveDataToLocal();
+        document.getElementById('status').innerText = `✅ [${monthKey}] 本地假表读取成功！匹配 ${updatedCount} 人。`;
+        alert(`[${monthKey}] 本地假表读取成功！已为 ${updatedCount} 位员工导入当月休假。`);
+
+      } catch (err) {
+        alert("解析失败：" + err.message);
+        document.getElementById('status').innerText = "❌ 读取失败";
+      } finally {
+        input.value = ''; // 清空 input 让档案可以重复上传
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  
   window.onload = async function() {
     initDateSelectors();
     updateSelect();
