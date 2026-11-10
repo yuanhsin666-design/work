@@ -2522,10 +2522,11 @@ allDividendRounds.forEach((r, idx) => {
             }
           }
         }
-        let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
+          let shuffledBaseShifts = [...baseShifts].sort(() => Math.random() - 0.5);
         let highPriorityShifts = shuffledBaseShifts.filter(s => s.level === '高').map(s => s.name);
         let otherPriorityShifts = shuffledBaseShifts.filter(s => s.level !== '高').map(s => s.name);
-        let orderedBaseShifts = [...highPriorityShifts, ...otherPriorityShifts];
+        // 🌟 把「支援」排在最后发牌，这样如果人数超过 12 人，多出来的人就会自动拿到支援！
+        let orderedBaseShifts = [...highPriorityShifts, ...otherPriorityShifts, supName];
         orderedBaseShifts.forEach(shiftName => {
           let alreadyAssigned = workingStaffs.some(sIdx => newSchedule[sIdx][dayIdx] === shiftName);
           if (alreadyAssigned) return;
