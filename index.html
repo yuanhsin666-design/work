@@ -2645,7 +2645,7 @@ allDividendRounds.forEach((r, idx) => {
     }
   }
 
-       async function importLocalRests(input) {
+         async function importLocalRests(input) {
     const file = input.files[0];
     if (!file) return;
 
@@ -2662,23 +2662,29 @@ allDividendRounds.forEach((r, idx) => {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+        
+        // 🌟 重点：不用 JSON 转换，直接暴力抓取整个表格的字串矩阵
+        // 把空白格子变成 "", 把任何数字、文字都变成纯字串
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: false, defval: "" });
 
         let dayColumnMap = {};
         let headerRowIndex = -1;
 
-        // 🌟 修正 1：直接暴力搜寻「横跨15格以上的连续数字1~31」
+        // 🌟 暴力搜寻：找哪一行包含了最多 1~31 的字串
         for (let r = 0; r < rows.length; r++) {
           let row = rows[r] || [];
           let foundDays = {};
           for (let c = 0; c < row.length; c++) {
-            let cleanStr = String(row[c] || '').replace(/[日号號\s]/g, '').trim();
+            // 把所有奇怪的空格、日、号全部清掉
+            let cleanStr = String(row[c] || '').replace(/[日号號\s\r\n]/g, '').trim();
             let num = parseInt(cleanStr, 10);
+            // 只要清完是纯数字 1~31，就记下来
             if (!isNaN(num) && num >= 1 && num <= 31 && String(num) === cleanStr) {
                 foundDays[c] = num; 
             }
           }
-          if (Object.keys(foundDays).length >= 15) { // 只要这一行有超过15个日期数字，就是表头
+          // 只要这一行抓到超过 10 个天数，就认定这是日期表头
+          if (Object.keys(foundDays).length >= 10) { 
               dayColumnMap = foundDays; 
               headerRowIndex = r; 
               break;
@@ -2686,12 +2692,12 @@ allDividendRounds.forEach((r, idx) => {
         }
 
         if (headerRowIndex === -1) {
-          alert("❌ 找不到日期表头，请确认表格上方有 1~31 的数字。");
+          alert("❌ 找不到日期表头，请确认表格上方有 1~31 的数字。\n\n(系统已尝试扫描全表，但找不到足够的日期数字)");
           document.getElementById('status').innerText = "❌ 读取失败";
           return;
         }
 
-        // 🌟 修正 2：扫描每一行，不管名字在第几栏，只要遇到员工名字就对号入座
+        // 🌟 抓取员工休假
         currentMonthRests = {};
         let updatedCount = 0;
 
@@ -2700,7 +2706,7 @@ allDividendRounds.forEach((r, idx) => {
           if (!row || row.length === 0) continue;
           
           let sIdx = -1;
-          // 扫描这一行的前 5 个格子（避免名字在 B 栏或 C 栏漏掉）
+          // 扫描前 5 个格子找员工名字
           for (let c = 0; c < Math.min(5, row.length); c++) {
               let rawName = row[c] ? String(row[c]).replace(/"/g, '').trim() : '';
               let cleanNameInRow = rawName.replace(/\s+/g, '');
@@ -2720,9 +2726,10 @@ allDividendRounds.forEach((r, idx) => {
           if (sIdx !== -1) {
             updatedCount++;
             let rests = [];
-            // 扫描这一行所有的格子，只要填 1 就是休假
+            // 扫描这一行的所有格子，只要填 1 就算休假
             for (let c = 0; c < row.length; c++) {
               let cellVal = String(row[c] || '').trim();
+              // 把各种可能的 1 都算进去（包含全形1、true、休）
               if (cellVal === '1' || cellVal === '１' || cellVal.toLowerCase() === 'true' || cellVal === '休') {
                 let day = dayColumnMap[c];
                 if (day >= 1 && day <= totalDays) rests.push(day);
@@ -2732,7 +2739,7 @@ allDividendRounds.forEach((r, idx) => {
           }
         }
 
-        // 3. 保存与渲染
+        // 保存与渲染
         renderAll();
         await saveDataToLocal();
         document.getElementById('status').innerText = `✅ [${monthKey}] 本地假表读取成功！匹配 ${updatedCount} 人。`;
