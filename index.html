@@ -2645,7 +2645,7 @@ allDividendRounds.forEach((r, idx) => {
     }
   }
 
-      async function importLocalRests(input) {
+       async function importLocalRests(input) {
     const file = input.files[0];
     if (!file) return;
 
@@ -2667,18 +2667,19 @@ allDividendRounds.forEach((r, idx) => {
         let dayColumnMap = {};
         let headerRowIndex = -1;
 
-        // 🌟 修正 1：找日期表头（不论在哪一行，只要同列有1~10的数字就抓）
+        // 🌟 修正 1：直接暴力搜寻「横跨15格以上的连续数字1~31」
         for (let r = 0; r < rows.length; r++) {
           let row = rows[r] || [];
-          let foundCount = 0;
+          let foundDays = {};
           for (let c = 0; c < row.length; c++) {
-            let num = parseInt(row[c]);
-            if (!isNaN(num) && num >= 1 && num <= 10) { 
-                dayColumnMap[c] = num; 
-                foundCount++;
+            let cleanStr = String(row[c] || '').replace(/[日号號\s]/g, '').trim();
+            let num = parseInt(cleanStr, 10);
+            if (!isNaN(num) && num >= 1 && num <= 31 && String(num) === cleanStr) {
+                foundDays[c] = num; 
             }
           }
-          if (foundCount >= 5) { // 只要找到 5 个连续数字就认定这是日期行
+          if (Object.keys(foundDays).length >= 15) { // 只要这一行有超过15个日期数字，就是表头
+              dayColumnMap = foundDays; 
               headerRowIndex = r; 
               break;
           }
@@ -2690,7 +2691,7 @@ allDividendRounds.forEach((r, idx) => {
           return;
         }
 
-        // 🌟 修正 2：抓取员工休假（不限定只有A栏，找遍整行只要名字有对上就抓）
+        // 🌟 修正 2：扫描每一行，不管名字在第几栏，只要遇到员工名字就对号入座
         currentMonthRests = {};
         let updatedCount = 0;
 
@@ -2699,8 +2700,8 @@ allDividendRounds.forEach((r, idx) => {
           if (!row || row.length === 0) continue;
           
           let sIdx = -1;
-          // 扫描整行前 3 个格子找员工名字
-          for (let c = 0; c < Math.min(3, row.length); c++) {
+          // 扫描这一行的前 5 个格子（避免名字在 B 栏或 C 栏漏掉）
+          for (let c = 0; c < Math.min(5, row.length); c++) {
               let rawName = row[c] ? String(row[c]).replace(/"/g, '').trim() : '';
               let cleanNameInRow = rawName.replace(/\s+/g, '');
               if (!cleanNameInRow) continue;
@@ -2713,13 +2714,13 @@ allDividendRounds.forEach((r, idx) => {
                        (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||
                        (cleanStaffName === "翔" && cleanNameInRow === "阿翔");
               });
-              if (sIdx !== -1) break; // 找到了就跳出
+              if (sIdx !== -1) break; 
           }
 
           if (sIdx !== -1) {
             updatedCount++;
             let rests = [];
-            // 扫描这一行的所有格子，填 1 的就抓进休假
+            // 扫描这一行所有的格子，只要填 1 就是休假
             for (let c = 0; c < row.length; c++) {
               let cellVal = String(row[c] || '').trim();
               if (cellVal === '1' || cellVal === '１' || cellVal.toLowerCase() === 'true' || cellVal === '休') {
