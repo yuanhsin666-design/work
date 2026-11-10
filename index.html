@@ -2645,7 +2645,7 @@ allDividendRounds.forEach((r, idx) => {
     }
   }
 
-    async function importLocalRests(input) {
+      async function importLocalRests(input) {
     const file = input.files[0];
     if (!file) return;
 
@@ -2662,23 +2662,26 @@ allDividendRounds.forEach((r, idx) => {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        // 将 Excel 转为二维数组（相当于 CSV 格式）
         const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
 
         let dayColumnMap = {};
         let headerRowIndex = -1;
 
-        // 1. 找日期表头
+        // 🌟 修正 1：找日期表头（不论在哪一行，只要同列有1~10的数字就抓）
         for (let r = 0; r < rows.length; r++) {
-          let row = rows[r];
+          let row = rows[r] || [];
+          let foundCount = 0;
           for (let c = 0; c < row.length; c++) {
             let num = parseInt(row[c]);
-            if (!isNaN(num) && num >= 1 && num <= 31) { 
+            if (!isNaN(num) && num >= 1 && num <= 10) { 
                 dayColumnMap[c] = num; 
-                headerRowIndex = r; 
+                foundCount++;
             }
           }
-          if (headerRowIndex !== -1) break;
+          if (foundCount >= 5) { // 只要找到 5 个连续数字就认定这是日期行
+              headerRowIndex = r; 
+              break;
+          }
         }
 
         if (headerRowIndex === -1) {
@@ -2687,7 +2690,7 @@ allDividendRounds.forEach((r, idx) => {
           return;
         }
 
-        // 2. 抓取员工休假
+        // 🌟 修正 2：抓取员工休假（不限定只有A栏，找遍整行只要名字有对上就抓）
         currentMonthRests = {};
         let updatedCount = 0;
 
@@ -2695,25 +2698,32 @@ allDividendRounds.forEach((r, idx) => {
           let row = rows[r];
           if (!row || row.length === 0) continue;
           
-          let rawName = row[0] ? String(row[0]).replace(/"/g, '').trim() : '';
-          let cleanNameInRow = rawName.replace(/\s+/g, '');
-          if (!cleanNameInRow) continue;
+          let sIdx = -1;
+          // 扫描整行前 3 个格子找员工名字
+          for (let c = 0; c < Math.min(3, row.length); c++) {
+              let rawName = row[c] ? String(row[c]).replace(/"/g, '').trim() : '';
+              let cleanNameInRow = rawName.replace(/\s+/g, '');
+              if (!cleanNameInRow) continue;
 
-          const sIdx = staffs.findIndex(s => {
-            let cleanStaffName = s.name.replace(/\s+/g, '');
-            return cleanStaffName === cleanNameInRow ||
-                   (cleanStaffName === "孫孫" && cleanNameInRow === "孙孙") ||
-                   (cleanStaffName === "孙孙" && cleanNameInRow === "孫孫") ||
-                   (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||
-                   (cleanStaffName === "翔" && cleanNameInRow === "阿翔");
-          });
+              sIdx = staffs.findIndex(s => {
+                let cleanStaffName = s.name.replace(/\s+/g, '');
+                return cleanStaffName === cleanNameInRow ||
+                       (cleanStaffName === "孫孫" && cleanNameInRow === "孙孙") ||
+                       (cleanStaffName === "孙孙" && cleanNameInRow === "孫孫") ||
+                       (cleanStaffName === "阿翔" && cleanNameInRow === "翔") ||
+                       (cleanStaffName === "翔" && cleanNameInRow === "阿翔");
+              });
+              if (sIdx !== -1) break; // 找到了就跳出
+          }
 
           if (sIdx !== -1) {
             updatedCount++;
             let rests = [];
-            for (let c = 1; c < row.length; c++) {
-              if (row[c] !== undefined && String(row[c]).trim() === '1') {
-                let day = dayColumnMap[c] || c;
+            // 扫描这一行的所有格子，填 1 的就抓进休假
+            for (let c = 0; c < row.length; c++) {
+              let cellVal = String(row[c] || '').trim();
+              if (cellVal === '1' || cellVal === '１' || cellVal.toLowerCase() === 'true' || cellVal === '休') {
+                let day = dayColumnMap[c];
                 if (day >= 1 && day <= totalDays) rests.push(day);
               }
             }
@@ -2731,7 +2741,7 @@ allDividendRounds.forEach((r, idx) => {
         alert("解析失败：" + err.message);
         document.getElementById('status').innerText = "❌ 读取失败";
       } finally {
-        input.value = ''; // 清空 input 让档案可以重复上传
+        input.value = ''; 
       }
     };
     reader.readAsArrayBuffer(file);
